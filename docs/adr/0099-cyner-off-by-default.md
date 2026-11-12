@@ -44,7 +44,7 @@ type), and spaCy, the rules and the gazetteer are unchanged.
 - **(a) Keep CyNER.** In the two sets it adds the false malware and threat
   actors above (dev 86 and 19 more, in-house 184 and 30 more), for two true
   malware (34 → 32 on dev, 98 → 96 in-house) that the pipeline loses without
-  it. It costs about 4 GB of memory more per pipeline process.
+  it. It keeps one more model in memory (Consequences).
 - **(b) Replace it with SecureModernBERT-NER.** On dev it is not better than
   having no cyber NER: malware F1 −0.0319 [−0.0969, +0.0378] and threat actors
   −0.0709 [−0.2286, +0.0763] against `none`, with 59 false malware against 46.
@@ -58,7 +58,12 @@ type), and spaCy, the rules and the gazetteer are unchanged.
 
 - **Memory.** About 4 GB less per pipeline process in these runs: 5.8 → 1.5 GB
   on dev and 6.1 → 2.2 GB on the in-house set. GLiNER was not loaded either in
-  `none`, so the saving is CyNER's and GLiNER's together.
+  `none`, so the saving is CyNER's and GLiNER's together; CyNER's share alone
+  was not measured.
+- **Offline.** The bootstrap downloads CyNER only when `CYNER_ENABLED=true`
+  (`docker/warm_models.py`). A cache or an offline bundle filled with the
+  default does not hold the model: set the variable before the bootstrap to
+  use CyNER without network access.
 - **The default bundle changes**: fewer malware and threat actors that only the
   NER proposed. A `BUNDLE_AFFECTING` entry and a minor version, under ADR-0085.
 - Rows already stored with `source="cyner"` stay as they are.

@@ -408,11 +408,26 @@ def test_an_off_stage_is_unavailable_and_says_it_is_disabled(monkeypatch):
 
 
 def test_an_enabled_stage_is_available_with_a_loaded_model(monkeypatch):
+    import sys
+    import types
+
+    # cyner_available() imports transformers before it asks for the pipeline.
+    monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
     monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
     monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", True)
     monkeypatch.setattr(stage2d_cyner, "_SENTINEL_PATH", Path("/nonexistent/.cyner_model_unavailable"))
     monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline([]))
     assert stage2d_cyner.cyner_available() is True
+
+
+def test_the_unavailable_reason_is_not_disabled_when_the_model_is_what_is_missing(monkeypatch):
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", True)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", False)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", True)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
 
 
 def test_the_stage_report_gives_the_disabled_reason_the_smoke_test_accepts(monkeypatch):

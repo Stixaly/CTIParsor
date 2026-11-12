@@ -16,9 +16,11 @@ theme.
   the false malware go from 132 to 46 on dev and from 319 to 135 in-house, the
   false threat actors from 31 to 12 and from 58 to 28, and the true malware
   from 34 to 32 and from 98 to 96. **Bundles change** for the same report:
-  fewer malware and threat actors that only the NER proposed. A pipeline
-  process needs about 4 GB less memory in these runs (5.8 → 1.5 GB on dev, 6.1
-  → 2.2 GB in-house). Rows already stored with `source="cyner"` stay as they
+  fewer malware and threat actors that only the NER proposed. On the in-house
+  set the correct tools go from 63 to 84. In these runs a pipeline process
+  goes from 5.8 to 1.5 GB on dev and from 6.1 to 2.2 GB in-house, with CyNER
+  and GLiNER both not loaded; CyNER's share alone was not measured. Rows
+  already stored with `source="cyner"` stay as they
   are.
 - **Stage 2e (GLiNER) never asked its model** (ADR-0098). gliner 0.2.29's
   `predict_entities` takes one string and returns `[]` for a list of chunks,

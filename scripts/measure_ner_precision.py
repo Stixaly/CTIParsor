@@ -238,9 +238,11 @@ def cmd_run(args) -> None:
     from pipeline import stage2d_cyner as s2d
 
     # The filters act on what these two models return: a run without them
-    # measures nothing (SKIP_HEAVY_MODELS, CYNER_ENABLED=false, no model).
+    # measures nothing (SKIP_HEAVY_MODELS, no model, or CyNER left off: it is
+    # off by default since ADR-0099).
     if s2._nlp is None or not s2d.cyner_available():
-        sys.exit(f"spaCy loaded: {s2._nlp is not None}, CyNER loaded: {s2d.cyner_available()}: both are needed")
+        sys.exit(f"spaCy loaded: {s2._nlp is not None}, CyNER loaded: {s2d.cyner_available()}: both are needed "
+                 "(CyNER runs only with CYNER_ENABLED=true)")
     # spaCy falls back from en_core_web_lg to en_core_web_sm without a word.
     nlp_meta = getattr(s2._nlp, "meta", None) or {}
     models = {"spacy": f"{nlp_meta.get('lang')}_{nlp_meta.get('name')}-{nlp_meta.get('version')}",

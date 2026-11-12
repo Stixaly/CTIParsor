@@ -64,7 +64,8 @@ Two ways to use it:
 
 - **Hybrid extraction** — regex IoCs (IPs, domains, URLs, hashes, CVEs,
   registry keys, file paths…), an ATT&CK gazetteer, semantic TTP matching,
-  CyNER 2.0 and GLiNER zero-shot NER, then LLM enrichment. The figures of a
+  then LLM enrichment; CyNER 2.0 and GLiNER zero-shot NER are optional and
+  off by default. The figures of a
   PDF are read too, by the LLM provider chosen for the text when its model can
   see.
 - **Built against hallucination** — every LLM-returned name is checked against

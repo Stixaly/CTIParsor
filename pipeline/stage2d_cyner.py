@@ -356,7 +356,7 @@ def _load_pipeline():
                 f"CyNER model '{_MODEL_ID}' is not accessible on HuggingFace Hub "
                 f"(private, gated, or removed). "
                 f"The run goes on without Stage 2d.\n"
-                f"To turn CyNER off and silence this warning, set in your .env:\n"
+                f"To turn CyNER off and silence this warning, unset it in your .env or set:\n"
                 f"  CYNER_ENABLED=false"
             )
             # Write a sentinel so every subsequent subprocess skips the network check.
