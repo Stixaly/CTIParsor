@@ -203,6 +203,42 @@ docker compose logs -f app worker
   `LOG_FILE` adds a rotated file ([configuration.md](configuration.md)).
 - `docker compose logs postgres` for the database.
 
+### Log tags
+
+Each line the API and the pipeline log starts with a tag in square brackets, which names
+the part of the code that wrote it. The table lists every tag in `api/` and `pipeline/`.
+The command-line scripts in `scripts/` print their own `[tag]` lines to the console; they
+are not in the service logs and are not listed here. Lines at `DEBUG` are not shown at the
+default `LOG_LEVEL=INFO`.
+
+The examples are the messages as the code writes them; `<...>` stands for a value.
+
+| Tag | Module | What it covers | Example | When to worry |
+|---|---|---|---|---|
+| `[startup]` | `api/main.py` | The API's start-up checks: the authentication mode, the default TLP, the ATT&CK release, the browser for URL capture, the process role. | `[startup] authentication is OFF (AUTH_MODE=off): single-analyst use on loopback only; ...` | An `error` line: the process has stopped. A `warning` with `AUTH_MODE=off` on a host other people can reach. |
+| `[queue]` | `api/queue_loop.py` | A worker's start (its concurrency, poll, heartbeat and lease settings) and its stop request. | `[queue] worker <id> starting: max_concurrent=..., poll=...s, heartbeat=...s, lease=...s` | No `starting` line after a restart: the worker did not come up. `stop requested` without a restart: the worker is going down. |
+| `[finalize]` | `api/worker.py` | The step that builds a report's STIX bundle from the stored rows, including rebuilds after review decisions. | `[finalize] job <id>: the rebuilt bundle failed STIX schema validation (<n> error(s)); ...` | Every `error`: the job is not completed and its bundle is not served. The `warning` lines name what the bundle goes without, or a build that was not published or not recorded. |
+| `[auth]` | `api/auth/deps.py`, `api/auth/oidc.py`, `api/routes/auth.py` | Sign-ins that fail or are locked, identity-provider sign-ins that are refused, accounts created or re-roled by the identity provider, and a route with no permission defined. | `[auth] failed sign-in for <name>` | Many failures for one name (a guessing attempt). Any `no permission is defined`: a route answers 403 because its permission is missing. |
+| `[admin]` | `api/routes/admin.py` | Each account and token change made through the admin routes: who did it and what changed. The password is never logged. | `[admin] <actor> created the <role> account <name>` | A change nobody on the team made. |
+| `[audit]` | `api/audit.py` | Failures of the audit trail: a record that could not be written, or the retention that could not be applied. | `[audit] could not write an audit row (<error type>); the answer to the request is not changed` | Any line. Requests answered while it fails are not in the audit trail (see [Audit trail](#audit-trail)). |
+| `[retention]` | `api/routes/jobs.py` | The sweep that deletes finished jobs older than the retention period: how many it deleted, and the jobs it could not delete. | `[retention] swept <n> job(s) older than <d>d` | A `failed to delete job` error: that job was not deleted, and its files still use disk space ([Disk](#disk)). |
+| `[baseline]` | `api/baseline_store.py` | STIX objects of an uploaded baseline that are dropped as invalid, so they are not used for enrichment. | `[baseline] job <id>: dropped invalid STIX object <id> (<reason>): ...` | Many drops for one job: its enrichment is built from less than was uploaded. |
+| `[db]` | `api/migrate.py`, `api/db_identity.py` | Schema migrations applied at start, and the record of which PostgreSQL cluster the database is on (`db-identity.json` in the state directory). | `[db] schema version <n> applied: <name> (<ms> ms)` | A `could not record` warning: the cluster record was not written, so a later start cannot compare against it. The migration lines are normal. |
+| `[health]` | `api/main.py` | `GET /api/health` found the job store unreachable, and answers 503. | `[health] job store unreachable: <error>` | Always: the Docker health check fails. Check the `postgres` service ([Health](#health)). |
+| `[metrics]` | `api/routes/metrics.py` | Gaps in `/metrics`: the job store unreachable (`ctiparsor_database_up` is 0), the free disk unknown, or the backup status file unreadable. | `[metrics] job store unreachable: <error>` | Any line: the gauge for that part is missing or reads 0 ([Monitoring](#monitoring-and-alerts)). |
+| `[policy]` | `api/routes/policy.py` | The policy page's last-run figures, when the stored bundle does not parse or the last run cannot be read. | `[policy] last run not read from the job store: <error type>: <error>` | The page shows "no run yet" while a run exists. |
+| `[aliases]` | `pipeline/aliases.py` | An alias file that cannot be read. Names are then not merged for the whole process. | `[aliases] <file> unreadable, no alias is resolved: <error>` | Any line: the file is broken, and the report's entity names are not resolved. |
+| `[mitre_db]` | `pipeline/mitre_db.py` | A file of revoked ATT&CK ids that cannot be read; revoked ids are then not replaced. | `[mitre_db] <file> unreadable, revoked ids are not replaced: <error>` | Any line. |
+| `[benign]` | `pipeline/benign.py` | A warninglist or legitimate-file list that cannot be read. Without it, no list applies, or no file is marked legitimate. | `[benign] <file> unreadable, no warninglist applies: <error>` | Any line: no warninglist (or legitimate-file list) applies until the file is fixed. |
+| `[corpora]` | `pipeline/detection/sync.py` | A corpus sync that failed. The browser gets the step that failed; the log gets the exception text. | `[corpora] <step>: <error text>` | A failed sync: that corpus is not updated by it. |
+| `[detection]` | `pipeline/detection/` | Detection corpora: a registry that does not parse, a corpus path that is missing, a rule file skipped, and duplicate rule ids. | `[detection] corpus '<name>': path '<root>' missing — run sync_corpora first` | A missing corpus path or a skipped file: that corpus contributes no rules, or fewer. |
+| `[calibration]` | `pipeline/calibration.py` | Decided rows and proposed thresholds that are skipped: a confidence that is not a finite number, or a threshold outside 0 to 1. | `[calibration] skipping out-of-range proposed threshold <value> for (<source>, <type>)` | A count that grows from run to run: those rows are not used by calibration. |
+| `[overrides]` | `pipeline/overrides.py` | The analyst's deny and promote rows: how many were loaded, and how many entities a deny row removed. | `[overrides] <n> deny / <m> promote row(s) active` | An unexpected count after a change to the rows. |
+| `[thresholds]` | `pipeline/thresholds.py` | The calibrated cutoffs loaded at start. A count of 0 means the built-in thresholds apply. | `[thresholds] <n> calibrated cutoff(s) loaded` | Only when a count of 0 is not what was expected. |
+| `[promotion]` | `pipeline/promotion.py` | The gazetteer terms cannot be read, so promotion candidates are not checked against them. | `[promotion] gazetteer terms unavailable, candidates not checked against them: <error>` | Any line: a candidate may duplicate a name the gazetteer already holds. |
+| `[capture]` | `pipeline/web_capture.py` | Playwright is installed but does not load, so URL capture is off (`warning`); the other lines are `DEBUG`. | `[capture] Playwright is installed but does not load, URL capture is off: <error>` | The `warning`: URL sources cannot be captured until it is fixed. |
+| `[anchor]` | `pipeline/stage1_ingestion.py` | Capture or HTML metadata that cannot be read for a source. `DEBUG` only. | `[anchor] HTML metadata unreadable for <file>: <error>` | Not normally: the anchor is still looked for in the other sources. |
+
 ## Audit trail
 
 The API writes one audit record for each state-changing request under `/api/` (`POST`,

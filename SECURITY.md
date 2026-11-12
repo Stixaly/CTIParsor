@@ -122,6 +122,42 @@ when the job runs, and an object that fails is left out, not repaired. A request
 body over its route's budget gets a 413 before the application reads the rest
 (`api/body_limit.py`).
 
+## HTTP security headers
+What each layer sends. Checked against `api/main.py`, the routes and `docker/nginx/default.conf`.
+
+**The application** (`api/`) sets none of the usual security headers: no
+`X-Frame-Options`, no `X-Content-Type-Options`, no `Referrer-Policy`, no
+`Strict-Transport-Security`, and no `Content-Security-Policy` on the pages of the web UI,
+which the API serves itself. It sets these headers on specific responses only:
+- `GET /api/jobs/{job_id}/source` sends `Content-Security-Policy: default-src 'none';
+  img-src data:; style-src 'unsafe-inline'; font-src data:; base-uri 'none'; form-action
+  'none'` when the source is HTML, XHTML, SVG or XML (`api/routes/jobs.py`). The policy stops
+  a page from loading anything remote; PDFs and other types get none. The reason is in
+  [CHANGELOG.md](CHANGELOG.md) (2026-10-30).
+- The redirects of the identity-provider sign-in (`_redirect` in `api/routes/auth.py`) send
+  `Cache-Control: no-store`.
+- The progress stream (`api/routes/progress.py`) sends `Cache-Control: no-cache`,
+  `X-Accel-Buffering: no` and `Connection: keep-alive`. The ATT&CK index
+  (`api/routes/attack.py`) sends `Cache-Control: no-cache` with an `ETag`.
+
+**The nginx proxy** (`proxy` profile, option C in [docs/deployment.md](docs/deployment.md))
+adds three headers to every response it forwards (`docker/nginx/default.conf`, `always`):
+- `X-Content-Type-Options: nosniff`
+- `X-Frame-Options: SAMEORIGIN`
+- `Referrer-Policy: no-referrer`
+
+It adds no `Content-Security-Policy` and no `Strict-Transport-Security`. The policy of the
+source route above passes through it unchanged. Nginx terminates TLS, so HSTS is the
+proxy's to send, and it does not.
+
+**Without the proxy**, the port published on the host (`127.0.0.1:8000` by default)
+sends none of the three nginx headers.
+
+**The gap.** The web UI has no `Content-Security-Policy` and no HSTS, on either path. No
+document in the repository and no commit message records why. The nginx lines came in with
+the containerization commit `5e2c2f8`, whose message does not give a reason for them. Any
+change to these headers should be recorded here with its reason.
+
 ## Offline by default
 No telemetry and no analytics. Each outbound call below is optional or started by an
 operator or an analyst; nothing else leaves the host:
