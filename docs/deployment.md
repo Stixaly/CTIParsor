@@ -394,7 +394,7 @@ own subprocess, so the API process is not where the time goes.
 **`WORKER_MAX_CONCURRENT` defaults to 1**, for a host install as for the
 compose worker. Each concurrent report holds roughly 4.4 GB resident with the NER models
 loaded (CyNER when `CYNER_ENABLED=true`, GLiNER when `GLINER_ENTITY_TYPES`
-names a type); with neither, the default, the evaluation runs of November
+names a type, which the default does); with neither, the evaluation runs of November
 2026 held in 1.5 to 2.2 GB per process
 ([eval/ner-swap-2026-11.md](eval/ner-swap-2026-11.md)). The sizing rule below
 keeps 4.4 GB as its ceiling: the former default of 10 asked for ~44 GB, and below

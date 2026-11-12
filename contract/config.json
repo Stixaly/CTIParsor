@@ -481,7 +481,7 @@
     "env GLINER_ENTITY_TYPES": {
       "set": true,
       "values": [
-        ""
+        "identity,location"
       ]
     },
     "env GLINER_MODEL": {

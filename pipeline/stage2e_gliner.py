@@ -33,7 +33,7 @@ Model configuration (via .env):
   GLINER_MODEL        = urchade/gliner_large-v2.1   (~800 MB, best zero-shot NER accuracy)
   GLINER_THRESHOLD    = 0.40                         (lower than supervised NER: zero-shot)
   GLINER_ENABLED      = true                         (set false to disable stage)
-  GLINER_ENTITY_TYPES =                              (the types asked for; none = stage off, ADR-0098)
+  GLINER_ENTITY_TYPES = identity,location            (the types asked for; empty = stage off, ADR-0098)
 
 The model is downloaded from HuggingFace Hub on first use and cached locally.
 """
@@ -90,7 +90,7 @@ _LABEL_MAP: dict[str, EntityType] = {
 def _labels_for(raw: str | None) -> list[str]:
     """The labels of `_LABEL_MAP` whose entity type *raw* names (the value of
     GLINER_ENTITY_TYPES: entity types separated by commas), in `_LABEL_MAP`'s
-    order.  Unset or blank names none.  A name that is not one of the six types
+    order.  None or blank names none.  A name that is not one of the six types
     is left out with a warning."""
     known = {etype.value for etype in _LABEL_MAP.values()}
     wanted = {token.strip().lower().replace("-", "_") for token in (raw or "").split(",")} - {""}
@@ -101,9 +101,18 @@ def _labels_for(raw: str | None) -> list[str]:
     return [label for label, etype in _LABEL_MAP.items() if etype.value in wanted]
 
 
-# ADR-0098 — the labels the model is asked for.  No default set: until
-# GLINER_ENTITY_TYPES names a type, the stage is off and the model is not loaded.
-_GLINER_LABELS = _labels_for(os.getenv("GLINER_ENTITY_TYPES"))
+# ADR-0098 — the labels the model is asked for.  Unset, the stage asks for
+# sectors and countries (the maintainer's choice of 2026-11-12); set to an
+# empty value, the stage is off and the model is not loaded.
+_DEFAULT_ENTITY_TYPES = "identity,location"
+
+
+def _configured_labels() -> list[str]:
+    """The labels GLINER_ENTITY_TYPES names; the default's when it is unset."""
+    return _labels_for(os.getenv("GLINER_ENTITY_TYPES", _DEFAULT_ENTITY_TYPES))
+
+
+_GLINER_LABELS = _configured_labels()
 
 # ── Text chunking ─────────────────────────────────────────────────────────────
 # GLiNER medium supports up to 384 subword tokens.  CTI prose averages ~0.35

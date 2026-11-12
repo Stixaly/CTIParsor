@@ -393,6 +393,15 @@ def test_the_setting_names_entity_types_and_gives_their_labels():
     assert labels(",".join(e.value for e in stage2e_gliner._LABEL_MAP.values())) == list(stage2e_gliner._LABEL_MAP)
 
 
+def test_unset_the_setting_asks_for_sectors_and_countries_and_empty_turns_the_stage_off(monkeypatch):
+    monkeypatch.delenv("GLINER_ENTITY_TYPES", raising=False)
+    assert stage2e_gliner._configured_labels() == ["targeted sector", "targeted country"]
+    monkeypatch.setenv("GLINER_ENTITY_TYPES", "")
+    assert stage2e_gliner._configured_labels() == []
+    monkeypatch.setenv("GLINER_ENTITY_TYPES", "campaign")
+    assert stage2e_gliner._configured_labels() == ["attack campaign"]
+
+
 def test_a_name_that_is_not_an_entity_type_is_left_out_with_a_warning(monkeypatch):
     warnings: list[str] = []
     monkeypatch.setattr(stage2e_gliner.logger, "warning", warnings.append)

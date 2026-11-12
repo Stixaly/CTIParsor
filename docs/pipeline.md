@@ -134,7 +134,7 @@ The boxes below give each stage in detail, in execution order.
 │    novel actors & malware not yet in MITRE ATT&CK                   │
 │  Default model: urchade/gliner_large-v2.1 (~1.8 GB)                 │
 │  Configurable via GLINER_MODEL in .env                              │
-│  Off until GLINER_ENTITY_TYPES names a type — ADR-0098              │
+│  Asks for GLINER_ENTITY_TYPES: sectors, countries — ADR-0098        │
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
@@ -434,7 +434,7 @@ Each NER stage adds a different capability:
 | 2b | Aho-Corasick gazetteer | Known malware/tools/APT groups |
 | 2c | Semantic embeddings | MITRE techniques by meaning, not name |
 | 2d | CyNER 2.0 (DeBERTa-v3) | Cybersecurity NER — malware & threat-actor groups; a threat actor written as ordinary language is dropped (ADR-0088) |
-| 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors: the types `GLINER_ENTITY_TYPES` names, none by default (ADR-0098) |
+| 2e | GLiNER zero-shot | Sectors, campaigns, infrastructure, novel actors: the types `GLINER_ENTITY_TYPES` names, sectors and countries by default (ADR-0098) |
 
 The gazetteer's ordinary-word policy (`GAZETTEER_POLICY`; the reviewed forms are in
 [gazetteer-ordinary-words.md](gazetteer-ordinary-words.md)) judges each occurrence of
