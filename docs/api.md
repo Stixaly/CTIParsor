@@ -583,3 +583,33 @@ decisions (ADR-0051, ADR-0052).
 | `POST` | `/api/overrides` | A hand-written rule (`term`, `entity_type`, `action`, optional `display`/`note`), active at once |
 | `PATCH` | `/api/overrides/{id}` | Set a row's `status` — activate a candidate, or ignore it so the next promotion run leaves it alone |
 | `DELETE` | `/api/overrides/{id}` | Remove a row |
+
+
+## Exceptions → HTTP status
+
+This table records which internal exception produces which HTTP answer (or none), so a developer adding a route or changing a handler knows which exception to raise to get the desired status. The mapping lives in the route handlers; these are the authoritative references today.
+
+| Exception | Defined in | Raised for | HTTP answer |
+|---|---|---|---|
+| `AuthError` | `api/auth/store.py:29` | Any invalid username, password, role, auth-source or token during a store operation (`ValueError` subclass, base of the two below). | 400 via `_bad()` in `api/routes/admin.py`; 401 for a wrong username/password in `api/routes/auth.py` |
+| `UsernameTakenError` | `api/auth/store.py:33` | `POST /api/admin/users` with an already-taken username (`ValueError` subclass). | **409** in `api/routes/admin.py` |
+| `LastAdminError` | `api/auth/store.py:37` | Disabling or demoting the last enabled admin (`ValueError` subclass). | **409** in `api/routes/admin.py` |
+| `AuthConfigError` | `api/auth/config.py:16` | Invalid `AUTH_MODE`, OIDC or session configuration at startup / config read (`RuntimeError`). | Not an HTTP status — fails startup; in the OIDC routes it is caught and answered as `302 /login?error=config` |
+| `OidcError` | `api/auth/oidc.py:53` | An identity-provider failure during the OIDC code flow (discovery, JWKS, token validation, account/role). The `code` argument selects the `error=` value. | Not an HTTP status — caught in `api/routes/auth.py` and answered as `302 /login?error=<code>` (`state`, `token`, `idp`, `denied`, `no_role`, `disabled`, `account`, `config`, `busy`) |
+| `MigrationError` | `api/migrate.py:60` | A database migration that fails or whose checksum/version does not match (`RuntimeError`, base of `DatabaseNewerThanCode`, `ChecksumMismatch`, `VerificationFailed`, `ClusterChanged`). | Never translated to HTTP — fails the job / the migration run |
+| `BaselineError` | `pipeline/baseline_stix.py:73` | A STIX baseline that is not a valid, readable, sized or usable bundle (`ValueError`). | **400** in `api/routes/baselines.py` and `api/routes/_common.py` |
+| `FileError` | `api/response_models/settings.py:61` | A per-corpus file that failed to sync or rebuild; it is embedded as an item of the `file_errors` field of `RebuildOut` (`api/response_models/settings.py:70,100`). It is a `Response` subclass (a response model), **not** a raised exception. | N/A — returned inside a `Response` body, never raised |
+
+The two exceptions already documented elsewhere are kept here for completeness:
+
+| Exception | Defined in | Raised for | HTTP answer |
+|---|---|---|---|
+| `BundleInvalidError` | `api/worker.py:110` | A bundle whose Stage 5 validation refused it (ADR-0084). | **409** from `POST /api/jobs/{id}/finalize` and `PATCH /api/jobs/{id}` with `"status": "completed"` (via `_bundle_refused` in `api/routes/jobs.py`); see "A bundle Stage 5 refuses" above |
+| `CaptureError` | `pipeline/web_capture.py:54` | A headless-Chromium URL capture that failed. | **502** on `POST /api/ingest/url`; `CaptureUnavailable`, its subclass, answers **503** instead (`api/routes/ingest.py`) |
+
+> Note: several exceptions are `RuntimeError`/`ValueError` subclasses and are caught by
+> their parent class in the handlers, so the order of `except` clauses matters. `AuthError`
+> is the base of `UsernameTakenError` and `LastAdminError`, which must be caught before it.
+>
+> This list is a documentation aid, not the source of truth. When in doubt, trace the
+> exception from its `raise` site to the `except`/`HTTPException` that handles it.
