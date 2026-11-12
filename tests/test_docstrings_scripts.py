@@ -1,8 +1,9 @@
 """Every script, model and evaluation module has a module docstring (#650, #652).
 
-Every ``cmd_*`` command of ``evaluation/__main__.py`` has a docstring too. The
-checks read the source with ``ast``: no module is imported, so a script with
-side effects at import time is not run.
+Every ``cmd_*`` command of ``evaluation/__main__.py`` has a docstring too, and
+so does every public top-level function of the four scripts of #650 item 3.
+The checks read the source with ``ast``: no module is imported, so a script
+with side effects at import time is not run.
 """
 
 from __future__ import annotations
@@ -52,3 +53,27 @@ def test_every_cmd_function_has_a_docstring() -> None:
     assert len(commands) >= 15, f"found {len(commands)} cmd_ functions in evaluation/__main__.py"
     missing = [node.name for node in commands if not ast.get_docstring(node)]
     assert not missing, f"cmd_ functions without a docstring: {missing}"
+
+
+# The four scripts of #650 item 3. Every public top-level function (no leading
+# underscore) of each must have a docstring; a new public function without one
+# fails here.
+ITEM3_SCRIPTS = (
+    "scripts/check_model_journey.py",
+    "scripts/check_failure_recipe.py",
+    "scripts/opencti_import_check.py",
+    "scripts/measure_ner_precision.py",
+)
+
+
+@pytest.mark.parametrize("rel", ITEM3_SCRIPTS)
+def test_public_functions_have_a_docstring(rel: str) -> None:
+    tree = _tree(ROOT / rel)
+    functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and not node.name.startswith("_")
+    ]
+    assert functions, f"no public function found in {rel}: the test is looking at the wrong file"
+    missing = [node.name for node in functions if not ast.get_docstring(node)]
+    assert not missing, f"{rel}: public functions without a docstring: {missing}"

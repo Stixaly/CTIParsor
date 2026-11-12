@@ -167,27 +167,33 @@ class Api:
 
 
 def utc_now() -> str:
+    """Return the current UTC time as an ISO 8601 string, to the second."""
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
 def snippet(raw: bytes, limit: int = SNIPPET) -> str:
+    """Return the start of a response body, whitespace collapsed, for an error message (at most SNIPPET characters)."""
     return " ".join(raw.decode("utf-8", "replace").split())[:limit]
 
 
 def header(headers: dict[str, str], name: str) -> str | None:
+    """Return the value of a response header, matched without regard to case, or None when it is absent."""
     return next((v for k, v in headers.items() if k.lower() == name.lower()), None)
 
 
 def counts_of(record: dict[str, Any] | None) -> dict[str, Any]:
+    """Return the counts of a stage record, or an empty dict when the record or its counts are missing."""
     value = (record or {}).get("counts")
     return value if isinstance(value, dict) else {}
 
 
 def find_stage(stages: list[dict[str, Any]], stage_id: str) -> dict[str, Any] | None:
+    """Return the stage record with the given id from a stage report, or None when there is none."""
     return next((s for s in stages if str(s.get("stage")) == stage_id), None)
 
 
 def reason_of(record: dict[str, Any]) -> str:
+    """Return a stage record's reason on one line, or an empty string."""
     return " ".join(str(record.get("reason") or "").split())
 
 
@@ -207,6 +213,8 @@ def redact_url(url: str) -> str:
 
 
 def multipart(filename: str, data: bytes) -> tuple[bytes, str]:
+    """Build a multipart/form-data body holding one PDF in the field named file. Returns the body and its Content-Type,
+    with a new boundary."""
     boundary = uuid4().hex
     safe = re.sub(r'["\r\n]', "_", filename)
     head = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="{safe}"\r\n'
@@ -215,6 +223,7 @@ def multipart(filename: str, data: bytes) -> tuple[bytes, str]:
 
 
 def base_url_error(value: str) -> str | None:
+    """Return why a --base-url is not usable (not http or https, or not on loopback), or None when it is."""
     parts = urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return f"--base-url must be an http(s) URL, not {value!r}"
@@ -224,6 +233,8 @@ def base_url_error(value: str) -> str | None:
 
 
 def url_error(value: str) -> str | None:
+    """Return why a --url is not usable (not an http or https URL with a host, or containing spaces), or None when it
+    is."""
     parts = urlsplit(value)
     if parts.scheme not in ("http", "https") or not parts.hostname:
         return f"--url must be an http or https URL with a host, not {value!r}"
@@ -233,6 +244,7 @@ def url_error(value: str) -> str | None:
 
 
 def pdf_error(path: Path) -> str | None:
+    """Return why a --pdf file is not usable (missing, empty, or without the %PDF- header), or None when it is."""
     if not path.is_file():
         return f"no such file: {path}"
     head = path.read_bytes()[:5]
@@ -295,6 +307,8 @@ def wait_for_job(api: Api, journey: Journey, job_id: str, wait_s: float) -> dict
 
 def run_journey(api: Api, journey: Journey, submit: Callable[[], tuple[int, Any, bytes]], *,
                 wait_s: float, required: tuple[str, ...], url: bool) -> Journey:
+    """Submit one input, wait for its job to end, and record the checks of the journey. A refused submission is recorded
+    as a failed check and the later checks are marked not checked. Returns the journey."""
     names = CHECKS_AFTER_SUBMIT + ((CHECK_SOURCE,) if url else ())
     journey.mark("posted", api.clock())
     try:
@@ -339,6 +353,7 @@ def run_journey(api: Api, journey: Journey, submit: Callable[[], tuple[int, Any,
 
 
 def check_ended(detail: dict[str, Any]) -> Check:
+    """Return the check that the job reached one of the statuses in ENDED_OK."""
     state = detail.get("status")
     if state in ENDED_OK:
         return Check(CHECKS_AFTER_SUBMIT[0], PASS, f"status {state}")
@@ -346,6 +361,8 @@ def check_ended(detail: dict[str, Any]) -> Check:
 
 
 def check_required(stages: list[dict[str, Any]], required: tuple[str, ...]) -> Check:
+    """Return the check that every stage in required ran. Stage 3 must also have an allowed egress record and at least
+    one provider call."""
     name = CHECKS_AFTER_SUBMIT[1]
     problems: list[str] = []
     seen: list[str] = []
@@ -377,6 +394,7 @@ def check_required(stages: list[dict[str, Any]], required: tuple[str, ...]) -> C
 
 
 def check_models(stages: list[dict[str, Any]]) -> Check:
+    """Return the check that each stage in MODEL_STAGES ran, with the number of rows it produced."""
     name = CHECKS_AFTER_SUBMIT[2]
     problems: list[str] = []
     seen: list[str] = []
@@ -398,6 +416,7 @@ def check_models(stages: list[dict[str, Any]]) -> Check:
 
 
 def check_text(stages: list[dict[str, Any]]) -> Check:
+    """Return the check that stage 1 extracted more than zero characters."""
     name = CHECKS_AFTER_SUBMIT[3]
     record = find_stage(stages, "1")
     chars = counts_of(record).get("chars")
@@ -408,6 +427,7 @@ def check_text(stages: list[dict[str, Any]]) -> Check:
 
 
 def check_extraction(api: Api, job_id: str) -> Check:
+    """Return the check on the job's entities: at least one entity, and at least one IoC or technique."""
     name = CHECKS_AFTER_SUBMIT[4]
     status, rows = api.json("GET", f"/api/jobs/{job_id}/entities")
     if status != 200 or not isinstance(rows, list):
@@ -424,6 +444,8 @@ def check_extraction(api: Api, job_id: str) -> Check:
 
 
 def check_bundle(api: Api, job_id: str, journey: Journey) -> Check:
+    """Fetch the job's STIX bundle and return the check on it: a JSON bundle with objects, whose relationships point at
+    objects it contains. Records the bundle's facts in the journey."""
     name = CHECKS_AFTER_SUBMIT[5]
     status, raw, headers = api.request("GET", f"/api/jobs/{job_id}/bundle")
     if status != 200:
@@ -459,10 +481,13 @@ def check_bundle(api: Api, job_id: str, journey: Journey) -> Check:
 
 
 def sorted_counts(counter: Counter) -> dict[str, int]:
+    """Return a counter as a dict with its keys in sorted order."""
     return {k: counter[k] for k in sorted(counter)}
 
 
 def check_source(api: Api, job_id: str, journey: Journey) -> Check:
+    """Return the check that the source archive of a URL job answers 200. The detail names the captured URL and the
+    blocked request count."""
     name = CHECK_SOURCE
     submitted = journey.facts.get("submitted", {})
     final = submitted.get("source_url")
@@ -487,10 +512,13 @@ def _cell(text: Any) -> str:
 
 
 def redact(text: str, token: str | None) -> str:
+    """Return text with the bearer token replaced by [redacted], or unchanged when there is no token."""
     return text.replace(token, "[redacted]") if token else text
 
 
 def journey_payload(journey: Journey) -> dict[str, Any]:
+    """Return a journey as a JSON-ready dict: its name, status, source, job id, times, durations, stages, checks and
+    facts."""
     return {
         "name": journey.name,
         "status": journey.status,
@@ -506,6 +534,8 @@ def journey_payload(journey: Journey) -> dict[str, Any]:
 
 
 def render_markdown(meta: dict[str, Any], journeys: list[Journey]) -> str:
+    """Render the report as Markdown: the run header, a table of the server, then one section per journey with its
+    checks."""
     server = meta["server"]
     lines = [
         f"# Model journey, run {meta['started_at']}",
@@ -548,6 +578,8 @@ def render_markdown(meta: dict[str, Any], journeys: list[Journey]) -> str:
 
 
 def write_reports(out_dir: Path, meta: dict[str, Any], journeys: list[Journey], token: str | None) -> tuple[Path, Path]:
+    """Write report.json and report.md to out_dir, with the bearer token redacted from both. Returns the paths of the
+    Markdown and the JSON file."""
     out_dir.mkdir(parents=True, exist_ok=True)
     payload = {**meta, "journeys": [journey_payload(j) for j in journeys]}
     json_path = out_dir / "report.json"
@@ -568,6 +600,7 @@ def _positive(value: str) -> float:
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser of the command."""
     parser = argparse.ArgumentParser(prog="python scripts/check_model_journey.py",
                                      description="The end-to-end journey with the real models (ADR-0097 item 24).")
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL,
@@ -589,6 +622,8 @@ def _usage(message: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the journey against the running stack and return the exit code: 0 when every journey passed, 1 when one did
+    not, 2 for a usage error or a stack that does not answer."""
     parser = build_parser()
     args = parser.parse_args(argv)
     error = base_url_error(args.base_url) or url_error(args.url) or pdf_error(args.pdf)
