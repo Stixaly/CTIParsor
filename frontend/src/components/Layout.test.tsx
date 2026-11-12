@@ -6,6 +6,7 @@ import Layout from './Layout'
 import { ThemeProvider } from '../context/ThemeContext'
 import { AuthContext, type AuthState } from '../context/AuthContext'
 import { roleAtLeast, type Me, type Role } from '../api/auth'
+import packageJson from '../../package.json'
 
 function state(role: Role | null, mode: Me['auth_mode'] = 'local', signOut = vi.fn(() => Promise.resolve())): AuthState {
   const me: Me | null = role
@@ -39,6 +40,14 @@ function renderLayout(auth: AuthState) {
 }
 
 afterEach(() => vi.unstubAllGlobals())
+
+describe('Layout footer', () => {
+  it('names CTIParsor and the frontend package version, not the old project name', () => {
+    renderLayout(state('reader'))
+    expect(screen.getByText(`CTIParsor ${packageJson.version}`)).toBeInTheDocument()
+    expect(screen.queryByText(/cti-to-stix/)).not.toBeInTheDocument()
+  })
+})
 
 describe('Layout and the signed-in user', () => {
   it('with authentication off shows no user menu and hides nothing', () => {

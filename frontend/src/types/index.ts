@@ -1,3 +1,9 @@
+// Shapes of the JSON the API returns, and the constants the UI shares with it:
+// the TLP and PAP marking levels, the detection formats, the ledger outcomes and
+// the STIX colours and labels. The server models are in api/response_models/ and
+// the schema snapshot is contract/openapi.json. A field marked optional (?) can be
+// absent from the response.
+
 export type JobStatus =
   | 'uploaded'
   | 'processing'

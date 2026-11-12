@@ -1,3 +1,8 @@
+// Review page of one job (route /review/:jobId, full window): the report with its
+// entities and relationships (DocumentReader), the entity list (Marginalia), the
+// relationship rail, the proposed detections and the pipeline's stage refusals. Each
+// decision is sent to the API through api/client.ts.
+
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { usePref } from '../hooks/usePref'
 import { createPortal } from 'react-dom'

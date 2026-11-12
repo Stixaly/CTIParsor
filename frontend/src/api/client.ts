@@ -1,3 +1,9 @@
+// HTTP client for the API under /api. Each endpoint is one exported function, and
+// all of them go through apiFetch: the session cookie, the CSRF token on a write,
+// and a 401 ends the session (api/session.ts). A non-2xx answer throws: a bundle the
+// STIX schemas refused becomes BundleRefusedError, any other status an Error whose
+// message starts with the status code. Job and entity ids in paths are URL-encoded here.
+
 import type { Job, Entity, Relationship, StixBundle, BundleLedger, CoverageResult, CoverageRule, CoverageReportRules, DetectionProposals, DetectionCorpus, CorpusConfig, CorpusRebuildSummary, CorpusSyncResult, FormatInfo, ExportFacets, ExportSelection, ExportAxis, LastRun, RuleLookupResult, ThresholdsInfo, AttackIndex, MitreEntry, BaselineIntake, BaselineStatus, EgressPreview } from '../types'
 
 import { sessionEnded, withCsrf } from './session'

@@ -1,3 +1,8 @@
+// Detection coverage of one job (route /coverage/:jobId, full window): the report's
+// ATT&CK techniques with their rules by format, the rule selection (useRuleSelection)
+// and the export panel. A promoted rule has no technique of the report, so it sits
+// under the PROMOTED_GROUP pseudo-technique.
+
 import { useMemo, useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'

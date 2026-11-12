@@ -1,3 +1,7 @@
+// Popover to edit one entity: its value and its type. Types with a strict,
+// machine-readable format (IoCs) are checked by validateIoC; named types accept any
+// text. A defanged value (hxxp, [.]) is refanged before it is checked.
+
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { Check, X, Trash2, Search, AlertTriangle } from 'lucide-react'
 import type { Entity } from '../types'

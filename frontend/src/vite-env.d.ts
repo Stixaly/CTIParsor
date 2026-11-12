@@ -2,3 +2,6 @@
 // TypeScript 6.0 a side-effect import (`import './index.css'`) must resolve
 // to a declaration, and `types` no longer pulls in every @types package.
 /// <reference types="vite/client" />
+
+// Replaced at build time by vite.config.ts `define`: the frontend package version.
+declare const __APP_VERSION__: string

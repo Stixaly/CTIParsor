@@ -1,3 +1,8 @@
+// Rules the analyst promoted from the proposed detections, kept per job in
+// localStorage (coverage.promoted.<job id>). Every instance of the hook shares one
+// store (useSyncExternalStore), so the review page, the coverage page and the export
+// read the same set. The reason is in the comment on the store below.
+
 import { useCallback, useMemo, useSyncExternalStore } from 'react'
 
 import { loadStringSet, saveStringSet, toggleInSet } from './sets'

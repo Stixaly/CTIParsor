@@ -1,3 +1,8 @@
+// Right-hand rail of the review page for the relationships of the document. It lists
+// each relationship, sends the accept, reject and reset decisions of the analyst
+// (single or bulk, BulkAction), and edits its dates. Only a date bound the analyst
+// changed is sent (DatePatch, ADR-0063 section 9).
+
 import { useState, useRef, useEffect } from 'react'
 import { enrichmentView, isImported, type EnrichmentStatus, type Relationship, type TemporalAssertion } from '../../types'
 import { ENRICH_FILTERS, REL_TYPES, confPct, heldPending, heldTitle, relNeedsReview, typeDot, typeLabel, verbsForPair, type EnrichFilter } from './tokens'

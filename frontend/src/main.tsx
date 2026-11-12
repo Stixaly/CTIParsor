@@ -1,3 +1,7 @@
+// Entry point: mounts <App> into #root under React.StrictMode, with the TanStack
+// Query client (one retry, 5 s stale time) and the browser router, and loads the
+// global styles (index.css).
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'

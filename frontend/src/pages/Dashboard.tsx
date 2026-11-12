@@ -1,3 +1,7 @@
+// Job board of the dashboard (route /dashboard): a row of stat tiles, then one
+// kanban card per job in columns. The list is refetched every 3 seconds. The actions
+// of a card are in components/dashboard/KanbanCard.tsx.
+
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
