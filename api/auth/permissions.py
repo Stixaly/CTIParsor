@@ -9,8 +9,9 @@ here before it can ship.
 Two rules are not a single role:
   * `DELETE /api/jobs/{job_id}` is `analyst` here; an analyst may delete only a
     report they imported, an admin any (`api/routes/jobs.py`, `may_delete`).
-  * `/metrics` (ADR-0097 item 18) is admin, with a loopback exception.
-    TODO(item 18 merge): add it to this table when the route lands.
+  * `/metrics` is not in this table. It is mounted outside `/api` (`api/main.py`,
+    `_OWN_RULE_ROUTERS`) and has its own rule: a loopback client, or the `METRICS_TOKEN`
+    bearer (`api/routes/metrics.py`; docs/api-permissions.md).
 """
 from __future__ import annotations
 

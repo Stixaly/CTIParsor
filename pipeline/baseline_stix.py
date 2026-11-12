@@ -71,7 +71,10 @@ SOURCE = "baseline_stix"
 
 
 class BaselineError(ValueError):
-    """The bundle cannot be used at all.  The message is shown to the analyst (HTTP 400)."""
+    """The baseline bundle cannot be used at all; the message is shown to the analyst.  Raised by
+    api/baseline_store.py when a job in enrich mode has no baseline or no report is chosen.  The
+    baseline routes (api/routes/baselines.py, api/routes/_common.py) answer 400 with the message;
+    the worker (api/worker.py) marks the finalize failed with it as the job's error."""
 
 
 Key = tuple[str, ...]          # ("obs", "ipv4-addr", "1.2.3.4"), ("mitre", "T1059.001"), …

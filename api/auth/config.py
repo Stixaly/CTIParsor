@@ -14,7 +14,9 @@ DEFAULT_TOKEN_DAYS = 90
 
 
 class AuthConfigError(RuntimeError):
-    """The authentication settings are refused; the process does not start."""
+    """An authentication setting is refused (AUTH_MODE, the OIDC_* variables, the client secret file,
+    SESSION_TTL_HOURS, OIDC_ROLE_MAP).  At start-up api/main.py logs it and re-raises, so the process
+    does not start.  In the OIDC routes (api/routes/auth.py) it answers 302 to /login?error=config."""
 
 
 def auth_mode() -> str:
