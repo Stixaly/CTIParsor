@@ -1,3 +1,9 @@
+// Route table. The pages with the sidebar (Dashboard, Policy, Settings, Access,
+// Account) sit in Layout. Review, Graph and Coverage are full-window and outside it.
+// Role gates are the RequireRole and RequireSession wrappers (RequireAuth.tsx);
+// /login is open. The review route is keyed by job id (ReviewForJob), so a new job
+// starts from a fresh page.
+
 import { Routes, Route, Navigate, useParams } from 'react-router-dom'
 import { ThemeProvider } from './context/ThemeContext'
 import Layout from './components/Layout'

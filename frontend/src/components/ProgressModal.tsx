@@ -1,3 +1,7 @@
+// Modal shown while a job runs: the five pipeline stages and the partial graph the
+// stream fills in. The data comes from useSSE, which follows the job's progress
+// stream. Tab focus stays inside the dialog, and returns to returnFocusTo on close.
+
 import { X, Loader2, CheckCircle2, AlertCircle } from 'lucide-react'
 import { useSSE } from '../hooks/useSSE'
 import { useEffect, useId, useMemo, useRef, type RefObject } from 'react'

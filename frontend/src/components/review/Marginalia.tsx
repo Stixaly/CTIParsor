@@ -1,3 +1,8 @@
+// Entity list beside the document on the review page: entities sorted by position
+// or by type, each with accept, reject, reset and a type change. A bulk decision is
+// passed with bulk set, so the caller can tell it from a single click. The decisions
+// themselves are made by the Review page.
+
 import { useState, useMemo, useEffect } from 'react'
 import { enrichmentView, type Entity } from '../../types'
 import { ENRICH_FILTERS, heldPending, typeDot, typeLabel, type EnrichFilter } from './tokens'

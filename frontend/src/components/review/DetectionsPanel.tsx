@@ -1,3 +1,8 @@
+// Proposed-detections panel of the review page: detection rules matched to this
+// report, each proposal with its match tier (direct, behavioural or weak) and a
+// score. Read-only: it shows detection readiness, not a test against telemetry.
+// Promoted rules are kept per job (usePromotedRules).
+
 import { useState } from 'react'
 
 import { useQuery } from '@tanstack/react-query'

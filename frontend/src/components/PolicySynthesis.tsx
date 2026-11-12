@@ -1,3 +1,8 @@
+// Parts of the Policy page that summarise the last pin run: the per-rule run badge,
+// the join from a rule text to its run statistics (pinStatIndex, keyed by rule
+// string), the last-run panel and the window choices (WINDOW_STEPS). The inputs are
+// the LastRun and PinRuleStat shapes from types/index.ts.
+
 import type { LastRun, PinRuleStat } from '../types'
 
 

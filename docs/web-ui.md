@@ -284,3 +284,14 @@ Manage **detection-rule corpora** (`/settings`): list configured Sigma repos wit
 live rule counts, add a repo (written to the gitignored local overlay), remove /
 disable one, and **Rebuild index** to re-ingest the local clones. See
 [Detection coverage](detection-coverage.md).
+
+## Where the types, the API client and the hooks live
+
+For a developer changing the frontend (`frontend/src/`):
+
+- `types/index.ts`: the shapes of the JSON the API returns, and the constants the UI shares with it.
+- `api/client.ts`: one exported function per API endpoint; errors are thrown from its shared request helper.
+- `hooks/useSSE.ts`: the progress stream of one job (`stage`, `partial_graph`, `done`).
+- `hooks/useRuleSelection.ts`: the coverage rules selected for export, per job.
+- `hooks/usePromotedRules.ts`: the rules promoted from the proposed detections, per job.
+- `hooks/usePref.ts`, `hooks/useCoverage.ts`, `hooks/useAttackIndex.ts`, `hooks/useMitreSearch.ts`: the other hooks.
