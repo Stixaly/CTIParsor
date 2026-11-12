@@ -48,8 +48,8 @@ Everything else is **Met** or **N/A** as of 2026-10-10.
 | interact | Met | README: *Quick start* (obtain), *Feedback and contributing* (bug reports and feature requests in GitHub Issues, vulnerabilities via SECURITY.md, contributions via CONTRIBUTING.md). |
 | contribution | Met | `main/CONTRIBUTING.md#how-a-change-gets-in`: fork, branch, one pull request per change, required checks, review. |
 | contribution_requirements | Met | `main/CONTRIBUTING.md`: the green-build checklist (ruff, mypy, coverage floors, frontend checks), *Conventions* (tests with each change, ADRs, line length). |
-| floss_license | Met | Apache-2.0. |
-| floss_license_osi | Met | Apache-2.0 is OSI-approved. |
+| floss_license | Met | AGPL-3.0-only. |
+| floss_license_osi | Met | GNU AGPL version 3 is OSI-approved. |
 | license_location | Met | `main/LICENSE`; per-file licences in `main/REUSE.toml`, texts in `LICENSES/`. |
 | documentation_basics | Met | README, and `docs/` (pipeline, configuration, web UI, deployment, Docker). |
 | documentation_interface | Met | REST API: `docs/api.md`; output: `docs/stix-output.md`; configuration: `docs/configuration.md`; CLI: README *Usage*. |

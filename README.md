@@ -8,7 +8,7 @@
   <img alt="Python 3.14" src="https://img.shields.io/badge/python-3.14-3776ab?logo=python&logoColor=white">
   <img alt="React + FastAPI" src="https://img.shields.io/badge/UI-React%20%2B%20FastAPI-61dafb?logo=react&logoColor=white">
   <img alt="Docker Compose" src="https://img.shields.io/badge/install-Docker%20Compose-2496ed?logo=docker&logoColor=white">
-  <a href="LICENSE"><img alt="License: Apache-2.0" src="https://img.shields.io/badge/license-Apache--2.0-green"></a>
+  <a href="LICENSE"><img alt="License: AGPL-3.0-only" src="https://img.shields.io/badge/license-AGPL--3.0--only-green"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/Stixaly/CTIParsor"><img alt="OpenSSF Scorecard" src="https://api.scorecard.dev/projects/github.com/Stixaly/CTIParsor/badge"></a>
 </p>
 
@@ -905,7 +905,15 @@ read [CONTRIBUTING.md](CONTRIBUTING.md); the test strategy is in
 
 ## License
 
-CTIParsor is released under the [Apache License 2.0](LICENSE).
+CTIParsor is released under the [GNU Affero General Public License, version 3 only](LICENSE)
+(`AGPL-3.0-only`). [NOTICE](NOTICE) identifies the project's origin and
+explains the licence's attribution and modification-notice obligations.
+The [name and logo policy](TRADEMARKS.md)
+distinguishes independent products and services from the official project.
+
+Commercial use, sale and hosting are allowed when the licence is respected;
+they do not require contacting the maintainers or paying the project.
+The AGPL's source-availability obligations still apply.
 
 Some files come from other projects and keep their own licence: OpenCTI's
 Snort parser, OASIS's STIX schemas and graph viewer, EclecticIQ's STIX icons

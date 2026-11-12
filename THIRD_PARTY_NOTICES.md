@@ -1,7 +1,9 @@
 # Third-party notices
 
-CTIParsor is released under the [Apache License 2.0](LICENSE). This
-repository and the image built from it also carry the files below, copied
+CTIParsor is released under the [GNU Affero General Public License, version 3 only](LICENSE)
+(`AGPL-3.0-only`). [NOTICE](NOTICE) identifies the project's origin and
+explains existing AGPL obligations; it does not relicense third-party material.
+This repository and the image built from it also carry the files below, copied
 from other projects. Each keeps its own copyright and licence. The licence
 texts are in [LICENSES/](LICENSES/), and [REUSE.toml](REUSE.toml) gives the
 same information per file in the [REUSE](https://reuse.software) format,
@@ -17,7 +19,7 @@ on 2026-10-10, and the web fonts with their Fontsource packages on 2026-10-30.
 | `docs/gazetteer-ordinary-words.md` (excerpts) | short excerpts of [AnnoCTR](https://github.com/boschresearch/anno-ctr-lrec-coling-2024) texts, whitespace-normalised and clipped, with links to their source lines | Bosch Research and AnnoCTR contributors | CC-BY-SA-4.0 (the document as a whole) | excerpted |
 | `frontend/public/stix-icons/` (27 SVG) | [eclecticiq/stix-icons](https://github.com/eclecticiq/stix-icons), `White/normal/SVG/` | EclecticIQ | CC-BY-SA-4.0 | no |
 | `frontend/public/stix-viz/stix2viz/stix2viz/stix2viz.js`, `frontend/public/stix-viz/application.css` | [oasis-open/cti-stix-visualization](https://github.com/oasis-open/cti-stix-visualization) | 2016 OASIS Open | BSD-3-Clause | no |
-| `frontend/public/stix-viz/stix-viz.html`, `frontend/public/stix-viz/stix-viz-app.js` | adapted from cti-stix-visualization's `index.html` and `application.js` | 2016 OASIS Open; CTIParsor contributors | BSD-3-Clause AND Apache-2.0 | yes |
+| `frontend/public/stix-viz/stix-viz.html`, `frontend/public/stix-viz/stix-viz-app.js` | adapted from cti-stix-visualization's `index.html` and `application.js` | 2016 OASIS Open; CTIParsor contributors | BSD-3-Clause AND AGPL-3.0-only | yes |
 | `frontend/public/stix-viz/stix2viz/stix2viz/icons/` (52 PNG) | cti-stix-visualization, icons by Bret Jordan | Bret Jordan | CC-BY-SA-4.0 | no |
 | `frontend/public/stix-viz/stix2viz/visjs/vis-network.min.js` | [vis-network](https://github.com/visjs/vis-network), as cti-stix-visualization ships it | 2011-2017 Almende B.V.; 2017-2019 visjs contributors | Apache-2.0 OR MIT | no |
 | `frontend/public/stix-viz/require.js` | [RequireJS](https://github.com/requirejs/requirejs) 2.3.6, as cti-stix-visualization ships it | jQuery Foundation and other contributors | MIT | no |

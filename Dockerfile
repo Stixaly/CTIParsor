@@ -54,7 +54,7 @@ ARG APP_GID=1001
 LABEL org.opencontainers.image.title="CTIParsor" \
       org.opencontainers.image.description="CTI reports to STIX 2.1 - pipeline, web UI and API" \
       org.opencontainers.image.source="https://github.com/Stixaly/CTIParsor" \
-      org.opencontainers.image.licenses="Apache-2.0" \
+      org.opencontainers.image.licenses="AGPL-3.0-only" \
       org.opencontainers.image.revision="${GIT_REV}"
 
 # API_HOST=0.0.0.0 is the container-internal bind; publishing the port to the

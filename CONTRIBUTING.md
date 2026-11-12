@@ -22,8 +22,15 @@ and points at the seams where most changes go.
 4. The maintainer reviews it; review conversations are resolved before the
    merge.
 
-Contributions are accepted under the project's licence, Apache-2.0
-([LICENSE](LICENSE)).
+Contributions are accepted under the project's licence, AGPL-3.0-only
+([LICENSE](LICENSE)). [NOTICE](NOTICE) explains attribution and modification
+notices under that licence.
+By submitting your own contribution for inclusion, you license it under
+that licence; you retain your copyright, and no copyright assignment is required.
+Only grant rights you hold or are authorised to grant. Identify third-party
+material and retain its own notices and licence. The project's
+[name and logo policy](TRADEMARKS.md) does not grant contributors the right
+to imply official endorsement of an independent product or service.
 
 ## Environment
 

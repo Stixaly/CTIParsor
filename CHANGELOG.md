@@ -9,6 +9,15 @@ theme.
 
 ## [Unreleased]
 
+- **Project licence changed** from Apache-2.0 to GNU AGPL version 3 only
+  (`AGPL-3.0-only`). Third-party components retain their own licences;
+  `REUSE.toml` and `THIRD_PARTY_NOTICES.md` identify them.
+- **Attribution and branding**: `NOTICE` identifies the project's origin and
+  explains existing AGPL obligations; `TRADEMARKS.md` distinguishes
+  independent products and services from the official project. Commercial
+  use remains permitted under the licence, without a contact or payment
+  requirement.
+
 - **Stage 2d (CyNER) is off by default** (ADR-0099). Set `CYNER_ENABLED=true`
   to run it as before; an `.env` that already sets it does not change. Measured
   end to end on AnnoCTR dev and the 8 in-house reports
