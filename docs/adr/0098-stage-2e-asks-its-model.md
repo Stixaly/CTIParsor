@@ -1,7 +1,7 @@
 # ADR-0098: Stage 2e asks its model, and its report says whether it answered
 
-**Status:** Accepted for the repair (§1 to §3). The default of
-`GLINER_ENTITY_TYPES` (§4) is open: the maintainer chooses it.
+**Status:** Accepted. Amended 2026-11-12: the default of
+`GLINER_ENTITY_TYPES` is `identity,location` (§5).
 **Date:** 2026-11-11
 **Deciders:** maintainer
 **Relates to:** ADR-0004 (P2-A, GLiNER as Stage 2e), ADR-0051 (one cutoff per
@@ -103,7 +103,38 @@ actors. Which types to ask for is the maintainer's choice, between:
 - **(b) Remove the stage.** No GLiNER dependency, no model to download or
   load. Sectors, campaigns and infrastructure then have no Stage 2 source.
 
+### 5. Amendment of 2026-11-12: the default is `identity,location`
+
+The maintainer chose on 2026-11-12: GLiNER is used for identities (targeted
+sectors) and locations (targeted countries). Unset, `GLINER_ENTITY_TYPES` is
+`identity,location`. Set to an empty value, the stage is off as in §4. The
+other four types stay available by naming them.
+
+What is known when this is decided:
+
+- GLiNER alone, without the LLM (table above): sectors 37 correct for 30
+  false, countries 7 for 4, on AnnoCTR dev.
+- The LLM alone, end to end on the same 16 reports with GLiNER silent
+  (docs/eval/ner-swap-2026-11.md, run `nerswap-e2e-none`): 29 correct sectors
+  for 51 false, out of 77 in the gold; with spaCy, 40 correct locations for
+  37 false.
+- The two together are not measured, nor the stage's time with two labels.
+
 ## Consequences
+
+Of the amendment:
+
+- Bundles change for the same report: sectors and countries from GLiNER are
+  added. `BUNDLE_AFFECTING` has the entry, and the contract records the
+  changed default.
+- A run loads the GLiNER model again, and Stage 2e takes its time again
+  (934 s for the 16 dev reports with six labels).
+- A default run shows 2e as `ran`, so the "models ran" check of
+  `scripts/check_model_journey.py` passes on it again.
+- An `.env` that sets `GLINER_ENTITY_TYPES=` (the line of `.env.example`
+  between ADR-0098 and this amendment) keeps the stage off.
+
+Of the ADR as first written (the empty default of §4):
 
 - No bundle changes with this ADR: no `BUNDLE_AFFECTING` entry. Setting a
   default other than empty will need one, and a `default` change in the

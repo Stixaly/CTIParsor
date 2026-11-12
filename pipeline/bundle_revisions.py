@@ -199,6 +199,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2d (CyNER) is off by default: malware and threat actors that only CyNER proposed "
      "no longer ship unless CYNER_ENABLED=true (ADR-0099)",
      "extraction"),
+    ("ba8ac7a", "2026-11-12",
+     "Stage 2e (GLiNER) asks for sectors and countries by default: the identities and locations "
+     "it finds ship, unless GLINER_ENTITY_TYPES is set to an empty value (ADR-0098)",
+     "extraction"),
 )
 
 

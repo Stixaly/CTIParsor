@@ -40,10 +40,15 @@ theme.
   and `chunks_unanswered`.
 - **Configuration added**: `GLINER_ENTITY_TYPES`, the entity types Stage 2e
   asks for (`identity`, `location`, `campaign`, `infrastructure`, `malware`,
-  `threat_actor`). Empty, the default: the stage is skipped
-  (`disabled: GLINER_ENTITY_TYPES names no entity type`) and its model is not
-  loaded, so bundles stay what they were. Naming a type adds entities to the
-  bundles; the measures per type are in the ADR.
+  `threat_actor`). The default is `identity,location`. **Bundles change** for
+  the same report: Stage 2e answered nothing in 0.7.0, and now adds the
+  targeted sectors and countries GLiNER finds. Measured without the LLM on
+  AnnoCTR dev, GLiNER alone finds 37 correct sectors for 30 false and 7
+  correct countries for 4 false; its effect beside the LLM, which finds
+  sectors and countries too, is not measured. A run loads the GLiNER model
+  again. Set to an empty value, the stage is skipped
+  (`disabled: GLINER_ENTITY_TYPES names no entity type`) and the model is not
+  loaded.
 
 ## [0.7.0] - 2026-11-10
 
