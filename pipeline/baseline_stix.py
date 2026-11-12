@@ -1451,6 +1451,9 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
     excluded_ids: set[str] = set()
     warnings: list[str] = []
 
+    # Step 5-6: one object per id. An object that fails the id checks is set aside
+    # as INVALID. When a bundle holds several valid copies of one id, the copy with
+    # the latest `modified` is kept and the others are recorded as OLDER_VERSION.
     objects: dict[str, dict] = {}                                                        # 5-6
     for obj in items:
         problem = _id_problem(obj)
@@ -1469,11 +1472,16 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
     excluded_ids.difference_update(objects)     # an invalid copy excludes its id only when no valid copy holds it
     excluded_ids.discard("")
 
+    # The candidate roots are the report objects of the bundle. Malformed `published`
+    # or `object_refs` values are read as None or 0 rather than refused here.
     reports = [{"id": o["id"], "name": _clip(_text(o.get("name"))),
                 "published": o["published"] if isinstance(o.get("published"), str) else None,
                 "refs": len(o["object_refs"]) if isinstance(o.get("object_refs"), list) else 0}
                for o in objects.values() if o["type"] == "report"]
     report_ids = {r["id"] for r in reports}
+    # Step 7: the root is the report the caller names, or the only report of the bundle.
+    # With several reports and no name, an import is refused with the list; a preview
+    # returns the list with needs_report_choice set, and no index.
     chosen = report_id if report_id is not None else (reports[0]["id"] if len(reports) == 1 else None)   # 7
     if chosen is None and reports:
         if not preview:
@@ -1488,6 +1496,8 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
     scope = set(objects) if chosen is None else _scope(objects, chosen)
     in_scope = [o for oid, o in objects.items() if oid in scope]
 
+    # Steps 8-10: the checks run on the scope only. A refused root cannot start a scope,
+    # so the whole intake fails instead of importing a partial graph.
     parsed, dropped = _check(in_scope, warnings, validate)                                         # 8-10
     if chosen is not None and chosen not in parsed:
         detail = next(d for o, _, d in dropped if o["id"] == chosen)
@@ -1496,6 +1506,8 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
         excluded.append(_exclusion(obj, reason, detail))
         excluded_ids.add(obj["id"])
 
+    # Step 11: an object that references an excluded object is dropped as well, and so on
+    # until nothing moves (whole objects only). The chosen report is never dropped here.
     kept, cascaded = ref_closure(objects, set(parsed), excluded_ids,                     # 11
                                  protected=frozenset() if chosen is None else frozenset({chosen}))
     for oid, reason in cascaded.items():
@@ -1511,9 +1523,12 @@ def _intake(raw: bytes, report_id: str | None, preview: bool,
         warnings.append(f"{len(dangling)} reference(s) point at ids the bundle does not hold, "
                         f"e.g. {sorted(dangling)[0]}; kept, they dangled in the source")
 
+    # Step 12: the index carries the most restrictive TLP and PAP of the imported objects.
     min_tlp, min_pap = _most_restrictive(                                                # 12
         imported.values(), {oid: o for oid, o in imported.items() if field(o, "type") == "marking-definition"},
         warnings)
+    # Step 13: references to ids the bundle does not hold are kept and only counted, since
+    # they already dangled in the source. The index is built from the imported objects.
     entries, relations, passthrough = _build_index(imported)                             # 13
     counts = {**Counter(field(o, "type") for o in imported.values()),
               "out_of_scope": len(objects) - len(scope), "dangling_refs": len(dangling)}

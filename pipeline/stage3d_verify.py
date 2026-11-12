@@ -201,12 +201,17 @@ def verify_relationships(
         return result
 
     system = _VERIFY_SYSTEM_DOCUMENT if document else _VERIFY_SYSTEM
+    # The quote cap bounds the quote the model may return: longer for a whole-report pass.
     quote_cap = 1_000 if document else 500
     batch_size = max(1, _VERIFY_BATCH)
+    # The words of the text are computed once and used to find each quote in the text.
     text_words = words(text)
     verified_rels: list = []
     held: list = []
     removed = 0
+    # Each batch is one model call. A batch returns three lists: the claims kept
+    # (verified with a quote found in the text), the claims held for review, and a count
+    # of the claims refuted. The lists are joined in input order.
     for start in range(0, len(rels), batch_size):
         batch = _verify_batch(text, text_words, rels[start:start + batch_size], llm_fn,
                               system, max_prompt_chars, quote_cap)
@@ -214,6 +219,7 @@ def verify_relationships(
         held.extend(batch.held)
         removed += batch.removed
 
+    # Held claims are counted in the LLM statistics so the run report shows them.
     if held:
         from pipeline import llm_stats
         llm_stats.bump("rel_verification_held", len(held))
