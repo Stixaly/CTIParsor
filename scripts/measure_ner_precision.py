@@ -741,6 +741,10 @@ def _diff(r: dict, m: str) -> float:
 def gates(cmp: dict, train: dict | None) -> list[tuple[str, str, bool | None, str]]:
     """(gate, type, passed, detail); passed is None when an input is missing
     or is not the one the criteria name."""
+    # The gates, in order. M0: the configuration and the document count. M1: the primary
+    # type's precision gain and its lower interval bound. M2: lost true positives. M3: F1.
+    # M4a: the also-acted-on type. M4b: the other scored types. M5: the train replay, when
+    # given in the named form; without it, M5 is reported with passed=None, which is not a pass.
     out: list[tuple[str, str, bool | None, str]] = []
     problems = list(cmp["config_problems"]) + ([] if cmp["split"] == "test" else [f"split {cmp['split']}"])
     out.append(("M0", "configuration", not problems, "; ".join(problems) or

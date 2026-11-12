@@ -932,6 +932,9 @@ def check_assertions(
     """Compute value, precision and status for the model's assertions against
     the chunk they came from (ADR-0063 §3).  Analyst and legacy assertions
     pass through."""
+    # Only the model's assertions are read here. The model gives a text; the value, precision
+    # and status come from reading that text in the chunk. When the text occurs more than
+    # once, the occurrence nearest the evidence quote is used, if the quote is found.
     anchor = document.anchor if document else None
     ev_pos = _evidence_position(evidence_text, chunk)
     out: list[TemporalAssertion] = []
@@ -940,6 +943,8 @@ def check_assertions(
             out.append(a)
             continue
         b = a.model_copy()
+        # An assertion with no text, or whose text is not in the chunk, is not read: it is
+        # unresolved (no_quote) or in conflict (the reason from locate).
         if b.evidence_label is None and rel_label is not None:
             try:
                 b.evidence_label = EvidenceLabel(getattr(rel_label, "value", rel_label))
@@ -960,6 +965,9 @@ def check_assertions(
             b.time_text, role=b.role, anchor=anchor,
             order_hint=numeric_order_hint(chunk, span, _separator(b.time_text)),
         )
+        # The reading sets the value, its alternatives, precision and status. The anchor is
+        # "document" when the reading used the document's anchor, "none" when it had none,
+        # and "explicit" otherwise.
         b.value, b.alternatives = reading.value, reading.alternatives
         b.precision = reading.precision  # type: ignore[assignment]  # one of Precision, from _read_*
         if reading.qualifier != "none":

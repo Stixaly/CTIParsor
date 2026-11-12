@@ -288,6 +288,9 @@ def _get_vllm_client():
 
 def _get_provider_diagnostics():
     """Run startup diagnostics for provider configuration."""
+    # One branch per LLM_PROVIDER. Each branch logs a warning when the provider cannot be
+    # used (a missing key or SDK), and an info line with the endpoint and model otherwise.
+    # The OpenAI-compatible providers need the `openai` package. Nothing is called here.
     if _PROVIDER == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not _anthropic_key:

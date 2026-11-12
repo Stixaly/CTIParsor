@@ -115,6 +115,8 @@ def _revoke_token(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
+    # One subcommand per account or token task. Each subcommand sets `run` to the function
+    # that does the work, and main calls it with the parsed arguments.
     parser = argparse.ArgumentParser(prog="python -m api.admin", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 

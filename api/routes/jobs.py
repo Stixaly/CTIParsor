@@ -509,6 +509,10 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
     if days <= 0:
         return 0
 
+    # Two steps: list the expired ids in one query, then delete each one. The cutoff is set
+    # in the `_sweep_cutoff` context variable during the deletes. `_delete_job` reads it and
+    # re-checks the job's age, so a job updated after the listing is not deleted. A failure
+    # to delete one job is logged and the sweep goes on with the next.
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     try:
         with get_conn() as conn:

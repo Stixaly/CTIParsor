@@ -227,6 +227,8 @@ def build_corpus_entries(objects: list[dict], domain: str, *, neutralise: bool =
     entry.  Every procedure keeps the URLs it cites, so an evaluation can drop
     the examples MITRE wrote from a report it scores (`exclude_cited`).
     """
+    # Pass 1: one `description` entry per active technique with a T-id. `seen` holds the
+    # dedup keys of the entries so far, so a procedure that repeats a description is dropped.
     by_id = {o["id"]: o for o in objects if "id" in o}
 
     def active(o: dict) -> bool:
@@ -246,6 +248,9 @@ def build_corpus_entries(objects: list[dict], domain: str, *, neutralise: bool =
                         "domain": domain, "text": text, "source": "", "ref": o["id"], "urls": []})
         seen.add(_dedup_key(tid, text))
 
+    # Pass 2: one `procedure` entry per `uses` relationship whose source and target are
+    # active, whose target is a technique, and whose text is at least 20 characters after
+    # cleaning. The source's name and aliases are the names that `neutralise` removes.
     for rel in objects:
         if rel.get("type") != "relationship" or rel.get("relationship_type") != "uses":
             continue

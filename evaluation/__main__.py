@@ -524,6 +524,9 @@ def cmd_score(args) -> None:
 def cmd_ttp_errors(args) -> None:
     """Split a run's technique errors by where they arise (ADR-0072): never
     retrieved, retrieved but not selected, and false positives by origin."""
+    # Each document is split by metrics.ttp_error_split. Documents that errored in the run
+    # are left out. The per-category tallies, the reasons of missed gold, and the candidate
+    # ceiling (found plus retrieved-but-not-selected, over all gold) are then summed.
     meta, preds = _load_run(args.name)
     modified = _modified_files(args.name, meta)
     canonical, catalogue = _canonical_fn(args.attack_release or run_release(meta))

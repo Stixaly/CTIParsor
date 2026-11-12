@@ -1071,6 +1071,9 @@ def _schema_failures(objects: list[dict], warnings: list[str]) -> list[tuple[dic
     reproduced: the signature of a borrowed id) what is not confirmed is
     validated once more, and searched by halves, within a budget, if that fails.
     """
+    # Step 1: validate the whole bundle once. An unverified result (no schemas installed)
+    # is a warning, not a failure. An error line is attributed to an object when it starts
+    # with that object's id, and any other error leaves the attribution incomplete.
     whole = _validate(objects)
     if whole.status == stage5_validation.UNVERIFIED:
         warnings.append("the STIX JSON schemas are not installed: the objects were checked by the stix2 library only")
@@ -1087,6 +1090,8 @@ def _schema_failures(objects: list[dict], warnings: list[str]) -> list[tuple[dic
         else:
             unattributed = True
     explained = bool(attributed) and not unattributed
+    # Step 2: each attributed object is validated alone. It is a failure only when it fails
+    # alone, and `explained` stays True only when its errors all reproduce on its own.
     failures = []
     for obj in objects:
         oid = obj["id"]
@@ -1097,6 +1102,9 @@ def _schema_failures(objects: list[dict], warnings: list[str]) -> list[tuple[dic
             explained = explained and attributed[oid] <= _own(oid, alone.errors)
     if explained:
         return failures
+    # Step 3: when something is not explained, the objects not confirmed as failures are
+    # validated together. If that fails, they are searched by halves within a budget. The
+    # slack term covers the cut between objects.
     confirmed = {obj["id"] for obj, _ in failures}
     rest = [obj for obj in objects if obj["id"] not in confirmed]
     verdict = whole if len(rest) == len(objects) else (_validate(rest) if rest else None)
