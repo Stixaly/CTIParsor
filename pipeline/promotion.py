@@ -116,7 +116,11 @@ def compute_candidates(
     min_jobs: int = DEFAULT_MIN_JOBS,
     share: float = DEFAULT_SHARE,
 ) -> list[Candidate]:
-    """Turn analyst decisions into deny and promote candidates. Each decision is (value, entity type, source, accepted, job id), where accepted is 1, 0 or None. A deny needs enough rejections in enough reports, with a rejected share of at least share. A promote needs enough accepted or manual decisions, a gazetteer type, a term the gazetteer does not know, a minimum length, and no generic fragment."""
+    """Turn analyst decisions into deny and promote candidates. Each decision is (value, entity type,
+    source, accepted, job id), where accepted is 1, 0 or None. A deny needs enough rejections in
+    enough reports, with a rejected share of at least share. A promote needs enough accepted or
+    manual decisions, a gazetteer type, a term the gazetteer does not know, a minimum length, and no
+    generic fragment."""
     from pipeline.stage2d_cyner import _is_generic_fragment
 
     tallies: dict[tuple[str, str], _Tally] = {}
@@ -168,7 +172,8 @@ def _row(r) -> dict:
 
 
 def list_overrides(conn, *, status: str | None = None, action: str | None = None) -> list[dict]:
-    """The rows of entity_overrides, optionally filtered by status and action, ordered by action, entity type and term."""
+    """The rows of entity_overrides, optionally filtered by status and action, ordered by action,
+    entity type and term."""
     clauses, params = [], []
     if status:
         clauses.append("status=?")

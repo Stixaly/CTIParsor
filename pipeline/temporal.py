@@ -71,7 +71,8 @@ class Anchor(BaseModel):
 
     @property
     def publication_grade(self) -> bool:
-        """True when the anchor may resolve a relative expression such as last month. Every source except file metadata qualifies (ADR-0063)."""
+        """True when the anchor may resolve a relative expression such as last month. Every source
+        except file metadata qualifies (ADR-0063)."""
         return self.source not in _WEAK_ANCHORS
 
     def day(self) -> date:
@@ -1179,7 +1180,8 @@ def times_to_json(times: list[TemporalAssertion]) -> str | None:
 
 
 def times_from_json(raw: str | None) -> list[TemporalAssertion]:
-    """Read assertions stored as JSON. Invalid JSON gives an empty list, and an item that no longer validates is dropped. Both cases are logged."""
+    """Read assertions stored as JSON. Invalid JSON gives an empty list, and an item that no longer
+    validates is dropped. Both cases are logged."""
     if not raw:
         return []
     try:

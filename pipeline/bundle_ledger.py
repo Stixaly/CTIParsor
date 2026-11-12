@@ -111,7 +111,8 @@ class MappingLedger:
         self, value: str, entity_type: str, outcome: str, *,
         obj: Any = None, reason: str | None = None, **info: Any,
     ) -> None:
-        """Record what Stage 4 did with one extracted entity: its outcome, the STIX object it became when there is one, the reason, and extra fields. Fields that are None are not stored."""
+        """Record what Stage 4 did with one extracted entity: its outcome, the STIX object it became
+        when there is one, the reason, and extra fields. Fields that are None are not stored."""
         entry: dict = {"value": value, "entity_type": entity_type, "outcome": outcome}
         if obj is not None:
             entry["stix_id"] = stix_field(obj, "id")

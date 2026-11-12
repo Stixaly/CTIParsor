@@ -46,7 +46,8 @@ def get_techniques() -> list[dict]:
     # A new list: the cached index is shared by the whole process, and a caller
     # that clears its result must not empty it for the others.  The dicts are
     # shared, not copied: read them, do not change them.
-    """A new list of the technique records in the MITRE index. The dicts are shared with the cache: read them, do not change them."""
+    """A new list of the technique records in the MITRE index. The dicts are shared with the cache:
+    read them, do not change them."""
     return list(_load().get("techniques", []))
 
 

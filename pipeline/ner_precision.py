@@ -34,7 +34,8 @@ from pipeline.regex_safety import compile_pattern
 
 
 def enabled() -> bool:
-    """True when NER_PRECISION_FILTERS is on, which is the default. False restores the behaviour from before ADR-0088."""
+    """True when NER_PRECISION_FILTERS is on, which is the default. False restores the behaviour from
+    before ADR-0088."""
     return env_bool("NER_PRECISION_FILTERS", default=True)
 
 

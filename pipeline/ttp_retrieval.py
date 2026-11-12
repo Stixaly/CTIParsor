@@ -635,7 +635,8 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
 
 
 def retrieval_available() -> bool:
-    """True when the retrieval settings name a known corpus and method, and that retriever can be built. With SKIP_HEAVY_MODELS only the BM25 method is available."""
+    """True when the retrieval settings name a known corpus and method, and that retriever can be
+    built. With SKIP_HEAVY_MODELS only the BM25 method is available."""
     s = retrieval_settings()
     if s["corpus"] not in CORPORA or s["method"] not in METHODS:
         return False
