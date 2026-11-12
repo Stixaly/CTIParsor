@@ -77,6 +77,7 @@ class _LineHandler(logging.StreamHandler):
     redirect or a test's capture sees it."""
 
     def emit(self, record: logging.LogRecord) -> None:
+        """Write the record to the audit stream: the one set by lines_to, or standard output."""
         self.stream = _line_stream or sys.stdout
         super().emit(record)
 
@@ -101,6 +102,8 @@ def retention_days() -> int:
 
 
 def outcome_for(status: int) -> str:
+    """The outcome of an answer with this HTTP status: ok for 2xx and 3xx, refused for the statuses in
+    _REFUSED_STATUSES, error for the rest."""
     if 200 <= status < 400:
         return "ok"
     if status in _REFUSED_STATUSES:
@@ -286,6 +289,7 @@ class AuditMiddleware:
         answer: dict[str, int] = {}
 
         async def send_and_see(message: Any) -> None:
+            """Pass a message on to the real send, and keep the status of a response start in `answer`."""
             if message["type"] == "http.response.start":
                 answer["status"] = message["status"]
             await send(message)

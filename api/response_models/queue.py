@@ -7,6 +7,7 @@ from api.response_models import Response as ApiResponse
 
 
 class QueueInfo(ApiResponse):
+    """The job queue: its depth, its limit and the oldest queued job."""
     depth: int = Field(description="Jobs in the queued status.")
     max_depth: int = Field(description="API_QUEUE_MAX_DEPTH: the most queued jobs the API accepts.")
     oldest_queued_job_id: str | None
@@ -29,6 +30,7 @@ class WorkerStatus(ApiResponse):
 
 
 class WorkerSummary(ApiResponse):
+    """Counts of the workers in the status, by state, and the capacity they offer."""
     alive: int = Field(description="Workers that are not stale.")
     busy: int
     idle: int

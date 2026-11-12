@@ -562,14 +562,19 @@ class _WorkerHooks(Hooks):
         self.resolved_away: list[RawEntity] = []
 
     def progress(self, event: str, data: dict) -> None:
+        """Record one progress event of the job."""
         emit_progress(self.job_id, event, data)
 
     def check_timeout(self) -> None:
+        """Raise TimeoutError when the job has run longer than the job timeout. A timeout of 0 or less means no
+        limit."""
         elapsed = time.monotonic() - self.started
         if _MAX_JOB_TIMEOUT > 0 and elapsed > _MAX_JOB_TIMEOUT:
             raise TimeoutError(f"Job timeout exceeded: {elapsed:.0f}s > {_MAX_JOB_TIMEOUT}s")
 
     def text_ready(self, text: str, figure_spans: list, figure_provider: str) -> None:
+        """Store the report text of the job, then record its figure spans when there are any. The spans are recorded
+        after the text, because they index into it."""
         with _lock:
             with get_conn() as conn:
                 conn.execute("UPDATE jobs SET report_text=?, updated_at=? WHERE id=?",
@@ -590,6 +595,8 @@ class _WorkerHooks(Hooks):
         # lease to expire and be reclaimed -- so re-check ownership here and
         # abandon the run rather than land a duplicate set of entities under a
         # job another worker now owns.
+        """Store the entities and the LLM result of the job, after checking that this worker still owns the job. Raise
+        RunAborted when another worker has taken it over."""
         if self.owner is not None and _current_owner(self.job_id) != self.owner:
             logger.warning(
                 f"[Worker] job {self.job_id} was reclaimed by another worker before "
@@ -617,18 +624,23 @@ class _WorkerHooks(Hooks):
                 conn.commit()
 
     def type_conflicts_resolved(self, resolved_away: list[RawEntity]) -> None:
+        """Keep the entities that Stage 2 resolved away, for the finalize step."""
         self.resolved_away = resolved_away
 
     def baseline_reconciled(self, reconciliation: Reconciliation) -> None:
+        """Keep the baseline reconciliation of the job, for the finalize step."""
         self.reconciliation = reconciliation
 
     def policy(self) -> dict | None:
+        """Load the relationship policy for this run: the saved one, or None when none is saved or it cannot be read."""
         return _load_policy()
 
     def policy_used(self, policy: dict | None) -> None:
         # Record the configuration this bundle was built under (ADR-0024),
         # stamped right after the policy is read, so the snapshot is the policy
         # actually applied rather than whatever the row holds when someone asks.
+        """Record the run configuration built from the policy this run applies, in the job's run_config_json. A failure
+        is logged and does not stop the run."""
         try:
             from api.run_config import build_run_config
             self.run_config = build_run_config(policy)

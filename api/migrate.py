@@ -234,6 +234,9 @@ def _span(versions: list[int]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of `python -m api.migrate`. `status` prints the schema history, `up` applies the pending migrations,
+    `check` verifies that the schema is at this code's version. Return 1 when `up` is refused or `check` fails, 0
+    otherwise."""
     from api.logging_config import setup_logging
 
     parser = argparse.ArgumentParser(prog="python -m api.migrate", description=__doc__.split("\n\n")[0])
