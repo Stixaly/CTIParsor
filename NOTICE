@@ -1,0 +1,46 @@
+CTIParsor
+Copyright: CTIParsor contributors
+Original project: https://github.com/Stixaly/CTIParsor
+
+The project's licence is GNU AGPL version 3 only (AGPL-3.0-only), in LICENSE.
+This notice identifies the project's origin and explains existing licence
+obligations. It does not add copyright restrictions to the AGPL or relicense
+third-party material identified in REUSE.toml and THIRD_PARTY_NOTICES.md.
+
+1. Attribution
+
+AGPL section 4 requires appropriate copyright notices and preservation of
+licence and warranty notices when conveying source copies. Section 5
+extends those requirements to modified versions. The project's attribution
+is:
+
+    CTIParsor — https://github.com/Stixaly/CTIParsor
+    Copyright: CTIParsor contributors
+
+Keeping this NOTICE with source distributions is a convenient way to carry
+the project's attribution. Legal notices, About information or accompanying
+documentation can also identify the upstream project. This notice does not
+require advertising, attribution on every screen, or attribution in generated
+reports or other outputs. The AGPL's requirements for Appropriate Legal
+Notices remain applicable.
+
+2. Origin and modifications
+
+When conveying a modified version, AGPL section 5(a) requires prominent
+notices that you modified it and a relevant date. Identifying it as modified
+from CTIParsor makes its origin clear. You may credit yourself for your own
+contributions; modifying the project does not transfer authorship or
+copyright in the pre-existing work.
+
+3. Name and logo
+
+No rights under trademark law to use the CTIParsor name or project logo are
+granted by the software licence. See TRADEMARKS.md for the project's policy,
+including truthful references to the project and uses allowed by law.
+
+Commercial use, sale and hosting are permitted when the AGPL is respected.
+This notice does not require permission, payment, contact with the
+maintainers, or submission of modifications upstream for those activities.
+The AGPL's source-availability obligations remain applicable, including
+section 13's offer of Corresponding Source to remote users interacting with
+a modified version over a computer network.

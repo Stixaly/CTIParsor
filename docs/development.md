@@ -454,7 +454,7 @@ CTIParsor/
 │   ├── eval/                      # Evaluation protocol and baselines (ADR-0060)
 │   └── adr/                       # Architecture Decision Records (see docs/adr/README.md)
 ├── TESTING.md                     # Test strategy
-├── LICENSE                        # Apache-2.0, CTIParsor's licence
+├── LICENSE                        # AGPL-3.0-only, CTIParsor's licence
 ├── LICENSES/                      # Every licence a file in the repository is under
 ├── REUSE.toml                     # Copyright and licence per file, checked by `reuse lint`
 ├── THIRD_PARTY_NOTICES.md         # The files copied from other projects, their sources and licences

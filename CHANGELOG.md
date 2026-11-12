@@ -9,6 +9,15 @@ theme.
 
 ## [Unreleased]
 
+- **Project licence changed** from Apache-2.0 to GNU AGPL version 3 only
+  (`AGPL-3.0-only`). Third-party components retain their own licences;
+  `REUSE.toml` and `THIRD_PARTY_NOTICES.md` identify them.
+- **Attribution and branding**: `NOTICE` identifies the project's origin and
+  explains existing AGPL obligations; `TRADEMARKS.md` distinguishes
+  independent products and services from the official project. Commercial
+  use remains permitted under the licence, without a contact or payment
+  requirement.
+
 - **Stage 2e (GLiNER) never asked its model** (ADR-0098). gliner 0.2.29's
   `predict_entities` takes one string and returns `[]` for a list of chunks,
   without an error: the stage recorded `ran` with 0 entities for every report.
