@@ -148,6 +148,10 @@ def _finalize_job(
     `review_revision` as the revision it was built from: a finalize that read
     the rows before this write is then refused.
     """
+    # Two UPDATE forms, each in two variants. With a bundle, the bundle columns and the
+    # status change in one statement, so the bundle is never visible without its status.
+    # The owner-checked form adds `AND worker_id=?`; its rowcount says whether the row
+    # was still this worker's. When the update matched nothing, the result is discarded.
     errors_json = _validation_errors_json(validation_errors)
     with _lock:
         with get_conn() as conn:

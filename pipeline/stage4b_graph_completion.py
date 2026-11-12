@@ -852,6 +852,10 @@ def _infer_long_distance(
     id_to_obj = {
         i: o for i, o in all_objs.items() if _otype(o) in LONG_DISTANCE_TYPES
     }
+    # Only the SDO graph is split into connected components. With fewer than two components
+    # there is nothing to bridge. Each component is represented by its most connected node
+    # (ties broken by id, so the choice is deterministic). The most connected of those
+    # representatives is the topic node, and every other one gets one inference toward it.
     rels = [o for o in stix_objects if _is_rel(o)]
     deg = _degree_map(rels)
     comps = _connected_components(set(id_to_obj), rels)
@@ -865,6 +869,10 @@ def _infer_long_distance(
     topic = max(centrals, key=lambda n: (deg.get(n, 0), n))
     existing = _existing_edges(stix_objects)
 
+    # The cap on new edges is checked before each inference, so the loop stops at the cap
+    # and records that it was reached (stats.capped). An inferer error skips only its own
+    # component. An edge is kept only when its verb is valid, its endpoints are known and
+    # distinct, the policy suggests it and no existing or forbidden edge has the same key.
     for cnode in centrals:
         if cnode == topic:
             continue

@@ -515,10 +515,15 @@ def inject(page_texts: list[str],
     pdfplumber path already uses — so enabling Stage 1f changes where figures
     appear and nothing else about how pages are stitched together.
     """
+    # Group the figures by page. The ordinal is the figure's 1-based position in `reads`;
+    # it is the number the block is rendered with, and the span keeps it.
     page_reads: dict[int, list[tuple[int, FigureCandidate, FigureRead, str]]] = {}
     for idx, (cand, read, sha256) in enumerate(reads, start=1):
         page_reads.setdefault(cand.page, []).append((idx, cand, read, sha256))
 
+    # The text is built as a list of parts, with `pos` tracking the length so far. Each
+    # page's text comes first, then that page's figures. A figure on a page number past
+    # the last page of text is appended at the end, with a warning.
     parts: list[str] = []
     spans: list[FigureSpan] = []
     pos = 0

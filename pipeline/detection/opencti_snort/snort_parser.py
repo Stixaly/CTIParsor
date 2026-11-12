@@ -1,3 +1,15 @@
+"""Parser, sanitiser and serialiser for one Snort rule.
+
+This is OpenCTI's copy of its Snort parser. README.md in this folder gives the
+source, the licence and the local patches. `Parser` splits a rule string into a
+header dict and an options dict, and raises ValueError or SyntaxError for the
+input it refuses. `Sanitizer` normalises pcre values, and `SerializeRule`
+writes a parsed rule back to text.
+
+The parser checks option names against the keyword tables in snort_dicts.py,
+and checks addresses and ports. It does not check the arguments of most
+keywords. The TODO comments in this file and in snort_dicts.py mark the
+places where that is so; README.md lists them."""
 import collections
 import ipaddress
 import re
@@ -33,6 +45,9 @@ class Parser:
 
     @staticmethod
     def actions(action: str) -> str:
+        """Return `action` when it is a Snort rule action, and raise ValueError otherwise.
+
+        The accepted actions are alert, log, pass, activate, dynamic, drop, reject and sdrop."""
         actions = {
             "alert",
             "log",
@@ -51,6 +66,9 @@ class Parser:
 
     @staticmethod
     def proto(proto: str) -> str:
+        """Return `proto` when it is tcp, udp, icmp or ip in any case, and raise ValueError otherwise.
+
+        The value is returned as written, not lower-cased."""
         protos = {"tcp", "udp", "icmp", "ip"}
 
         if proto.lower() in protos:
@@ -127,6 +145,13 @@ class Parser:
         return True
 
     def ip(self, ip):
+        """Parse a source or destination address field.
+
+        Accepts one address or variable, a `!` negation, a comma-separated list, or a
+        bracketed list (nested brackets allowed). Returns the tuple (allowed, value),
+        where `allowed` is False for a `!` negation. For a list, `value` is a list of
+        such tuples, and a nested list gives a nested tuple. Raises ValueError for an
+        address or variable that is not valid. Returns None when `ip` is not a string."""
         if isinstance(ip, str):
             ip = ip.strip('"')
             # CTIParsor patch (#519): a single bracketed address or variable
@@ -148,6 +173,13 @@ class Parser:
     # pylint: disable=too-many-statements
     @staticmethod
     def port(port):
+        """Parse a source or destination port field.
+
+        Accepts a number, a range `low:high`, an open range `:high` or `low:`, a variable
+        such as `$HTTP_PORTS`, `any`, or a bracketed list. Returns (allowed, value):
+        `allowed` is False for a `!` negation, and `value` is the port text, or a list of
+        (allowed, item) pairs for a bracketed list. Raises ValueError for a malformed port
+        or a number outside 0 to 65535."""
         variables = {"any", "$HTTP_PORTS"}
 
         # is the source marked as not
@@ -280,6 +312,7 @@ class Parser:
 
     @staticmethod
     def destination(dst):
+        """Return `dst` when it is the arrow `->` or `<>`, and raise ValueError otherwise."""
         destinations = {"->": "to_dst", "<>": "bi_direct"}
 
         if dst in destinations:
@@ -288,6 +321,10 @@ class Parser:
         raise ValueError(msg)
 
     def get_header(self):
+        """Return the header: the text before the first `(` of the rule.
+
+        Raises SyntaxError when the rule does not match the header-and-options shape. The
+        option block must end with `;)`."""
         if re.match(r"(^[a-z|A-Z].+?)?(\(.+;\)|;\s\))", self.rule.lstrip()):
             header = self.rule.split("(", 1)
             return header[0]
@@ -296,9 +333,15 @@ class Parser:
 
     @staticmethod
     def remove_leading_spaces(string: str) -> str:
+        """Return `string` with its leading and trailing whitespace removed (`str.strip`)."""
         return string.strip()
 
     def get_options(self):
+        """Return the options as a list of strings, in rule order.
+
+        The option block is the text between the first `(` and the closing `)`. It is
+        split at each `;` that is not preceded by a backslash. Raises ValueError when the
+        block does not end with `)`."""
         options = f"{self.rule.split('(', 1)[-1].lstrip().rstrip()}"
         if not options.endswith(")"):
             raise ValueError(
@@ -325,6 +368,12 @@ class Parser:
         return op_list
 
     def parse_header(self):  # pylint: disable=too-many-statements
+        """Parse the rule header into an ordered dict keyed by field name.
+
+        The header has seven fields (action, protocol, source, source port, arrow,
+        destination, destination port), or one field, which gives the action alone. The
+        fields are matched in that order. Raises ValueError when the header is missing or
+        has another number of fields."""
         # OrderedDict(
         #     [
         #         ("action", "alert"),
@@ -400,6 +449,11 @@ class Parser:
         return header_dict
 
     def parse_options(self, rule=None):
+        """Parse the option block into an ordered dict keyed by position.
+
+        Each value is (name, values). The text after the first `:` is split at commas,
+        except for pcre, whose text is kept as one string. An option without `:` has the
+        empty string as its values. A `rule` argument replaces self.rule before parsing."""
         if rule:
             self.rule = rule
         opts = self.get_options()
@@ -417,6 +471,10 @@ class Parser:
         return options_dict
 
     def validate_options(self, options):
+        """Check that each option name is known to Dicts, and return the options unchanged.
+
+        Raises ValueError with "unrecognized option" for a name that no keyword table
+        holds. A single-value content modifier is accepted without further checks."""
         for _index, option in options.items():
             key, value = option
             # CTIParsor patch (#422): OpenCTI sets `opt` only on some paths
@@ -458,12 +516,19 @@ class Parser:
 
 
 class Sanitizer:
+    """Normalises option values before the rule is written back.
+
+    Only pcre is normalised. See `pcre`."""
     def __init__(self):
         self.methods = {
             "pcre": self.pcre,
         }
 
     def sanitize(self, parsed):
+        """Normalise the option values of a parsed rule in place, and return the rule.
+
+        An option whose name has a method in self.methods is replaced by the result of
+        that method. The other options are left as they are."""
         options = parsed["options"]
         # CTIParsor patch (#521): options maps index -> (name, value) and methods is
         # keyed by name, so match the name and keep the tuple shape.
@@ -476,6 +541,11 @@ class Sanitizer:
 
     @staticmethod
     def pcre(value: Union[str, List]) -> Union[str, List]:
+        """Return a pcre value in the form "/regex/flags", adding the quotes and slashes that are missing.
+
+        A value that already ends in a slash, with optional flags after it, gets no second
+        slash. A list keeps its shape, and only its first element is normalised. An empty
+        value is returned as it is."""
         # The parser stores a pcre option as a str, but list input keeps its shape (#624).
         if isinstance(value, list):
             if not value:
@@ -494,6 +564,11 @@ class Sanitizer:
 
     @staticmethod
     def depth(options):
+        """Return the larger of the rule's depth value and dsize value.
+
+        The first depth option and the first dsize option are used. The dsize operator,
+        which is the first non-digit character, is stripped from both ends of the value
+        before the comparison. A rule without either option raises IndexError."""
         depth_idx = [idx for idx in options if "depth" in options[idx]][0]
         dsize_idx = [idx for idx in options if "dsize" in options[idx]][0]
         # CTIParsor patch (#521): each option is a (name, values) tuple, so the value is [1].
@@ -510,6 +585,7 @@ class Sanitizer:
 
 
 class SerializeRule:
+    """Writes a parsed rule back to Snort text: header, options, or the whole rule."""
     def __init__(self, rule):
         self.rule = rule
 
@@ -546,6 +622,11 @@ class SerializeRule:
         return serialised
 
     def serialize_header_item(self, item: Any) -> Optional[str]:
+        """Return the text of one header field.
+
+        A string is returned as it is. For a (allowed, value) tuple, a list value is written
+        as a bracketed list, with a leading `!` when it is not allowed. A single value in a
+        tuple is returned without its `!`. Any other type gives None."""
         if isinstance(item, str):
             return item
 
@@ -557,6 +638,9 @@ class SerializeRule:
         return None  # TODO: verify this is intended behavior
 
     def serialize_header(self, header: Dict = None) -> str:
+        """Return the header fields, each preceded by a space.
+
+        The fields come from `header`, or from self.rule["header"] when `header` is empty."""
         serialised = str()
         if not header:
             header = self.rule["header"]
@@ -567,6 +651,11 @@ class SerializeRule:
         return serialised
 
     def serialize_options(self, options: Dict = None) -> str:
+        """Return the option block as "(name:value; ...)".
+
+        The options come from `options`, or from self.rule["options"] when `options` is
+        empty. An option without a value is written as its name alone. A pcre value is
+        written as it is, and other values are joined with commas."""
         options_list = []
         if not options:
             options = self.rule["options"]
@@ -588,4 +677,5 @@ class SerializeRule:
         return serialized_options
 
     def serialize_rule(self):
+        """Return the whole rule: the header, a space, then the option block."""
         return f"{self.serialize_header()} {self.serialize_options()}".lstrip()
