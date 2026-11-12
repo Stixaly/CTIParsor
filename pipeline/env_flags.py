@@ -35,7 +35,7 @@ def env_bool(name: str, *, default: bool = False) -> bool:
     if v in _FALSY:
         return False
     # Unrecognised values fall back to the default rather than being treated as true,
-    # so that CYNER_ENABLED=maybe keeps the stage active as before.
+    # so that CYNER_ENABLED=maybe leaves the stage at its default (off).
     return default
 
 

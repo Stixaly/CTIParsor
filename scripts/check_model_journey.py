@@ -2,7 +2,7 @@
 
     python scripts/check_model_journey.py --pdf PATH --url URL \\
         [--base-url http://127.0.0.1:8000] [--report-dir output/model-journey/<UTC time>] \\
-        [--wait-s 2400] [--required-stages "2c 2d 2e 3"]
+        [--wait-s 2400] [--required-stages "2c 2e 3"]
 
 Two journeys run one after the other, on the stack as it is configured (its
 models, its LLM):
@@ -20,7 +20,7 @@ name, a status (pass, fail or not_checked) and a detail:
 - 2 required stages ran: each stage of --required-stages is in the stage report
   as `ran`; Stage 3 also needs an egress record that allows the report and at
   least one provider call;
-- 3 models ran: stages 2c, 2d and 2e are in the report and ran (a skip for any
+- 3 models ran: stages 2c and 2e are in the report and ran (a skip for any
   reason, the heavy models off included, fails);
 - 4 document text: Stage 1 recorded a number of characters above zero;
 - 5 extraction: the job has at least one entity, and at least one IoC or
@@ -64,9 +64,9 @@ from uuid import uuid4
 ROOT = Path(__file__).resolve().parent.parent
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
-DEFAULT_REQUIRED = "2c 2d 2e 3"
+DEFAULT_REQUIRED = "2c 2e 3"
 TOKEN_ENV = "CTIPARSOR_TOKEN"  # noqa: S105 - the name of the variable, not a secret
-MODEL_STAGES = ("2c", "2d", "2e")
+MODEL_STAGES = ("2c", "2e")
 PENDING = frozenset({"uploaded", "queued", "processing"})
 ENDED_OK = frozenset({"completed", "for_review"})
 IOC_TYPES = frozenset({"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256"})
@@ -596,7 +596,7 @@ def main(argv: list[str] | None = None) -> int:
         return _usage(error)
     required = tuple(args.required_stages.split())
     if not required or not all(STAGE_ID.fullmatch(s) for s in required):
-        return _usage(f"--required-stages must be stage ids such as \"2c 2d 2e 3\", not {args.required_stages!r}")
+        return _usage(f"--required-stages must be stage ids such as \"2c 2e 3\", not {args.required_stages!r}")
     pdf_bytes = args.pdf.read_bytes()
     if not pdf_bytes:
         return _usage(f"empty file: {args.pdf}")

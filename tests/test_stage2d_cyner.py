@@ -12,6 +12,8 @@ System, Vulnerability, Date, Location.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 from models.schemas import EntityType
 from pipeline import stage2d_cyner
 
@@ -371,3 +373,75 @@ def test_bare_apt_is_rejected_but_numbered_apt_group_survives(monkeypatch):
     results = stage2d_cyner.extract_cyner_entities("irrelevant text")
     values = {r.value for r in results}
     assert values == {"APT44"}
+
+
+# ── 3. Off by default (ADR-0099) ────────────────────────────────────────────
+
+def _enabled_in_fresh_process(**env):
+    """_CYNER_ENABLED as a new interpreter reads it: the flag is read at import."""
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    child_env = {k: v for k, v in os.environ.items() if k not in ("CYNER_ENABLED", "SKIP_HEAVY_MODELS")}
+    child_env.update(env)
+    out = subprocess.run(
+        [sys.executable, "-c", "import pipeline.stage2d_cyner as m; print(m._CYNER_ENABLED)"],
+        cwd=Path(__file__).resolve().parents[1], env=child_env, capture_output=True, text=True, check=True,
+    )
+    return out.stdout.strip()
+
+
+def test_the_stage_is_off_unless_cyner_enabled_is_true():
+    assert _enabled_in_fresh_process() == "False"
+    assert _enabled_in_fresh_process(CYNER_ENABLED="maybe") == "False"
+    assert _enabled_in_fresh_process(CYNER_ENABLED="true") == "True"
+
+
+def test_an_off_stage_is_unavailable_and_says_it_is_disabled(monkeypatch):
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", False)
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline([]))
+    assert stage2d_cyner.cyner_available() is False
+    assert stage2d_cyner.cyner_unavailable_reason() == "disabled: CYNER_ENABLED is not true"
+
+
+def test_an_enabled_stage_is_available_with_a_loaded_model(monkeypatch):
+    import sys
+    import types
+
+    # cyner_available() imports transformers before it asks for the pipeline.
+    monkeypatch.setitem(sys.modules, "transformers", types.ModuleType("transformers"))
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", True)
+    monkeypatch.setattr(stage2d_cyner, "_SENTINEL_PATH", Path("/nonexistent/.cyner_model_unavailable"))
+    monkeypatch.setattr(stage2d_cyner, "_load_pipeline", lambda: _fake_pipeline([]))
+    assert stage2d_cyner.cyner_available() is True
+
+
+def test_the_unavailable_reason_is_not_disabled_when_the_model_is_what_is_missing(monkeypatch):
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", True)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", False)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", True)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    assert stage2d_cyner.cyner_unavailable_reason() == "model or index unavailable"
+
+
+def test_the_stage_report_gives_the_disabled_reason_the_smoke_test_accepts(monkeypatch):
+    from pipeline.orchestrator import Document, RunOptions, run_document
+    from scripts.smoke_stage_report import judge
+
+    for module in ("pipeline.stage2c_ttp_semantic", "pipeline.stage2e_gliner"):
+        monkeypatch.setattr(f"{module}._SKIP_HEAVY", True)
+    monkeypatch.setattr(stage2d_cyner, "_SKIP_HEAVY", False)
+    monkeypatch.setattr(stage2d_cyner, "_CYNER_ENABLED", False)
+    options = RunOptions(disabled=frozenset({"1f", "2f", "3"}), consensus=False, document_relations=False,
+                         verify_relationships=False, verify_ttps=False, llm_parallelism=1)
+
+    outcome = run_document(Document(text="Emotet hit a hospital.", original_filename="r.txt"), options).outcome("2d")
+
+    assert (outcome.status, outcome.reason) == ("skipped", "disabled: CYNER_ENABLED is not true")
+    assert judge([outcome.as_dict()], ["2d"])[1] == []

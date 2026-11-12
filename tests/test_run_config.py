@@ -167,3 +167,10 @@ def test_a_runs_build_record_is_copied_from_its_run_config(monkeypatch):
     nothing = run_config.run_build_record(None)                  # the run config could not be built
     assert nothing["kind"] == "run"
     assert [nothing[k] for k in ("git_rev", "policy", "env", "manifest")] == [None] * 4
+
+
+def test_cyner_is_recorded_off_when_unset(monkeypatch):
+    monkeypatch.delenv("CYNER_ENABLED", raising=False)
+    assert run_config.captured_env()["CYNER_ENABLED"] == "false"
+    monkeypatch.setenv("CYNER_ENABLED", "true")
+    assert run_config.captured_env()["CYNER_ENABLED"] == "true"

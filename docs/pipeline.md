@@ -118,7 +118,7 @@ The boxes below give each stage in detail, in execution order.
 └─────────────────────────────┬────────────────────────────────────────┘
                               │
 ┌─────────────────────────────▼────────────────────────────────────────┐
-│  Stage 2d — CyNER 2.0                       (offline once cached)   │
+│  Stage 2d — CyNER 2.0 (off by default)      (offline once cached)   │
 │  DeBERTa-v3 fine-tuned on cybersecurity NER (model card F1 91.88%)  │
 │  Detects: Malware, Threat_group (threat-actor groups)               │
 │  Model: PranavaKailash/CyNER-2.0-DeBERTa-v3-base (CYNER_ENABLED)    │

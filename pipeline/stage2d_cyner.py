@@ -54,11 +54,11 @@ logger = get_logger(__name__)
 # distinct from "Organization", so threat-actor detection no longer relies on
 # the _ORG_BLOCKLIST heuristic below.
 # NOTE: model_type is deberta-v2 → the `sentencepiece` package is required.
-# If the model cannot be loaded, Stage 2e (GLiNER) covers the same entity types
-# (malware families, threat actor groups) via zero-shot NER.
-# Set CYNER_ENABLED=false in .env to skip this stage and silence all warnings.
+# Off by default (ADR-0099): measured end to end with the LLM, the pipeline
+# without CyNER has half the false malware and threat actors for almost the
+# same recall.  Set CYNER_ENABLED=true in .env to run this stage.
 _MODEL_ID      = os.getenv("CYNER_MODEL",   "PranavaKailash/CyNER-2.0-DeBERTa-v3-base")
-_CYNER_ENABLED = env_bool("CYNER_ENABLED", default=True)
+_CYNER_ENABLED = env_bool("CYNER_ENABLED", default=False)
 
 # Sentinel file written to the project root the first time the model is detected
 # as inaccessible (private/removed).  Future subprocess invocations check for this
@@ -355,8 +355,8 @@ def _load_pipeline():
             logger.warning(
                 f"CyNER model '{_MODEL_ID}' is not accessible on HuggingFace Hub "
                 f"(private, gated, or removed). "
-                f"Stage 2e (GLiNER) covers the same entity types as a fallback.\n"
-                f"To disable CyNER and silence this warning permanently, add to your .env:\n"
+                f"The run goes on without Stage 2d.\n"
+                f"To turn CyNER off and silence this warning, unset it in your .env or set:\n"
                 f"  CYNER_ENABLED=false"
             )
             # Write a sentinel so every subsequent subprocess skips the network check.
@@ -390,6 +390,15 @@ def cyner_available() -> bool:
     except ImportError:
         return False
     return _load_pipeline() is not None
+
+
+def cyner_unavailable_reason() -> str:
+    """What the stage report says when cyner_available() is False.  A stage
+    off by configuration says so with the word the smoke test accepts
+    ("disabled")."""
+    if not _SKIP_HEAVY and not _CYNER_ENABLED:
+        return "disabled: CYNER_ENABLED is not true"
+    return "model or index unavailable"
 
 
 def extract_cyner_entities(text: str) -> list[RawEntity]:
