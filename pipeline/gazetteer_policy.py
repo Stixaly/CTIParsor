@@ -71,6 +71,7 @@ class Judgement:
 
     @property
     def withheld(self) -> bool:
+        """True when the occurrence is not resolved to one object: its outcome is unresolved or excluded."""
         return self.outcome != "resolved"
 
 
@@ -87,6 +88,7 @@ class Occurrence:
 
     @property
     def surface(self) -> str:
+        """The occurrence text as the document writes it, from start to end."""
         return self.text[self.start:self.end]
 
 
@@ -98,10 +100,12 @@ class Index:
 
     @property
     def ambiguous(self) -> frozenset[str]:
+        """The names that map to more than one MITRE object."""
         return frozenset(name for name, ids in self.candidates.items() if len(ids) > 1)
 
 
 def mode() -> str:
+    """The GAZETTEER_POLICY mode: off, shadow or apply. An unknown value logs a warning and gives shadow."""
     value = (os.environ.get("GAZETTEER_POLICY") or "shadow").strip().lower()
     if value not in MODES:
         logger.warning(f"[gazetteer policy] GAZETTEER_POLICY={value!r} is not one of {MODES}; "
@@ -128,6 +132,7 @@ def version() -> str | None:
 
 
 def decisions() -> dict[str, str]:
+    """The decision of each gazetteer form, from the policy file: RETAIN, CASE or CONTEXT."""
     return dict(_policy().get("forms", {}))
 
 
@@ -141,6 +146,7 @@ def is_promoted(entry: dict) -> bool:
 
 
 def identity(entry: dict) -> str:
+    """The identity of a gazetteer entry: its MITRE ID, or its canonical name when it has none."""
     return entry.get("mitre_id") or entry["canonical"]
 
 

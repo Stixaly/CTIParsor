@@ -97,6 +97,7 @@ class StageOutcome:
     details: dict[str, Any] = field(default_factory=dict)
 
     def as_dict(self) -> dict:
+        """The outcome as a flat dict: the details are merged into the top level."""
         d = asdict(self)
         d.update(d.pop("details"))
         return d
@@ -193,10 +194,13 @@ class Document:
 
     @property
     def name(self) -> str:
+        """The original file name, else the file name, else text for pasted text."""
         return self.original_filename or (Path(self.file_path).name if self.file_path else "text")
 
     @property
     def report_name(self) -> str:
+        """The name as a report identifier: the file stem with every character that is not a word character or a hyphen
+        replaced by an underscore."""
         return re.sub(r"[^\w\-]", "_", Path(self.name).stem)
 
 
@@ -282,16 +286,20 @@ class RunResult:
     baseline_build: Any = None
 
     def outcome(self, stage: str) -> StageOutcome | None:
+        """The outcome of one stage id, or None when the run has no outcome for it."""
         return next((o for o in self.stages if o.stage == stage), None)
 
     def ran(self, stage: str) -> bool:
+        """True when the stage ran, as opposed to being skipped or failing."""
         o = self.outcome(stage)
         return o is not None and o.status == RAN
 
     def not_run(self) -> list[StageOutcome]:
+        """The outcomes of the stages that did not run: skipped or failed."""
         return [o for o in self.stages if o.status != RAN]
 
     def stage_report(self) -> list[dict]:
+        """Every outcome as a flat dict, for the stage report."""
         return [o.as_dict() for o in self.stages]
 
 
@@ -313,6 +321,8 @@ class FileCheckpoint:
         self.job_id = job_id
 
     def load(self, fingerprint: str, total: int) -> tuple[dict[int, Any], str]:
+        """Read the saved Stage 3 chunk results. Return (results by chunk index, saved_at). Return an empty result when
+        the file is absent, belongs to another run (different fingerprint or chunk count), or cannot be read."""
         from pipeline.stage3_llm import LLMEnrichmentResult
 
         if not self.path.exists():
@@ -331,6 +341,8 @@ class FileCheckpoint:
             return {}, ""
 
     def save(self, fingerprint: str, total: int, results: dict[int, Any]) -> None:
+        """Write the Stage 3 chunk results to the checkpoint file, through a temporary file that is then renamed. A
+        failed write is logged and does not stop the stage."""
         from api.db import now_iso
 
         data = {
@@ -350,6 +362,7 @@ class FileCheckpoint:
             logger.warning(f"[Stage 3] Checkpoint save failed: {exc}")
 
     def clear(self) -> None:
+        """Delete the checkpoint file. A failure is logged and the file is left on disk."""
         try:
             self.path.unlink(missing_ok=True)
         except OSError as exc:
@@ -412,6 +425,16 @@ def chunk_size_for(doc_len: int) -> int:
     return 3000
 
 
+# The "Key techniques" line of build_doc_context(): only semantic TTPs at or above
+# this confidence are listed, the highest first, at most SUMMARY_TTP_TOP_N of them.
+# The line is part of the prompt given to every Stage 3 chunk call. No ADR or
+# commit message records why these values were chosen. 0.55 is the same number
+# as the confidence of Stage 2g alias lists (docs/pipeline.md) but is a separate
+# setting. It is not read from configuration.
+SUMMARY_TTP_MIN_CONFIDENCE = 0.55
+SUMMARY_TTP_TOP_N = 5
+
+
 def build_doc_context(gazetteer_entities: list, cyner_entities: list,
                       gliner_entities: list, semantic_ttp_entities: list) -> str:
     """A concise document-level entity summary passed to every LLM chunk call.
@@ -434,9 +457,10 @@ def build_doc_context(gazetteer_entities: list, cyner_entities: list,
         lines.append(f"Threat actors: {', '.join(actor_names)}")
 
     top_ttps = sorted(
-        [e for e in semantic_ttp_entities if e.mitre_id and e.confidence >= 0.55],
+        [e for e in semantic_ttp_entities
+         if e.mitre_id and e.confidence >= SUMMARY_TTP_MIN_CONFIDENCE],
         key=lambda x: x.confidence, reverse=True,
-    )[:5]
+    )[:SUMMARY_TTP_TOP_N]
     if top_ttps:
         lines.append(f"Key techniques: {', '.join(f'{e.value} ({e.mitre_id})' for e in top_ttps)}")
 

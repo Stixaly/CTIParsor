@@ -1,3 +1,12 @@
+"""Stage 2f: CVSS score and description for CVE identifiers, from the CIRCL CVE API.
+
+enrich_cves() answers from the database cache first (get_cached()), then fetches
+the missing identifiers from cve.circl.lu (_fetch_from_circl()), within
+_MAX_FETCH requests and _MAX_TOTAL_SECONDS, and stores the answers
+(save_to_cache()).  enrichment_enabled() is the switch, and is_valid_cve() checks
+the identifier's form before any request.
+"""
+
 # pipeline/stage2f_cve_enrichment.py
 from __future__ import annotations
 

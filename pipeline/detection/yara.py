@@ -1,3 +1,11 @@
+"""YARA rule corpus adapter (ADR-0015): parse rule files into DetectionRule objects.
+
+YaraAdapter reads .yar, .yara and .rule files.  Private rules are read but not
+counted, because they are helpers that cannot fire on their own.  The strings
+and the condition of each rule are read with regular expressions, and the
+ATT&CK technique IDs come from the meta keys listed in _TECHNIQUE_META_KEYS.
+"""
+
 from __future__ import annotations
 
 import hashlib

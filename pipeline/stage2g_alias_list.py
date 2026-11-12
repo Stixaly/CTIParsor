@@ -209,7 +209,9 @@ class AliasListStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """Always True: the alias lists are matched without a model."""
         return True
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the names found in alias constructions of the text, such as X (aka Y, Z)."""
         return extract_alias_list_entities(text)

@@ -1,3 +1,14 @@
+"""Stage 2: deterministic extraction with regular expressions and, when it loads, spaCy.
+
+extract_entities() refangs the text (refang()) and returns, as RawEntity values,
+the hashes, the network indicators (IP addresses, domains, URLs, emails), the
+CVE identifiers, the ATT&CK technique IDs, MAC addresses, AS numbers, file paths,
+bare file names and registry keys.  The spaCy named entities are added when the
+model is installed and SKIP_HEAVY_MODELS is off.  RegexExtractionStage wraps the
+function for the stage registry.  Patterns are compiled through
+pipeline.regex_safety.
+"""
+
 import ipaddress
 import re
 from collections.abc import Iterator
@@ -1083,7 +1094,9 @@ class RegexExtractionStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """Always True: the regular expressions need no model."""
         return True
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the entities of the text found by extract_entities()."""
         return extract_entities(text)
