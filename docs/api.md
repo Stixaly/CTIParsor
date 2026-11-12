@@ -583,3 +583,35 @@ decisions (ADR-0051, ADR-0052).
 | `POST` | `/api/overrides` | A hand-written rule (`term`, `entity_type`, `action`, optional `display`/`note`), active at once |
 | `PATCH` | `/api/overrides/{id}` | Set a row's `status` — activate a candidate, or ignore it so the next promotion run leaves it alone |
 | `DELETE` | `/api/overrides/{id}` | Remove a row |
+
+## Routes outside the OpenAPI schema
+
+Two routes are served outside `/api/`, so they are not in `contract/openapi.json`:
+
+- **`GET /`** is the web interface: the built frontend (`frontend/dist`) mounted at `/` in `api/main.py`.
+  It is not behind the API's sign-in check, and it is left out of the schema (`include_in_schema=False`).
+  When the frontend has not been built, the same route answers a short HTML page that says so.
+- **`GET /metrics`** is the Prometheus endpoint, text format 0.0.4 (`api/routes/metrics.py`). It has its own
+  rule, not a role: a loopback client gets the metrics, and so does any client that sends `METRICS_TOKEN` as a
+  bearer; any other client gets 403. The route is listed in [api-permissions.md](api-permissions.md) and set
+  up in [operations.md](operations.md#monitoring-and-alerts).
+
+## Internal errors and their answers
+
+The application raises these exceptions inside its modules. A route turns each one into the answer below;
+the docstring of each class says the same. The table is checked against the classes by
+`tests/test_error_docstrings.py`.
+
+| Exception | Raised when | Answer |
+|---|---|---|
+| `AuthError` (`api/auth/store.py`) | An account, password or token change is refused (bad username, role, password, token name or lifetime, unknown user) | 400 with the message (`api/routes/admin.py`); the admin CLI prints `refused: <message>` and exits 1 |
+| `UsernameTakenError` (`api/auth/store.py`) | The username of a new account is taken | 409 with the message (`POST /api/admin/users`) |
+| `LastAdminError` (`api/auth/store.py`) | A change would leave no enabled admin | 409 with the message (`PATCH /api/admin/users/{user_id}`) |
+| `AuthConfigError` (`api/auth/config.py`) | An authentication setting is refused | At start-up the process does not start. In the OIDC login and callback, 302 to `/login?error=config` |
+| `OidcError` (`api/auth/oidc.py`) | A sign-in is refused (`state`, `idp`, `token`, `disabled`, `no_role`, `account`, `busy`) | 302 to `/login?error=<code>`; the callback also clears the binding cookie |
+| `MigrationError` (`api/migrate.py`) | The database cannot be brought to this code's schema version | The process does not start (`api.db.init_db`); `python -m api.migrate up` prints `migration refused: <message>` and exits 1 |
+| `BaselineError` (`pipeline/baseline_stix.py`) | The baseline bundle cannot be used | 400 with the message in the baseline routes and at job intake; the worker marks the finalize failed with the message as the job's error |
+| `BundleInvalidError` (`api/worker.py`) | The rebuilt bundle fails the Stage 5 schemas | 409 on `POST` finalize with `{"validation": "invalid", "errors": [...]}`; the job is not completed and `GET` bundle answers 409 |
+| `FinalizeOvertaken` (`api/worker.py`) | Review decisions changed during every rebuild | 409 on `POST` finalize; finalize again once the review settles |
+| `CaptureError` (`pipeline/web_capture.py`) | A URL is invalid or a page cannot be captured | 400 for a URL refused at intake or in corpus settings; 502 when a capture fails |
+| `CaptureUnavailable` (`pipeline/web_capture.py`) | The browser cannot run on this server | 503 |

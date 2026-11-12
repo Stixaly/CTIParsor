@@ -27,15 +27,20 @@ _USERNAME_RE = compile_pattern(r"[a-z0-9][a-z0-9._@-]{0,63}")
 
 
 class AuthError(ValueError):
-    """A request to change accounts that is refused; the message is for the operator."""
+    """A request to change accounts or tokens that is refused: a bad username, role, password,
+    token name or lifetime, or an unknown user.  The message is for the operator.
+    The admin routes (api/routes/admin.py) answer 400 with it; the admin CLI (api/admin.py)
+    prints `refused: <message>` and exits 1.  The OIDC sign-in catches it to try another
+    username (api/auth/oidc.py)."""
 
 
 class UsernameTakenError(AuthError):
-    """An account with that username exists."""
+    """The username of a new account is taken.  POST /api/admin/users answers 409 with the message."""
 
 
 class LastAdminError(AuthError):
-    """The change would leave no enabled admin."""
+    """A role or disabled change that would leave no enabled admin.  PATCH /api/admin/users/{user_id}
+    answers 409 with the message; the admin CLI prints it as `refused` (exit 1)."""
 
 
 @dataclass(frozen=True)
