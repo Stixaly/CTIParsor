@@ -195,6 +195,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
     ("48ae014", "2026-11-08",
      "The Anthropic defaults move to claude-sonnet-5-5 (text) and claude-haiku-5-5 (figures)",
      "extraction"),
+    ("61b2c02", "2026-11-12",
+     "Stage 2d (CyNER) is off by default: malware and threat actors that only CyNER proposed "
+     "no longer ship unless CYNER_ENABLED=true (ADR-0099)",
+     "extraction"),
 )
 
 

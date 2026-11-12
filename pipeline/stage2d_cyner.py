@@ -355,7 +355,7 @@ def _load_pipeline():
             logger.warning(
                 f"CyNER model '{_MODEL_ID}' is not accessible on HuggingFace Hub "
                 f"(private, gated, or removed). "
-                f"Stage 2e (GLiNER) covers the same entity types as a fallback.\n"
+                f"The run goes on without Stage 2d.\n"
                 f"To turn CyNER off and silence this warning, set in your .env:\n"
                 f"  CYNER_ENABLED=false"
             )
