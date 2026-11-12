@@ -77,6 +77,11 @@ jobs:
       - name: Licences (reuse lint)
         run: reuse lint
 
+      # Every relative link in the tracked Markdown resolves (scripts/check_doc_links.py,
+      # make check-docs); a dead link or a missing heading fails this step.
+      - name: Doc links (relative links in the Markdown resolve)
+        run: python scripts/check_doc_links.py
+
       # Blocking since the tree reached zero errors (2026-09-27); mypy is pinned
       # in requirements/requirements-dev.txt so a new release cannot fail this on its own.
       - name: Type check (mypy)

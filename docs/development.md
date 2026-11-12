@@ -35,7 +35,7 @@ be on the host besides Docker.
 | `make run` | Run pipeline on `tests/fixtures/sample_report.txt` |
 | `make run-dir` | Run pipeline on every file in `input/` |
 | `make check` | Diagnostic: list which pipeline stages are available |
-| `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`) |
+| `make check-docs` | Verify every number claimed in the README and `docs/pipeline.md` against the source of truth (CI runs the same check through `tests/test_doc_claims.py`), then check that every relative link in the tracked Markdown resolves to a tracked file and every `#anchor` to a heading of its target (`scripts/check_doc_links.py`; CI runs the link check as a step of the fast-tests job). Links into the local `data/` corpora are accepted only from `docs/gazetteer-ordinary-words.md`, which the policy hash does not let us edit |
 | `make contract` | Record the stable contract of `docs/support-policy.md` in `contract/*.json`; refuses a breaking change unless `ACCEPT_BREAKING=1` (`scripts/contract.py`, ADR-0094 item 1). CI checks it through `tests/test_contract.py` |
 | `make audit` | Scan Python + npm deps for known CVEs (`pip-audit` + `npm audit`), no image build needed |
 | `make lock` | Resolve `requirements/requirements*.txt` into the hashed locks the image, CI and the audit install with `pip install --require-hashes` (`scripts/lock.sh`, ADR-0080) |
@@ -261,6 +261,7 @@ CTIParsor/
 │   │  ── checks and diagnostics ──
 │   ├── check_stages.py            # Diagnostic: which stages are available (make check)
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
+│   ├── check_doc_links.py         # Relative links and heading anchors in the tracked Markdown resolve (make check-docs, CI)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
 │   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
 │   ├── check_backup_restore.py    # A backup restores into an empty install with every row and file (ADR-0094 item 3)
