@@ -11,6 +11,11 @@
         "backup"
       ]
     },
+    "compose service backup-init": {
+      "profiles": [
+        "backup"
+      ]
+    },
     "compose service bootstrap": {
       "profiles": [
         "bootstrap"
