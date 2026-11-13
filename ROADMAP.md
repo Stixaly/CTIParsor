@@ -55,7 +55,8 @@ ADR-0094 are done: a contract snapshot, the migration from the last release,
 backup and restore, the browser journey, the in-house gold set, the
 measurement of the exported bundle, the worker status, the OpenCTI import of
 the candidate, the clean install from the published image, a freeze with real
-use, a recorded run with the default provider, figure reading on by
+use, a recorded run of the qualified LLM configuration (a local vLLM,
+[ADR-0100](docs/adr/0100-a-local-vllm-is-the-1-0-llm-configuration.md)), figure reading on by
 default, and a run's record of the models it actually loaded (item 13, added
 2026-11-08). The state of each, what it
 proves and what it does not cover are in the ADR's
@@ -76,9 +77,11 @@ release candidate.
 Supported, with evidence still missing, as the capability matrix says:
 
 - IoC extraction and relationships, against a gold set: items 5 and 6.
-- The `anthropic` provider, a recorded run: item 11.
+- The qualified LLM configuration (a local vLLM, [ADR-0100](docs/adr/0100-a-local-vllm-is-the-1-0-llm-configuration.md)),
+  a recorded run with figure reading on: gate `default_provider_measured`.
+  The `anthropic` provider stays supported and is not qualified for 1.0.
 - Figure reading (Stage 1f), on by default with the provider chosen for the
-  text: measured with the default provider, item 11.
+  text: not yet measured with the qualified configuration, figures on (ADR-0100).
 
 ## After 1.0
 

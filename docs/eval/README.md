@@ -246,36 +246,51 @@ Reading a 19.2 / 20.0 comparison on this gold:
 * The paired comparison of the two tracks on dev, and how its difference splits:
   [attack-v20-2026-10.md](attack-v20-2026-10.md).
 
-## Measuring the default provider (ADR-0094 item 11)
+## Measuring the qualified configuration (ADR-0100, gate `default_provider_measured`)
 
-Decision 13 needs one recorded measure of `anthropic`, the default
-`LLM_PROVIDER`: two runs at `LLM_TEMPERATURE=0` on AnnoCTR test and two on the
-in-house set, with the spread between the two runs of each set published.
-`scripts/measure_default_provider.py` runs the four and writes the summary.
+The 1.0 qualified LLM configuration is a local vLLM serving
+`Inferact/Qwen3.8-27B-NVFP4`, for the text and the figures
+([ADR-0100](../adr/0100-a-local-vllm-is-the-1-0-llm-configuration.md), which
+amends ADR-0094 decision 13 and item 11). The gate `default_provider_measured`
+needs one recorded measure of it, with figure reading on: two runs at
+`LLM_TEMPERATURE=0` and `LLM_SEED=13` on AnnoCTR test and two on the in-house
+set, with the spread between the two runs of each set published.
+`scripts/measure_default_provider.py` runs the four and writes the summary. Its
+default, `--provider vllm`, is this configuration; `--provider anthropic` runs
+the billed option instead, which is supported and not qualified.
 
 ```bash
 python scripts/measure_default_provider.py --dry-run     # the checks, then the commands; runs nothing
 python scripts/measure_default_provider.py               # the four runs, their scores, the spreads
-python scripts/measure_default_provider.py --estimate default-provider-inhouse-1 \
+python scripts/measure_default_provider.py --estimate qualified-vllm-inhouse-1 --provider anthropic \
     --price-in <USD per million input tokens> --price-out <USD per million output tokens>
 ```
 
-* **It is billed.** Every LLM request of the four runs goes to Anthropic. The
-  script refuses to start unless `ANTHROPIC_API_KEY` is set, `LLM_PROVIDER` is
-  `anthropic` (or unset), `LLM_TEMPERATURE` is `0`, `VISION_PROVIDER` does not
-  turn figure reading off, `ANTHROPIC_MODEL` is the default, and none of the four
-  run names exists yet. The `.env` values count as the environment does for
-  `python -m evaluation`.
-* **AnnoCTR test is read once for this decision** (ADR-0060). A second
-  measurement on test is a new decision, not a repetition.
-* **Figure reading is on**: the in-house runs read the figures of each report
-  with the text's provider (ADR-0094 item 12).
+* **The vLLM run is not billed.** The script refuses to start unless
+  `LLM_PROVIDER=vllm`, `VLLM_BASE_URL` is set, `VLLM_MODEL` is
+  `Inferact/Qwen3.8-27B-NVFP4`, `VLLM_ENABLE_THINKING=false`, `LLM_TIMEOUT=600`,
+  `LLM_SEED=13`, `LLM_TEMPERATURE=0`, `VISION_PROVIDER` is `vllm` or `auto` (the
+  script sets `vllm`), and none of the four run names exists yet. Its runs are
+  named `qualified-vllm-*`. The summary records `llm_seed` and `billed: false`.
+* **The anthropic option is billed.** `--provider anthropic` refuses to start
+  unless `ANTHROPIC_API_KEY` is set, `LLM_PROVIDER` is `anthropic` (or unset),
+  `LLM_TEMPERATURE` is `0`, `VISION_PROVIDER` does not turn figure reading off,
+  and `ANTHROPIC_MODEL` is the default. Its runs are named `default-provider-*`.
+  Every LLM request of its four runs goes to Anthropic. Anthropic takes no seed.
+* **AnnoCTR test is read once per decision** (ADR-0060). A second measurement on
+  test is a new decision, not a repetition; the October runs read it with the
+  vLLM server.
+* **Figure reading is on** in the qualified configuration: the in-house runs read
+  the figures of each report with the same vLLM server (`VISION_PROVIDER=vllm`).
+  The figures-off runs of 2026-11-08 to 2026-11-10 do not satisfy the gate
+  ([inhouse-bundle-2026-11.md](inhouse-bundle-2026-11.md)).
 * **`--estimate NAME`** reads a run already made and counts its LLM requests and
   the characters of each report. The records do not store tokens, so input
   tokens are estimated at 4 characters a token (approximate, the prompt template
   per call is not counted). Output tokens are not recorded: they are estimated
   only with `--out-tokens-per-call`. Prices are arguments; none is written in the
-  code.
+  code. A cost is estimated for `--provider anthropic` only: a vLLM run is not
+  billed, and the estimate says so.
 * **A failed step stops the script** and writes no summary. The script has no
   resume mode: the run directories already written keep their files, so finish
   the remaining commands of the dry run by hand, then read the scores as above.

@@ -85,6 +85,32 @@ the worker (`restart: unless-stopped`), not `bootstrap`:
 
 Set `LLM_PROVIDER` to choose your backend.
 
+### Qualified for 1.0
+
+The LLM configuration qualified for 1.0 is a local vLLM serving
+`Inferact/Qwen3.8-27B-NVFP4`, for the text and for the figures
+([ADR-0100](adr/0100-a-local-vllm-is-the-1-0-llm-configuration.md)):
+```env
+LLM_PROVIDER=vllm
+VLLM_BASE_URL=http://<server>:8000
+VLLM_MODEL=Inferact/Qwen3.8-27B-NVFP4
+VLLM_ENABLE_THINKING=false
+LLM_TIMEOUT=600
+LLM_TEMPERATURE=0
+LLM_SEED=13
+VISION_PROVIDER=vllm
+```
+`LLM_TEMPERATURE` and `LLM_SEED` are the sampling of the recorded runs; the seed
+reaches vLLM only. `LLM_TIMEOUT=600` allows a local model's long answers
+(`.env.example`, section 1). A server named by a host name, rather than by an
+address, must also be listed in `LLM_LOCAL_HOSTS`, or its provider counts as
+external and an AMBER report is refused ([egress policy](#egress-policy-tlp)).
+
+What this qualifies is this server and model, with thinking off. The figures
+of this configuration are not yet measured: the gate `default_provider_measured`
+([1.0 readiness](releases/1.0-readiness.md)) is pending. Anthropic remains
+supported as an option; it is not qualified for 1.0.
+
 ### Anthropic (default)
 ```env
 LLM_PROVIDER=anthropic
@@ -154,7 +180,7 @@ Ollama 0.40.8 handles one request at a time by default (`OLLAMA_NUM_PARALLEL`, m
 
 The bundled service reserves no GPU. The commented `deploy.resources.reservations.devices` block in `compose.yaml` enables one and needs the NVIDIA container toolkit; on an air-gapped host, the driver and that toolkit must be installed from offline packages too.
 
-`.env.example` recommends `mistral-nemo` over `mistral` for JSON adherence. The pipeline's quality was measured with Anthropic models and with Qwen3.8-27B on vLLM only, so evaluate the model you choose on your own reports ([docs/eval/](eval/)).
+`.env.example` recommends `mistral-nemo` over `mistral` for JSON adherence. The pipeline's quality was measured with Qwen3.8-27B on vLLM only, so evaluate the model you choose on your own reports ([docs/eval/](eval/)).
 
 `--with-llm=MODEL[,MODEL...]` on the packager bundles several models: the first is the text model, and a vision-capable one can serve Stage 1f. `setup.sh --offline` then prints the `VISION_PROVIDER` and `VISION_MODEL` lines to set.
 
