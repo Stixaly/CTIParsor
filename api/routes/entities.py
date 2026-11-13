@@ -11,7 +11,7 @@ from api.response_models.entities import (
     EntityDeleted,
     EntityOut,
 )
-from api.routes._common import require_job, storable_text
+from api.routes._common import renew_retention, require_job, storable_text
 from models.schemas import EntityType
 from pipeline import baseline_stix, decisions
 
@@ -115,12 +115,13 @@ def create_entity(job_id: str, body: EntityCreate):
     eid = str(uuid4())
     with _lock:
         with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (eid, job_id, body.value, body.entity_type, body.context, body.confidence, body.mitre_id, "manual"),
-            )
-            conn.commit()
+            with transaction(conn):
+                conn.execute(
+                    "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (eid, job_id, body.value, body.entity_type, body.context, body.confidence, body.mitre_id, "manual"),
+                )
+                renew_retention(conn, job_id)
     return {"id": eid, "job_id": job_id, "value": body.value, "entity_type": body.entity_type,
             "context": body.context, "confidence": body.confidence, "mitre_id": body.mitre_id,
             "accepted": None, "source": "manual", "decision_origin": None, "control_sample": False,
@@ -194,6 +195,7 @@ def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
                     )
                     if decided == 0:
                         raise HTTPException(404, "Entity not found or was deleted")
+                renew_retention(conn, job_id)
             updated = conn.execute(
                 "SELECT * FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
             ).fetchone()
@@ -209,10 +211,13 @@ def accept_all_pending(job_id: str):
         require_job(conn, job_id)
     with _lock:
         with get_conn() as conn:
-            accepted = decisions.record(
-                conn, "entity", "job_id=? AND accepted IS NULL AND held_reason IS NULL", (job_id,),
-                accepted=True, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
-            )
+            with transaction(conn):
+                accepted = decisions.record(
+                    conn, "entity", "job_id=? AND accepted IS NULL AND held_reason IS NULL", (job_id,),
+                    accepted=True, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
+                )
+                if accepted:
+                    renew_retention(conn, job_id)
     return {"accepted": accepted}
 
 
@@ -264,11 +269,14 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
 
     with _lock:
         with get_conn() as conn:
-            updated = decisions.record(
-                conn, "entity", f"job_id=? AND entity_type=? {scope_clause}",
-                (job_id, body.entity_type),
-                accepted=accepted_val, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
-            )
+            with transaction(conn):
+                updated = decisions.record(
+                    conn, "entity", f"job_id=? AND entity_type=? {scope_clause}",
+                    (job_id, body.entity_type),
+                    accepted=accepted_val, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
+                )
+                if updated:
+                    renew_retention(conn, job_id)
 
     return {
         "updated":     updated,
@@ -288,10 +296,11 @@ def delete_entity(job_id: str, entity_id: str):
             ).fetchone()
             if row and row["enrichment_status"] in baseline_stix.IMPORTED:
                 raise HTTPException(409, "row from the analyst's STIX bundle: reject it instead")
-            result = conn.execute(
-                "DELETE FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
-            )
-            conn.commit()
-            if result.rowcount == 0:
-                raise HTTPException(404, "Entity not found")
+            with transaction(conn):
+                result = conn.execute(
+                    "DELETE FROM entities WHERE id=? AND job_id=?", (entity_id, job_id)
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(404, "Entity not found")
+                renew_retention(conn, job_id)
     return {"deleted": entity_id}

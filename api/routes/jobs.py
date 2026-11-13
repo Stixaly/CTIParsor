@@ -410,21 +410,24 @@ def _delete_job(job_id: str) -> bool:
     same cleanup — a second copy of this would drift the moment one of them
     gained a new output file type.
 
-    Under the sweep (`_sweep_cutoff` set) a job that is queued, processing or
-    was updated after the cutoff is kept, and so is one that changes between
-    the read below and the DELETE: the sweep's list is only a choice of
-    candidates, the DELETE decides.  Returns False then, not 409.
+    Under the sweep (`_sweep_cutoff` set) a job that is queued, processing, was
+    updated after the cutoff, or had a human decision after it (`activity_at`,
+    #723) is kept, and so is one that changes between the read below and the
+    DELETE: the sweep's list is only a choice of candidates, the DELETE decides.
+    Returns False then, not 409.
     """
     cutoff = _sweep_cutoff.get()
     with _lock:
         with get_conn() as conn:
             # Fetch original_filename BEFORE deleting — needed to locate output files
             row = conn.execute(
-                "SELECT id, original_filename, status, updated_at FROM jobs WHERE id=?", (job_id,)
+                "SELECT id, original_filename, status, updated_at, activity_at FROM jobs WHERE id=?", (job_id,)
             ).fetchone()
             if not row:
                 return False
-            if cutoff is not None and (row["status"] in ("queued", "processing") or row["updated_at"] >= cutoff):
+            if cutoff is not None and (row["status"] in ("queued", "processing")
+                                       or row["updated_at"] >= cutoff
+                                       or (row["activity_at"] or "") >= cutoff):
                 return False
             if row["status"] == "processing":
                 # Deleting a running job would orphan the worker's writes
@@ -449,7 +452,8 @@ def _delete_job(job_id: str) -> bool:
                     conn.execute("DELETE FROM job_baselines WHERE job_id=?", (job_id,))
                     # The status test is part of the DELETE: a worker may claim
                     # the job between the SELECT above and here.  Under the sweep
-                    # the expiry is tested here too, for the same reason (#488).
+                    # the expiry is tested here too, for the same reason (#488), on both clocks:
+                    # a decision committed since the read above renews `activity_at` (#723).
                     # 0 rows rolls the children back with it.
                     if cutoff is None:
                         cur = conn.execute(
@@ -458,7 +462,8 @@ def _delete_job(job_id: str) -> bool:
                     else:
                         cur = conn.execute(
                             "DELETE FROM jobs WHERE id=? AND status NOT IN ('queued','processing') "
-                            "AND updated_at < ?", (job_id, cutoff),
+                            "AND updated_at < ? AND (activity_at IS NULL OR activity_at < ?)",
+                            (job_id, cutoff, cutoff),
                         )
                     if cur.rowcount == 0:
                         raise _NotDeleted
@@ -493,10 +498,12 @@ def delete_job(job_id: str, user: User | None = Depends(current_user)):
 
 
 def sweep_expired_jobs(retention_days: int | None = None) -> int:
-    """Delete every job whose last update is older than the retention window.
+    """Delete every job that has been idle for longer than the retention window.
 
-    Called periodically by the queue loop (api/queue_loop.py), never by a
-    request handler. `queued`/`processing` jobs are excluded regardless of
+    A job is idle when its last update (`updated_at`) and its last human decision
+    or edit (`activity_at`, #723; NULL when none is known) are both older than
+    the window.  Called periodically by the queue loop (api/queue_loop.py), never
+    by a request handler. `queued`/`processing` jobs are excluded regardless of
     age — they are active work, not abandoned output — everything else
     (`uploaded`, `for_review`, `completed`, `failed`) is eligible once stale,
     since a row stuck at `uploaded` past the window is itself an anomaly worth
@@ -515,8 +522,8 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
             ids = [
                 r[0] for r in conn.execute(
                     "SELECT id FROM jobs WHERE status NOT IN ('queued','processing') "
-                    "AND updated_at < ?",
-                    (cutoff,),
+                    "AND updated_at < ? AND (activity_at IS NULL OR activity_at < ?)",
+                    (cutoff, cutoff),
                 ).fetchall()
             ]
     except Exception as exc:

@@ -10,7 +10,7 @@ from api.response_models.relationships import (
     RelationshipDeleted,
     RelationshipOut,
 )
-from api.routes._common import require_job, storable_text
+from api.routes._common import renew_retention, require_job, storable_text
 from models.schemas import STIX_RELATIONSHIP_TYPES
 from pipeline import baseline_stix, decisions
 from pipeline.temporal import (
@@ -237,6 +237,7 @@ def create_relationship(job_id: str, body: RelCreate):
                     "VALUES (?,?,?,?,?,?,?)",
                     (job_id, "relationship", rid, None, 1, decisions.HUMAN, now),
                 )
+                renew_retention(conn, job_id)
     _shown_start, _shown_stop = display_bounds(_times)
     return {
         "id": rid, "job_id": job_id, **body.model_dump(), "evidence_label": _label,
@@ -274,10 +275,13 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
     held = " AND (held_reason IS NULL OR accepted IS NOT NULL)" if body.action == "accept" else ""
     with _lock:
         with get_conn() as conn:
-            updated = decisions.record(
-                conn, "relationship", f"job_id=? AND id IN ({placeholders}){held}", (job_id, *ids),
-                accepted=accepted, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
-            )
+            with transaction(conn):
+                updated = decisions.record(
+                    conn, "relationship", f"job_id=? AND id IN ({placeholders}){held}", (job_id, *ids),
+                    accepted=accepted, origin=decisions.HUMAN_BULK, decided_at=now_iso(),
+                )
+                if updated:
+                    renew_retention(conn, job_id)
     return {"updated": updated, "action": body.action}
 
 
@@ -415,6 +419,7 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
                     )
                     if decided == 0:
                         raise HTTPException(404, "Relationship not found")
+                renew_retention(conn, job_id)
             updated = conn.execute(
                 "SELECT * FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
             ).fetchone()
@@ -432,10 +437,11 @@ def delete_relationship(job_id: str, rel_id: str):
             ).fetchone()
             if row and row["enrichment_status"] in baseline_stix.IMPORTED:
                 raise HTTPException(409, "row from the analyst's STIX bundle: reject it instead")
-            result = conn.execute(
-                "DELETE FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
-            )
-            conn.commit()
-            if result.rowcount == 0:
-                raise HTTPException(404, "Relationship not found")
+            with transaction(conn):
+                result = conn.execute(
+                    "DELETE FROM relationships WHERE id=? AND job_id=?", (rel_id, job_id)
+                )
+                if result.rowcount == 0:
+                    raise HTTPException(404, "Relationship not found")
+                renew_retention(conn, job_id)
     return {"deleted": rel_id}
