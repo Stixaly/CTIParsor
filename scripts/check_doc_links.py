@@ -48,6 +48,10 @@ LOCAL_DATA_ALLOWED = {
 # reaches them: they are untracked or ignored. `data` is skipped only at the
 # root (the local corpora); pipeline/data/ is tracked and is walked.
 SKIP_DIRS = {".git", ".venv", "node_modules", ".secrets", "__pycache__"}
+#: Markdown kept as test data, not documentation: copies of the repository's files as they
+#: stood at a recorded date (tests/fixtures/release_dossier/repo/SECURITY.md), whose relative
+#: links point at files beside the original, not beside the copy.
+DATA_PREFIXES = ("tests/fixtures/",)
 ROOT_ONLY_SKIP_DIRS = {"data"}
 
 FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
@@ -204,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     links = 0
     broken: list[str] = []
     for name in sorted(tracked):
-        if not name.endswith(".md") or not (root / name).is_file():
+        if not name.endswith(".md") or name.startswith(DATA_PREFIXES) or not (root / name).is_file():
             continue
         files += 1
         text = (root / name).read_text(encoding="utf-8", errors="replace")
