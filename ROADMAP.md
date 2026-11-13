@@ -39,7 +39,7 @@ It is for one analyst, on a self-hosted Docker Compose install, who reviews the
 extractions before exporting them
 ([who 1.0 is for](docs/support-policy.md#who-10-is-for)). That changes if
 [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) is accepted
-(proposed on 2026-11-08): 1.0 would be one install shared by one team, behind
+(accepted on 2026-11-08): 1.0 is one install shared by one team, behind
 authentication, with roles. It certifies no level
 of precision ([what it does not promise](docs/support-policy.md#what-10-does-not-promise)).
 The [capability matrix](docs/support-policy.md#capability-matrix) marks each
@@ -61,14 +61,16 @@ default, and a run's record of the models it actually loaded (item 13, added
 proves and what it does not cover are in the ADR's
 [action plan](docs/adr/0094-what-1-0-promises.md#action-plan).
 
-If [ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) is
-accepted, the tag also waits for its work items 14 to 24, none started:
-authentication and roles, sessions and tokens, the egress policy by TLP, the
-audit, metrics and alert rules, scheduled backups, bounds on the job list and
-on requeues, the false backup log, response models, a load and failure recipe,
-and an end-to-end journey with the real models. The
+[ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) also adds
+work items 14 to 24, and the tag waits for them: authentication and roles,
+sessions and tokens, the egress policy by TLP, the audit, metrics and alert
+rules, scheduled backups, bounds on the job list and on requeues, the false
+backup log, response models, a load and failure recipe, and an end-to-end
+journey with the real models. Their code is on `main`. Their qualification is
+not finished: the [capabilities section](docs/support-policy.md#capabilities-implemented-qualified-limits)
+says, for each, what has been shown and what is still open.
 
-[readiness checklist](docs/releases/1.0-readiness.md) records each gate on the
+The [readiness checklist](docs/releases/1.0-readiness.md) records each gate on the
 release candidate.
 
 Supported, with evidence still missing, as the capability matrix says:
