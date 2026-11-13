@@ -640,6 +640,13 @@ def spec(stage4: Path = STAGE4) -> dict[str, list[dict[str, Any]]]:
             {"worker_id": "worker-1:7:a1b2c3", "role": "worker", "max_concurrent": 1, "app_version": "0.2.0",
              "started_at": _t(25, "07:58:00.000000"), "heartbeat_at": _t(25, "09:31:30.000000")},
         ],
+        # A deleted job's bundle that the filesystem refused to remove (version 22, #724): the row
+        # names the file, and the next pass retries it.
+        "job_file_cleanups": [
+            {"job_id": "job-deleted-1", "path": "/var/lib/ctiparsor/output/deleted_report_job-deleted-1_bundle.json",
+             "attempts": 2, "last_error": "[Errno 13] Permission denied",
+             "created_at": _t(26, "09:10:00.000000"), "updated_at": _t(26, "09:12:00.000000")},
+        ],
     }
 
 

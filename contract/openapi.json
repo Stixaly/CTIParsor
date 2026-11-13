@@ -75,6 +75,13 @@
         "string"
       ]
     },
+    "DELETE /api/jobs/{} response:200.files_pending": {
+      "required": false,
+      "types": [
+        "integer",
+        "null"
+      ]
+    },
     "DELETE /api/jobs/{} response:403": {
       "media": []
     },

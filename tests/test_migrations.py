@@ -247,7 +247,7 @@ def test_version_14_adds_an_empty_worker_table_and_leaves_a_running_job_with_its
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [14, 15, 16, 17, 18, 19, 20] and report.recognised == list(range(1, 14))
+    assert report.applied == list(range(14, history.latest_version() + 1)) and report.recognised == list(range(1, 14))
     assert conn.execute("SELECT COUNT(*) AS n FROM worker_heartbeats").fetchone()["n"] == 0
     job = conn.execute("SELECT status, worker_id, heartbeat_at FROM jobs").fetchone()
     assert tuple(job) == ("processing", "old-worker:7:a1b2c3", "t")   # the previous revision's worker keeps it
@@ -267,7 +267,7 @@ def test_version_15_adds_a_nullable_column_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [15, 16, 17, 18, 19, 20] and report.recognised == list(range(1, 15))
+    assert report.applied == list(range(15, history.latest_version() + 1)) and report.recognised == list(range(1, 15))
     assert conn.execute("SELECT resolved_types_json FROM jobs").fetchone()["resolved_types_json"] is None
     conn.execute("UPDATE jobs SET resolved_types_json='[]' WHERE id='j1'")
     for statement in history.load()[14].statements:                   # run again: nothing breaks, nothing is lost
@@ -284,7 +284,7 @@ def test_version_16_marks_the_inherited_techniques_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [16, 17, 18, 19, 20] and report.recognised == list(range(1, 16))
+    assert report.applied == list(range(16, history.latest_version() + 1)) and report.recognised == list(range(1, 16))
     assert conn.execute("SELECT propagated FROM rule_techniques").fetchone()["propagated"] == 0   # an old row: its own
     conn.execute("UPDATE rule_techniques SET propagated=1")
     for statement in history.load()[15].statements:                   # run again: nothing breaks, nothing is lost
@@ -302,7 +302,7 @@ def test_version_18_adds_the_account_tables_and_a_nullable_owner_and_is_idempote
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [18, 19, 20] and report.recognised == list(range(1, 18))
+    assert report.applied == list(range(18, history.latest_version() + 1)) and report.recognised == list(range(1, 18))
     for table in ("users", "sessions", "api_tokens", "login_failures"):
         assert conn.execute(f"SELECT COUNT(*) AS n FROM {table}").fetchone()["n"] == 0
     owner = conn.execute("SELECT imported_by FROM jobs").fetchone()["imported_by"]
@@ -338,7 +338,7 @@ def test_version_20_adds_the_audit_table_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [20] and report.recognised == list(range(1, 20))
+    assert report.applied == list(range(20, history.latest_version() + 1)) and report.recognised == list(range(1, 20))
     assert conn.execute("SELECT COUNT(*) AS n FROM audit_events").fetchone()["n"] == 0
     conn.execute("INSERT INTO audit_events (at, auth, route, outcome) VALUES ('t','none','/api/x','refused')")
     with pytest.raises(Exception, match="audit_events_outcome_check"):
@@ -360,7 +360,7 @@ def test_version_17_adds_the_attempts_counter_at_zero_and_is_idempotent(schema):
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [17, 18, 19, 20] and report.recognised == list(range(1, 17))
+    assert report.applied == list(range(17, history.latest_version() + 1)) and report.recognised == list(range(1, 17))
     assert conn.execute("SELECT attempts FROM jobs").fetchone()["attempts"] == 0   # an old job: a full allowance
     conn.execute("UPDATE jobs SET attempts=2 WHERE id='j1'")
     for statement in history.load()[16].statements:                   # run again: nothing breaks, nothing is lost
@@ -499,7 +499,7 @@ def test_version_19_adds_the_pending_oidc_requests_table_and_is_idempotent(schem
 
     report = migrate.upgrade(conn)
 
-    assert report.applied == [19, 20] and report.recognised == list(range(1, 19))
+    assert report.applied == list(range(19, history.latest_version() + 1)) and report.recognised == list(range(1, 19))
     conn.execute("INSERT INTO oidc_logins (state_hash, nonce, code_verifier, next_path, binding_hash, "
                  "created_at, expires_at) VALUES ('h','n','v','/','b','t','t')")
     with pytest.raises(Exception, match="oidc_logins_pkey"):

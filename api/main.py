@@ -102,6 +102,9 @@ async def lifespan(app: FastAPI):
     init_db()
     uploads_dir().mkdir(parents=True, exist_ok=True)
     output_dir().mkdir(parents=True, exist_ok=True)
+    # The files of deleted jobs that an earlier run could not remove are retried first (#724).
+    from api.routes.jobs import retry_pending_cleanups
+    retry_pending_cleanups()
     # Who runs the pipeline depends on CTIPARSOR_ROLE (ADR-0046).  `all`, the
     # host-install default: this process, through the queue loop in a background
     # thread — and a job left `processing` at boot is an orphan of a restart,

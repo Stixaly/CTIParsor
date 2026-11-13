@@ -148,6 +148,17 @@ file is missing".
 - Nothing is deleted by default. Deleting a report deletes its rows and files;
   `JOB_RETENTION_DAYS` (0 = never) deletes the finished reports older than N
   days ([configuration.md](configuration.md)).
+- A deleted report's rows go first. A file the filesystem refuses to remove (a
+  permission, a locked file, a volume that is not mounted) stays on disk, and
+  its path is kept in the table `job_file_cleanups` (version 22) until it is
+  removed. The removal is retried at each start of the API and of a worker, on
+  each retention sweep (hourly by default), and by a `DELETE` of the same report
+  id. The `DELETE` answer then carries `files_pending`, the number of files
+  still waiting. To see them:
+  `SELECT job_id, path, attempts, last_error FROM job_file_cleanups;`. A row
+  whose `attempts` keeps rising is a file the API process cannot remove: check
+  its owner and mode on the state volume. A row is dropped without removing its
+  file when its path is not directly in `uploads/`, `uploads/meta/` or `output/`.
 - The container logs are capped: 5 files of 50 MB for each `app` and `worker`
   container, 3 of 20 MB for `postgres`.
 - After a few rebuilds the BuildKit cache is the largest item;
@@ -222,6 +233,7 @@ The examples are the messages as the code writes them; `<...>` stands for a valu
 | `[admin]` | `api/routes/admin.py` | Each account and token change made through the admin routes: who did it and what changed. The password is never logged. | `[admin] <actor> created the <role> account <name>` | A change nobody on the team made. |
 | `[audit]` | `api/audit.py` | Failures of the audit trail: a record that could not be written, or the retention that could not be applied. | `[audit] could not write an audit row (<error type>); the answer to the request is not changed` | Any line. Requests answered while it fails are not in the audit trail (see [Audit trail](#audit-trail)). |
 | `[retention]` | `api/routes/jobs.py` | The sweep that deletes finished jobs older than the retention period: how many it deleted, and the jobs it could not delete. | `[retention] swept <n> job(s) older than <d>d` | A `failed to delete job` error: that job was not deleted, and its files still use disk space ([Disk](#disk)). |
+| `[cleanup]` | `api/routes/jobs.py` | The removal of the files of deleted reports: a file that could not be removed (its attempt number and the error), a path dropped because it is outside the job directories, and a warning with how many files still wait ([Disk](#disk)). | `[cleanup] could not remove <path> of job <id> (attempt <n>): <error>` | Any `could not remove` line that repeats for the same path: the file stays on disk and its row stays in `job_file_cleanups`. A `pass stopped` error: the store or the filesystem failed during the retry, and the next pass runs it again. |
 | `[baseline]` | `api/baseline_store.py` | STIX objects of an uploaded baseline that are dropped as invalid, so they are not used for enrichment. | `[baseline] job <id>: dropped invalid STIX object <id> (<reason>): ...` | Many drops for one job: its enrichment is built from less than was uploaded. |
 | `[db]` | `api/migrate.py`, `api/db_identity.py` | Schema migrations applied at start, and the record of which PostgreSQL cluster the database is on (`db-identity.json` in the state directory). | `[db] schema version <n> applied: <name> (<ms> ms)` | A `could not record` warning: the cluster record was not written, so a later start cannot compare against it. The migration lines are normal. |
 | `[health]` | `api/main.py` | `GET /api/health` found the job store unreachable, and answers 503. | `[health] job store unreachable: <error>` | Always: the Docker health check fails. Check the `postgres` service ([Health](#health)). |

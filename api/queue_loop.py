@@ -595,6 +595,9 @@ def main(argv: list[str] | None = None) -> int:
     # first migrates, the others wait and find nothing left to do.
     from api.db import init_db
     init_db()
+    # The files of deleted jobs that a previous run could not remove (#724).
+    from api.routes.jobs import retry_pending_cleanups
+    retry_pending_cleanups()
 
     logger.info(
         f"[queue] worker {WORKER_ID} starting: max_concurrent={args.max_concurrent}, "
