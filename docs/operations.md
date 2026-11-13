@@ -146,8 +146,9 @@ file is missing".
 | `cti-cache` | the models (2.6 GB) and corpora (0.2 GB) `bootstrap` downloads; it grows when they are downloaded again | `docker system df -v` |
 
 - Nothing is deleted by default. Deleting a report deletes its rows and files;
-  `JOB_RETENTION_DAYS` (0 = never) deletes the finished reports older than N
-  days ([configuration.md](configuration.md)).
+  `JOB_RETENTION_DAYS` (0 = never) deletes the finished reports idle for more
+  than N days ([configuration.md](configuration.md),
+  [what counts as activity](#what-counts-as-activity)).
 - A deleted report's rows go first. A file the filesystem refuses to remove (a
   permission, a locked file, a volume that is not mounted) stays on disk, and
   its path is kept in the table `job_file_cleanups` (version 22) until it is
@@ -165,6 +166,39 @@ file is missing".
   `docker builder prune` reclaims it ([docker.md](docker.md)).
 - No route reports the free space. Watch the filesystem of Docker's data
   directory (`docker info --format '{{.DockerRootDir}}'`, then `df -h` on it).
+
+### What counts as activity
+
+The retention sweep (`JOB_RETENTION_DAYS`) deletes a finished report only when
+both of its clocks are older than the window:
+
+- `updated_at`, the last change the worker or a request made to the report
+  (a run ending, a bundle built, a status change);
+- `activity_at`, the last human decision or edit on its entities or
+  relationships (migration 21).
+
+Activity is written in the same transaction as the change it records, so a
+change that fails or is rolled back does not renew the report. These renew
+`activity_at`:
+
+- accepting, rejecting or resetting an entity or a relationship (`PATCH`, and
+  the bulk routes `POST .../entities/bulk`, `POST .../entities/accept-pending`,
+  `POST .../relationships/bulk`), when the change touched at least one row;
+- creating, editing or deleting an entity or a relationship (`POST`, `PATCH`,
+  `DELETE`).
+
+These do not: reading a report (`GET`, polling the status). Finalizing a report
+does renew it, but through `updated_at`: publishing the rebuilt bundle sets it.
+The automatic accept at the end of a run is part of that run, which also sets
+`updated_at`.
+
+Existing reports: migration 21 sets `activity_at` from the newest analyst
+decision in the decision journal. Edits that were not decisions (a value or a
+type changed by hand) are not in the journal and are not counted for reports
+that were last touched before the upgrade.
+
+A report kept by the sweep keeps its rows, decisions and files. The sweep logs
+`[retention] swept <n> job(s) older than <d>d` ([Logs](#logs)).
 
 ## Sizing
 

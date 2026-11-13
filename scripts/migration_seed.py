@@ -350,6 +350,7 @@ def _jobs(stage4: Path) -> list[dict[str, Any]]:
          "report_text": stage4_report_text("long_distance", stage4), "bundle_json": bundle_a,
          "llm_result_json": _llm_result(), "tlp_level": "GREEN", "pap_level": "GREEN",
          "created_at": _t(20, "09:14:03.512345"), "updated_at": _t(21, "16:02:44.120931"),
+         "activity_at": _t(21, "15:58:12.000000"),
          "run_config_json": json.dumps(_run_config("2026-10-20T09:14:05Z")),
          "worker_id": "worker-7f3a2c", "heartbeat_at": _t(20, "09:15:40.004112"),
          "bundle_ledger_json": ledger_a, "bundle_validation": "validated", "bundle_validation_errors": None,

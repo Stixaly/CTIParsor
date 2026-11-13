@@ -369,6 +369,38 @@ def test_version_17_adds_the_attempts_counter_at_zero_and_is_idempotent(schema):
     assert migrate.upgrade(conn).applied == []
 
 
+def test_version_21_takes_the_last_human_decision_as_the_clock_and_is_idempotent(schema):
+    """(#723) The backfill reads the decision journal: an analyst's newest decision becomes
+    the report's activity, an automatic one does not, and a rerun keeps a newer value."""
+    conn = schema()
+    _legacy_at(conn, 20)
+    for job_id in ("decided", "auto_only", "undecided"):
+        conn.execute("INSERT INTO jobs (id, original_filename, status, created_at, updated_at) "
+                     "VALUES (?,?,?,?,?)", (job_id, "r.pdf", "for_review", "2026-08-01T00:00:00+00:00",
+                                           "2026-08-01T00:00:00+00:00"))
+    journal = [
+        ("decided", "entity", "e1", "2026-09-01T10:00:00+00:00", "human"),
+        ("decided", "entity", "e2", "2026-10-01T10:00:00+00:00", "human_bulk"),
+        ("auto_only", "entity", "e3", "2026-10-05T10:00:00+00:00", "auto_policy"),
+    ]
+    for job_id, kind, target, at, origin in journal:
+        conn.execute("INSERT INTO review_decisions (job_id, target_kind, target_id, accepted, origin, created_at) "
+                     "VALUES (?,?,?,?,?,?)", (job_id, kind, target, 1, origin, at))
+    assert not history.column_exists(conn, "jobs", "activity_at")
+
+    report = migrate.upgrade(conn)
+
+    assert report.applied == list(range(21, history.latest_version() + 1)) and report.recognised == list(range(1, 21))
+    clock = {r["id"]: r["activity_at"] for r in conn.execute("SELECT id, activity_at FROM jobs").fetchall()}
+    assert clock == {"decided": "2026-10-01T10:00:00+00:00", "auto_only": None, "undecided": None}
+    conn.execute("UPDATE jobs SET activity_at='2026-10-20T00:00:00+00:00' WHERE id='decided'")
+    for statement in history.load()[20].statements:                   # run again: nothing breaks, nothing is lost
+        conn.execute(statement)
+    assert conn.execute("SELECT activity_at FROM jobs WHERE id='decided'").fetchone()["activity_at"] \
+        == "2026-10-20T00:00:00+00:00"
+    assert migrate.upgrade(conn).applied == []
+
+
 # ── Refusals ─────────────────────────────────────────────────────────────────
 
 def test_a_database_newer_than_the_code_is_refused(schema):

@@ -73,15 +73,16 @@ def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, ve
                                      "login_failures", "oidc_logins", "sessions", "users", "worker_heartbeats"]
         assert result.new_columns["jobs"] == ["review_revision", "bundle_review_revision", "bundle_build_json",
                                               "pipeline_mode", "resolved_types_json", "attempts",
-                                              "imported_by"]
+                                              "imported_by", "activity_at"]
         assert result.new_columns["rule_techniques"] == ["propagated"]
         assert result.new_rows == {"schema_migrations": 11}
     elif version == 13:                                     # v0.2.0: versions 14 to 22 apply
         assert (result.new_tables, result.new_columns, result.new_rows) == (
             ["api_tokens", "audit_events", "job_file_cleanups", "login_failures", "oidc_logins", "sessions", "users",
              "worker_heartbeats"],
-            {"jobs": ["resolved_types_json", "attempts", "imported_by"], "rule_techniques": ["propagated"]},
-            {"schema_migrations": 7})
+            {"jobs": ["resolved_types_json", "attempts", "imported_by", "activity_at"],
+             "rule_techniques": ["propagated"]},
+            {"schema_migrations": 9})
     else:
         assert (result.new_tables, result.new_columns, result.new_rows) == ([], {}, {})
 
@@ -143,7 +144,7 @@ def test_a_sequence_behind_its_column_is_a_difference(schema):
     top = max(row["id"] for row in seeded.rows["review_decisions"])
     schema.execute_script("ALTER TABLE review_decisions ALTER COLUMN id RESTART WITH 1")   # as a rebuilt table's
     checked, stuck = mc.sequence_differences(schema, tables)
-    assert checked == 3 and [d.line() for d in stuck] == [
+    assert checked == 4 and [d.line() for d in stuck] == [
         f"review_decisions.id: its sequence gives 1 next, not above the highest value stored ({top}): "
         "the next row collides"]
     assert mc.sequence_differences(schema, ["jobs"]) == (0, [])             # only the tables named
