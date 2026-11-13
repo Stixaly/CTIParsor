@@ -14,7 +14,7 @@ on 2026-10-10, and the web fonts with their Fontsource packages on 2026-10-30.
 
 | Files | Source | Copyright | Licence | Modified |
 |---|---|---|---|---|
-| `pipeline/detection/opencti_snort/` | [OpenCTI](https://github.com/OpenCTI-Platform/opencti), `opencti-graphql/src/python/runtime/snort/` (ADR-0070) | 2021-2026 Filigran SAS | Apache-2.0 | no |
+| `pipeline/detection/opencti_snort/` | [OpenCTI](https://github.com/OpenCTI-Platform/opencti), `opencti-graphql/src/python/runtime/snort/` (ADR-0070) | 2021-2026 Filigran SAS | Apache-2.0 | yes: local patches, listed in [its README](pipeline/detection/opencti_snort/README.md) |
 | `pipeline/data/stix2_json_schemas/` | [oasis-open/cti-stix2-json-schemas](https://github.com/oasis-open/cti-stix2-json-schemas), commit `9af1db4` | 2016 OASIS Open | BSD-3-Clause | no |
 | `docs/gazetteer-ordinary-words.md` (excerpts) | short excerpts of [AnnoCTR](https://github.com/boschresearch/anno-ctr-lrec-coling-2024) texts, whitespace-normalised and clipped, with links to their source lines | Bosch Research and AnnoCTR contributors | CC-BY-SA-4.0 (the document as a whole) | excerpted |
 | `frontend/public/stix-icons/` (27 SVG) | [eclecticiq/stix-icons](https://github.com/eclecticiq/stix-icons), `White/normal/SVG/` | EclecticIQ | CC-BY-SA-4.0 | no |

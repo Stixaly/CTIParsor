@@ -43,6 +43,8 @@ def cookie_secure(request: Request) -> bool:
 
 
 def set_session_cookie(response: Response, session_id: str, secure: bool) -> None:
+    """Set the session cookie on a response: HttpOnly, SameSite strict, lasting session_ttl_hours. The Secure flag is
+    the one given."""
     response.set_cookie(SESSION_COOKIE, session_id, max_age=int(session_ttl_hours() * 3600),
                         httponly=True, samesite="strict", secure=secure, path="/")
 

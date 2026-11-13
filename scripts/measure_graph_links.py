@@ -184,6 +184,9 @@ def _comention_candidates(
     nodes: list[dict], rels: list[dict], text: str
 ) -> tuple[collections.Counter, set[str]]:
     """Find co-mentioned node pairs without existing edges."""
+    # Without source text there is no co-mention to find. The pairs already linked by a
+    # relationship are skipped, and so are pairs of two observables, pairs of two
+    # attack patterns, and pairs with an excluded type.
     if not text:
         return collections.Counter(), set()
 
@@ -210,6 +213,8 @@ def _comention_candidates(
     seen_pairs: set[frozenset[str]] = set()
     rescuable: set[str] = set()
 
+    # Each unordered pair is seen once, even when the two nodes share several sentences.
+    # The count is per pair of types, sorted, so (A, B) and (B, A) fall in one bucket.
     for nids in sentence_to_nodes.values():
         if len(nids) < 2:
             continue
@@ -246,6 +251,8 @@ def _comention_candidates(
 
 def _bundle_stats(job: dict, extracted: int) -> dict:
     """Compute statistics for a single job bundle."""
+    # Split the bundle into relationships, the report, and nodes. The CTIParsor identity
+    # (the producer) is not a node, and neither are the types in NON_NODE_TYPES.
     objects = job.get("objects", [])
     nodes: list[dict] = []
     rels: list[dict] = []
@@ -269,6 +276,9 @@ def _bundle_stats(job: dict, extracted: int) -> dict:
     labels: collections.Counter = collections.Counter()
     rules: collections.Counter = collections.Counter()
 
+    # Per relationship: its evidence label, and the rule that produced it. An inference rule
+    # is counted by its name before the first colon. A policy pin without an inference rule
+    # counts as "policy-pin".
     for r in rels:
         label = r.get("x_evidence_label")
         labels[label if label is not None else "(absent)"] += 1
@@ -282,6 +292,8 @@ def _bundle_stats(job: dict, extracted: int) -> dict:
             tag = "(none)"
         rules[tag] += 1
 
+    # Degree counts the relationships touching each node. A node with degree 0 is isolated.
+    # Components come from the same relationships, and the largest component is reported.
     degree: dict[str, int] = {nid: 0 for nid in node_ids}
     for r in rels:
         src = r.get("source_ref")
@@ -306,6 +318,8 @@ def _bundle_stats(job: dict, extracted: int) -> dict:
     if report_obj and "x_synthesis_stats" in report_obj:
         synthesis = report_obj["x_synthesis_stats"]
 
+    # Co-mention candidates: node pairs that appear in the same sentence of the source text
+    # but have no relationship. `rescuable` lists the isolated nodes among them.
     text = job.get("text", "")
     candidates, rescuable = _comention_candidates(nodes, rels, text)
     candidate_total = sum(candidates.values())

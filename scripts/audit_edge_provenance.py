@@ -31,6 +31,9 @@ from api.db_backend import DBConnection
 
 def _load_jobs(conn: DBConnection) -> list[tuple[str, str, dict | None, dict | None]]:
     """Return (job_id, filename, bundle, run_config) for every job with a bundle."""
+    # A job is kept when its bundle is JSON with an `objects` list. A bundle that fails those
+    # checks is skipped with a warning on stderr. An unreadable run config is not an error:
+    # the job is kept with run_config None.
     cursor = conn.execute(
         "SELECT id, original_filename, bundle_json, run_config_json FROM jobs"
     )
@@ -259,6 +262,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    # Read-only: the jobs are read from the store, and each bundle's edges are counted by
+    # whether they carry an evidence label. Totals are summed over the jobs printed.
     init_db()
     jobs = _load_jobs(get_conn())
 

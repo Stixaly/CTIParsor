@@ -80,10 +80,12 @@ _INTAKE_WAIT_S = 30.0
 # request, not at import: a test (or an operator, after a restart) turns the mode
 # off without reloading the module.
 def enrichment_enabled() -> bool:
+    """True unless STIX_ENRICHMENT_ENABLED turns enrichment off. It is on by default."""
     return env_bool("STIX_ENRICHMENT_ENABLED", default=True)
 
 
 def require_enrichment() -> None:
+    """Answer 400 when STIX enrichment is off on this server."""
     if not enrichment_enabled():
         raise HTTPException(400, "STIX enrichment is not enabled on this server")
 

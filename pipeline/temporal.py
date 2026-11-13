@@ -71,9 +71,12 @@ class Anchor(BaseModel):
 
     @property
     def publication_grade(self) -> bool:
+        """True when the anchor may resolve a relative expression such as last month. Every source
+        except file metadata qualifies (ADR-0063)."""
         return self.source not in _WEAK_ANCHORS
 
     def day(self) -> date:
+        """The anchor value as a date."""
         return date.fromisoformat(self.value[:10])
 
 
@@ -107,6 +110,7 @@ class DocumentTime:
 
     @classmethod
     def build(cls, text: str, anchor: Anchor | None) -> DocumentTime:
+        """Build the document's time context: the anchor, and the folded text in which quotes are located."""
         return cls(anchor=anchor, folded_text=fold(text or "")[0])
 
 
@@ -152,6 +156,7 @@ def fold(text: str) -> tuple[str, list[int]]:
 
 
 def fold_text(text: str) -> str:
+    """The text folded for quote matching (see fold()), without the offset map."""
     return fold(text)[0]
 
 
@@ -540,6 +545,8 @@ def _relative(s: str, anchor_day: date) -> Reading | None:
     """A relative expression resolved against ``anchor_day``; None when ``s``
     is not one this module reads."""
     y, mo = anchor_day.year, anchor_day.month
+    # Fixed phrases first ("today", "last week", ...). A week is the Monday-to-Sunday
+    # week that contains the anchor day, shifted by whole weeks.
     fixed = _REL_FIXED.get(s)
     if fixed:
         unit, delta = fixed
@@ -554,6 +561,9 @@ def _relative(s: str, anchor_day: date) -> Reading | None:
         monday = anchor_day - timedelta(days=anchor_day.weekday()) + timedelta(weeks=delta)
         sunday = monday + timedelta(days=6)
         return Reading(value=f"{monday.isoformat()}/{sunday.isoformat()}", precision="day")
+    # "N units ago" (English, and the French form with the unit mapped by _FR_UNITS).
+    # A week back is an approximation (qualifier "approx"); an out-of-range date is
+    # reported as unresolved instead of raising.
     for rx, fr in ((_R_AGO, False), (_R_IL_Y_A, True)):
         m = rx.match(s)
         if m:
@@ -597,6 +607,8 @@ def _relative(s: str, anchor_day: date) -> Reading | None:
             if not _plausible(yy):
                 return _unresolved("implausible_year", "month")
             return Reading(value=f"{yy:04d}-{mm:02d}/{y:04d}-{mo:02d}", precision="month")
+    # "last <month>" is the most recent such month before the anchor. The anchor's own
+    # month counts as the previous year, so the result is always strictly in the past.
     m = _R_LAST_MONTHNAME.match(s) or _R_FR_MONTH_DERNIER.match(s)
     if m and _month(m.group(1)):
         target = _month(m.group(1)) or 0
@@ -925,6 +937,9 @@ def check_assertions(
     """Compute value, precision and status for the model's assertions against
     the chunk they came from (ADR-0063 §3).  Analyst and legacy assertions
     pass through."""
+    # Only the model's assertions are read here. The model gives a text; the value, precision
+    # and status come from reading that text in the chunk. When the text occurs more than
+    # once, the occurrence nearest the evidence quote is used, if the quote is found.
     anchor = document.anchor if document else None
     ev_pos = _evidence_position(evidence_text, chunk)
     out: list[TemporalAssertion] = []
@@ -933,6 +948,8 @@ def check_assertions(
             out.append(a)
             continue
         b = a.model_copy()
+        # An assertion with no text, or whose text is not in the chunk, is not read: it is
+        # unresolved (no_quote) or in conflict (the reason from locate).
         if b.evidence_label is None and rel_label is not None:
             try:
                 b.evidence_label = EvidenceLabel(getattr(rel_label, "value", rel_label))
@@ -953,6 +970,9 @@ def check_assertions(
             b.time_text, role=b.role, anchor=anchor,
             order_hint=numeric_order_hint(chunk, span, _separator(b.time_text)),
         )
+        # The reading sets the value, its alternatives, precision and status. The anchor is
+        # "document" when the reading used the document's anchor, "none" when it had none,
+        # and "explicit" otherwise.
         b.value, b.alternatives = reading.value, reading.alternatives
         b.precision = reading.precision  # type: ignore[assignment]  # one of Precision, from _read_*
         if reading.qualifier != "none":
@@ -1058,6 +1078,10 @@ def export_plan(times: list[TemporalAssertion], mode: str = DEFAULT_EXPORT_MODE)
     UTC and labelled as a projection.  Month and year never fill a native
     field.  Windows never do.  Equal bounds give no native pair.
     """
+    # Each assertion gets one outcome: withheld with a reason, or a candidate for a
+    # native bound. The checks run in this order, and the first one that applies is
+    # the reason. A conflict among bound roles withholds every bound, and an analyst
+    # value replaces the automatic values of the same role.
     mode = mode if mode in EXPORT_MODES else DEFAULT_EXPORT_MODE
     conflicted = any(a.status == "conflict" and a.role in BOUND_ROLES for a in times)
     analyst_roles = {a.role for a in times if a.origin == "analyst"}
@@ -1084,6 +1108,9 @@ def export_plan(times: list[TemporalAssertion], mode: str = DEFAULT_EXPORT_MODE)
                 continue
         outcome[a.id] = ("withheld", reason)
 
+    # One bound per role: the most precise candidate wins, and the others are withheld
+    # as less_precise. The sort is stable, so among equally precise candidates the
+    # first one in the input keeps its place.
     chosen: dict[str, tuple[TemporalAssertion, datetime, str] | None] = {}
     for role in BOUND_ROLES:
         ranked = sorted(candidates[role],
@@ -1092,12 +1119,16 @@ def export_plan(times: list[TemporalAssertion], mode: str = DEFAULT_EXPORT_MODE)
         for c in ranked[1:]:
             outcome[c[0].id] = ("withheld", "less_precise")
 
+    # A native pair must be ordered: the end must be strictly after the start. When it
+    # is not, both bounds are withheld (equal_bounds or order) and no native field is set.
     start: tuple[TemporalAssertion, datetime, str] | None = chosen["start"]
     end: tuple[TemporalAssertion, datetime, str] | None = chosen["end"]
     if start and end and end[1] <= start[1]:
         for c in (start, end):
             outcome[c[0].id] = ("withheld", "equal_bounds" if end[1] == start[1] else "order")
         start = end = None
+    # The surviving picks fill the native fields. Every assertion, picked or not, gets
+    # a decision record, and the payload keeps the full assertion for the analyst.
     plan = ExportPlan()
     native_field: dict[str, str] = {}
     for pick, fname in ((start, "start_time"), (end, "stop_time")):
@@ -1168,12 +1199,15 @@ def legacy_assertions(start: str | None, stop: str | None) -> list[TemporalAsser
 
 
 def times_to_json(times: list[TemporalAssertion]) -> str | None:
+    """The assertions as a JSON list for storage. None when there are none."""
     if not times:
         return None
     return json.dumps([a.model_dump(mode="json", exclude_none=True) for a in times])
 
 
 def times_from_json(raw: str | None) -> list[TemporalAssertion]:
+    """Read assertions stored as JSON. Invalid JSON gives an empty list, and an item that no longer
+    validates is dropped. Both cases are logged."""
     if not raw:
         return []
     try:
@@ -1207,6 +1241,7 @@ def display_bounds(times: list[TemporalAssertion]) -> tuple[str | None, str | No
 
 
 def status_counts(times: list[TemporalAssertion]) -> dict[str, int]:
+    """Count the assertions by status: verified, ambiguous, unresolved and conflict."""
     counts: dict[str, int] = {}
     for a in times:
         counts[a.status] = counts.get(a.status, 0) + 1

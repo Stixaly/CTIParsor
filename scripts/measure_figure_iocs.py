@@ -107,6 +107,8 @@ def main() -> int:
     if args.limit > 0:
         pdfs = pdfs[: args.limit]
 
+    # Without a vision backend nothing can be measured, so the run exits 2 with the reason.
+    # One read cache is shared by all the PDFs of the run.
     backend = get_backend()
     if backend is None:
         print(f"No vision backend: {skip_reason()}", file=sys.stderr)
@@ -129,6 +131,8 @@ def main() -> int:
     all_kinds: Counter = Counter()
     all_ungrounded: list[str] = []
 
+    # One row per PDF, then the totals over all of them. Totals are sums; the grounded
+    # share is computed from them, not averaged per PDF.
     for pdf_str in pdfs:
         pdf_path = Path(pdf_str)
         r = measure_pdf(pdf_path, backend, cache)

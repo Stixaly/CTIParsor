@@ -168,6 +168,10 @@ def _mention_at(gold: Gold, start: int, end: int) -> tuple[annoctr.Mention, str]
 
 
 def compare(docs, gold, affected_ids: set[str], base, applied, traces) -> dict:
+    # Scores per type and for all types, on all documents and on the affected ones only.
+    # Then each identity the policy removed is traced to the form that withheld it
+    # ("(displaced)" when no withheld occurrence names it); identities it added are listed.
+    # Each withheld mention is classed by what the gold annotates at that span.
     per_type = {}
     for etype in (*TYPES.values(), None):
         a, b = _per_doc(docs, gold, base, etype), _per_doc(docs, gold, applied, etype)
@@ -258,6 +262,8 @@ def main() -> None:
     ap.add_argument("--json", type=Path, default=None)
     args = ap.parse_args()
 
+    # The documents are the cyber layer of the chosen splits. A document is "affected" when a
+    # judged form occurs in its text: only those documents can change under the policy.
     docs = [d for d in annoctr.load(args.root, splits=SPLITS) if "cyber" in d.layers]
     gold = load_gold(args.root, docs)
     forms = judged_forms()
@@ -270,6 +276,8 @@ def main() -> None:
                      "gold_mentions_not_located": sum(1 for g in gold.values() for m, _ in g.mentions
                                                       if m.start is None),
                      "paths": {}}
+    # Each matcher path (aho when available, then regex) runs the corpus twice: once with the
+    # policy off, once with it applied. `only` restricts the policy to the chosen reasons.
     outputs = {}
     with only(reasons):
         for path in paths:
@@ -279,6 +287,8 @@ def main() -> None:
             outputs[path] = (base, applied, traces)
             results["paths"][path] = compare(docs, gold, affected_ids, base, applied, traces)
             results["paths"][path]["predictions_without_attack_id"] = {"off": base_no_id, "apply": applied_no_id}
+    # When both paths ran, they must agree: the same identities per document and the same
+    # withheld occurrences. `agree` is False when any of the three counts differs.
     agree = None
     if len(outputs) == 2:
         (ba, aa, ta), (br, ar, tr) = outputs["aho"], outputs["regex"]
@@ -291,6 +301,9 @@ def main() -> None:
     first = results["paths"][paths[0]]
     results["gates"] = gates(first, agree)
 
+    # The report: the first path's per-type and whole-corpus scores, bootstrap intervals of
+    # the difference, the per-form breakdown, and the lost and added identities. The gates
+    # are printed last, and the whole result goes to --json if given.
     print(f"policy {results['policy_version']}  classes {results['only']}  "
           f"{first['documents']} documents (AnnoCTR train+dev, cyber layer), "
           f"{first['affected_documents']} affected ({len(forms)} judged forms)")

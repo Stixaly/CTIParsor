@@ -1,3 +1,14 @@
+"""Vision backends: read one figure and return what it shows.
+
+FigureRead is the result for one figure: its kind, the text it shows verbatim,
+the edges it draws, the IoCs it names, and the provider usage.  VisionBackend is
+the protocol.  AnthropicVisionBackend and OpenAICompatVisionBackend (Ollama, vLLM,
+Mistral and other OpenAI-compatible servers) send the image with FIGURE_SCHEMA and
+parse the JSON answer.  get_backend() picks the backend from VISION_PROVIDER and
+caches it; skip_reason() says why there is none.  Run as a module, it reports what
+the environment resolves to (_main()).
+"""
+
 # pipeline/vlm.py
 from __future__ import annotations
 
@@ -325,8 +336,11 @@ class VisionBackend(Protocol):
     name: str
     model: str
     max_concurrency: int
-    def available(self) -> bool: ...
-    def read_figure(self, png: bytes, prompt: str = PROMPT) -> FigureRead: ...
+    def available(self) -> bool:
+        """True when this backend can read figures. The answer is probed once and cached."""
+    def read_figure(self, png: bytes, prompt: str = PROMPT) -> FigureRead:
+        """Read one figure from its PNG bytes and return a FigureRead. A failure comes back as an unread FigureRead
+        that carries the error."""
 
 
 class AnthropicVisionBackend:
@@ -354,6 +368,9 @@ class AnthropicVisionBackend:
         return self._client
 
     def available(self) -> bool:
+        """True when ANTHROPIC_API_KEY is set and the model reports image input. VISION_ASSUME_CAPABLE skips the
+        capability request. The answer is cached on the instance. A failed request gives False and sets
+        probe_failed."""
         if self._available is not None:
             return self._available
         if anthropic is None or not os.environ.get("ANTHROPIC_API_KEY", "").strip():
@@ -395,6 +412,8 @@ class AnthropicVisionBackend:
         return ok
 
     def read_figure(self, png: bytes, prompt: str = PROMPT) -> FigureRead:
+        """Send one PNG with the figure prompt and the FIGURE_SCHEMA output format. Return the parsed FigureRead, or an
+        unread one on error."""
         t0 = time.monotonic()
         try:
             b64 = base64.b64encode(png).decode("ascii")
@@ -444,6 +463,10 @@ class OpenAICompatVisionBackend:
         return h
 
     def available(self) -> bool:
+        """True when the server can read images. Ollama: the model is pulled and has the vision capability. vLLM: the
+        server serves the model and accepts one image request. Other providers: an API key is set and the model
+        reports vision. VISION_ASSUME_CAPABLE skips the probe. The answer is cached on the instance; a failed probe
+        gives False and sets probe_failed."""
         if self._available is not None:
             return self._available
         if _assume_capable():
@@ -566,6 +589,8 @@ class OpenAICompatVisionBackend:
         return ok
 
     def read_figure(self, png: bytes, prompt: str = PROMPT) -> FigureRead:
+        """Send one PNG to the chat completions endpoint with a strict JSON schema. A reply that the token limit cut
+        before any content is an error. Return the parsed FigureRead, or an unread one on error."""
         t0 = time.monotonic()
         try:
             b64 = base64.b64encode(png).decode("ascii")

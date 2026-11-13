@@ -1,3 +1,5 @@
+"""Entity routes of a job (/api/jobs/{job_id}/entities): list, create, edit, delete, and the bulk and accept-pending
+actions on its entities."""
 from typing import Any
 from uuid import uuid4
 
@@ -93,6 +95,7 @@ def _check_origin(origin: str) -> None:
 
 @router.get("", response_model=list[EntityOut], response_model_exclude_unset=True)
 def list_entities(job_id: str):
+    """List the entities of a job, ordered by type and value. Answer 404 when the job does not exist."""
     with get_conn() as conn:
         require_job(conn, job_id)
         rows = conn.execute(
@@ -104,6 +107,7 @@ def list_entities(job_id: str):
 
 @router.post("", response_model=EntityOut, response_model_exclude_unset=True)
 def create_entity(job_id: str, body: EntityCreate):
+    """Add an entity to a job; its source is manual. Answer 400 for an unknown type or an empty value."""
     if body.entity_type not in VALID_TYPES:
         raise HTTPException(400, f"Unknown entity_type '{body.entity_type}'")
     # Same refusal as the PATCH below: a blank name is not an entity (issue #438, #525).
@@ -129,6 +133,8 @@ def create_entity(job_id: str, body: EntityCreate):
 
 @router.patch("/{entity_id}", response_model=EntityOut, response_model_exclude_unset=True, responses=_IMPORTED_ROW)
 def update_entity(job_id: str, entity_id: str, patch: EntityPatch):
+    """Accept, reject or edit an entity. Answer 404 when it does not exist, and 409 when it is held for review or is a
+    row of the analyst's STIX bundle, which can only be accepted or rejected."""
     _check_origin(patch.decision_origin)
     with get_conn() as conn:
         row = conn.execute(
@@ -280,6 +286,8 @@ def bulk_update_entities(job_id: str, body: BulkPatch):
 
 @router.delete("/{entity_id}", response_model=EntityDeleted, response_model_exclude_unset=True, responses=_IMPORTED_ROW)
 def delete_entity(job_id: str, entity_id: str):
+    """Delete an entity. Answer 409 for a row of the analyst's STIX bundle, which can only be rejected, and 404 when
+    the entity does not exist."""
     with _lock:
         with get_conn() as conn:
             # A deleted row could no longer say whether the baseline object leaves the bundle.

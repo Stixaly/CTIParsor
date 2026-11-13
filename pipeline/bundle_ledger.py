@@ -111,6 +111,8 @@ class MappingLedger:
         self, value: str, entity_type: str, outcome: str, *,
         obj: Any = None, reason: str | None = None, **info: Any,
     ) -> None:
+        """Record what Stage 4 did with one extracted entity: its outcome, the STIX object it became
+        when there is one, the reason, and extra fields. Fields that are None are not stored."""
         entry: dict = {"value": value, "entity_type": entity_type, "outcome": outcome}
         if obj is not None:
             entry["stix_id"] = stix_field(obj, "id")
@@ -338,6 +340,7 @@ class MappingLedger:
                 self.objects[oid] = {"origin": _rel_origin_from_props(o)}
 
     def to_dict(self) -> dict:
+        """The ledger as a JSON-ready dict. The refused list is included only when something was refused."""
         out = {
             "version": LEDGER_VERSION,
             "objects": self.objects,

@@ -115,10 +115,13 @@ def _revoke_token(args: argparse.Namespace) -> int:
 
 
 def _parser() -> argparse.ArgumentParser:
+    # One subcommand per account or token task. Each subcommand sets `run` to the function
+    # that does the work, and main calls it with the parsed arguments.
     parser = argparse.ArgumentParser(prog="python -m api.admin", description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     def password_args(p: argparse.ArgumentParser) -> None:
+        """Add the --password-file option to a sub-command's parser."""
         p.add_argument("--password-file", help="read the password from this file instead of prompting")
 
     p = sub.add_parser("create-admin", help="create the first admin")
@@ -165,6 +168,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of `python -m api.admin`: run the chosen command and return its exit code, 1 when it is refused or
+    the database fails."""
     args = _parser().parse_args(argv)
     from api.db import DB_ERRORS, init_db
     from api.logging_config import setup_logging

@@ -1,3 +1,5 @@
+"""Database access of the API and the worker: the job connection and the rule connection (PostgreSQL only, ADR-0053),
+the transaction helper, init_db, and the helpers that write a job's status and its progress events."""
 import os
 import threading
 from collections.abc import Iterator
@@ -162,10 +164,12 @@ def init_db() -> None:
 
 
 def now_iso() -> str:
+    """The current UTC time, as an ISO 8601 string."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def emit_progress(job_id: str, event_type: str, data: dict) -> None:
+    """Insert one progress event of a job, with its data stored as JSON."""
     import json
     with _lock:
         with get_conn() as conn:
@@ -177,6 +181,7 @@ def emit_progress(job_id: str, event_type: str, data: dict) -> None:
 
 
 def set_job_status(job_id: str, status: str) -> None:
+    """Set the status of a job and its updated_at time."""
     with _lock:
         with get_conn() as conn:
             conn.execute(

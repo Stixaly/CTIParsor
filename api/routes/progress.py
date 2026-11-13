@@ -1,3 +1,5 @@
+"""Progress of a job as server-sent events (GET /api/jobs/{job_id}/progress). The stream sends a connected event,
+the stored progress events of the job, and a done event with the job's final status."""
 import asyncio
 import json
 import time
@@ -68,10 +70,14 @@ def _parse_last_event_id(request: Request) -> int:
 
 @router.get("/{job_id}/progress", responses=_SSE)
 async def progress_stream(job_id: str, request: Request):
+    """Stream the progress of a job as server-sent events. Answer 404 when the id is refused before the stream opens.
+    The stream ends at a terminal status, when the job does not exist, when its time limit is reached, or when the
+    session ends."""
     refuse_nul_id(job_id)       # before the stream opens: a 404 here, not a 500 part-way through it
 
     async def generator():
         # Resume from the client's Last-Event-ID on reconnect (0 on first connect)
+        """Yield the events of the stream: connected first, then each stored progress event with its id, then done."""
         last_id = _parse_last_event_id(request)
         done_sent = False
         # Send initial connection confirmation

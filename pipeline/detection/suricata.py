@@ -1,3 +1,11 @@
+"""Suricata rule corpus adapter (ADR-0015): parse rule files into DetectionRule objects.
+
+SuricataAdapter reads .rules files and skips the commented-out rules.  The
+module constants map Suricata severities and name the options left out of a
+rule's deduplication key (_VOLATILE_OPTIONS): the rule identifier, its revision,
+the message, the references, the metadata, the class type and the target.
+"""
+
 from __future__ import annotations
 
 import hashlib

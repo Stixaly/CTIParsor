@@ -679,6 +679,8 @@ def _dns_pin_arg(host: str) -> str | None:
     proxy in front), a subresource/redirect DNS race is the one gap this
     module does not close on its own.
     """
+    # A literal IP needs no pin. Otherwise the pin uses the first IPv4 answer of the cached
+    # resolution, the one validate_url already checked. With no IPv4 answer, nothing is pinned.
     try:
         ipaddress.ip_address(host)
         return None  # literal IP in the URL — nothing to resolve, nothing to pin

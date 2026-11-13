@@ -77,6 +77,8 @@ def _check_rule(entity_type: str, action: str) -> None:
 
 @router.get("", response_model=OverrideList, response_model_exclude_unset=True)
 def get_overrides(status: str | None = Query(None), action: str | None = Query(None)) -> dict:
+    """List the override rules, optionally filtered by status and action. Answer 400 for an unknown status or action.
+    The answer says whether overrides are enabled."""
     if status is not None and status not in STATUSES:
         raise HTTPException(400, f"status must be one of: {', '.join(STATUSES)}")
     if action is not None and action not in ACTIONS:
@@ -88,6 +90,8 @@ def get_overrides(status: str | None = Query(None), action: str | None = Query(N
 
 @router.post("/promote", response_model=OverridePromotion, response_model_exclude_unset=True)
 def promote(body: PromoteIn) -> dict:
+    """Propose override rules from the analysts' decisions, with the thresholds of the body. The rules are written only
+    when `apply` is set. Answer 400 for a threshold that is not positive or a share outside (0, 1]."""
     if min(body.min_rejections, body.min_accepts, body.min_jobs) < 1:
         raise HTTPException(400, "'min_rejections', 'min_accepts' and 'min_jobs' must be positive integers")
     if not 0.0 < body.share <= 1.0:
@@ -104,6 +108,8 @@ def promote(body: PromoteIn) -> dict:
 
 @router.post("", response_model=OverrideRow, response_model_exclude_unset=True)
 def create_override(body: OverrideIn) -> dict:
+    """Add a manual override rule for a term. Answer 400 for a term that is empty, or an entity type or action the rule
+    does not accept."""
     _check_rule(body.entity_type, body.action)
     if not body.term.strip():
         raise HTTPException(400, "'term' must not be empty")
@@ -120,6 +126,7 @@ def create_override(body: OverrideIn) -> dict:
 
 @router.patch("/{override_id}", response_model=OverrideRow, response_model_exclude_unset=True)
 def patch_override(override_id: str, body: StatusIn) -> dict:
+    """Set the status of an override rule. Answer 404 when it does not exist."""
     if body.status not in STATUSES:
         raise HTTPException(400, f"status must be one of: {', '.join(STATUSES)}")
     with _lock:
@@ -133,6 +140,7 @@ def patch_override(override_id: str, body: StatusIn) -> dict:
 
 @router.delete("/{override_id}", response_model=OverrideDeleted, response_model_exclude_unset=True)
 def remove_override(override_id: str) -> dict:
+    """Delete an override rule. Answer 404 when it does not exist."""
     with _lock:
         with get_conn() as conn:
             removed = delete_override(conn, override_id)

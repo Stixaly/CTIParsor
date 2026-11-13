@@ -13,6 +13,7 @@ from api.response_models import Response
 
 
 class CorpusOut(Response):
+    """One corpus of the registry, with its rule count and whether its parser is compiled in."""
     name: str = Field(description="The corpus name: the {name} segment of its routes.")
     adapter: str = Field(description="The format the corpus is parsed as (sigma, suricata, yara).")
     enabled: bool
@@ -31,10 +32,12 @@ class CorpusOut(Response):
 
 
 class CorporaOut(Response):
+    """The corpora of the registry, as the list route returns them."""
     corpora: list[CorpusOut]
 
 
 class FormatOut(Response):
+    """One rule format (sigma, suricata or yara) with its corpora and rule counts."""
     format: str
     available: bool = Field(description="True when a parser for the format is compiled in.")
     corpora: int = Field(description="Configured corpora in this format.")
@@ -42,6 +45,7 @@ class FormatOut(Response):
 
 
 class FormatsOut(Response):
+    """The rule formats with their corpora and rule counts."""
     formats: list[FormatOut]
 
 
@@ -53,17 +57,20 @@ class CorporaResult(Response):
 
 
 class CorpusCreated(Response):
+    """Result of adding a corpus to the local overlay."""
     ok: bool
     warning: str | None = Field(description="Set when the adapter has no parser in this build.")
     corpora: list[CorpusOut]
 
 
 class FileError(Response):
+    """A file that the parser could not read while a corpus was rebuilt."""
     path: str = Field(description="The file, relative to the corpus root.")
     error: str
 
 
 class SyncOut(Response):
+    """Result of syncing one corpus: the fetch and the rebuild, and the corpora after them."""
     ok: bool
     detail: str = Field(description="What the fetch did, as the sync step reported it.")
     rules: int = Field(description="Rules written for this corpus by the rebuild.")
@@ -72,6 +79,7 @@ class SyncOut(Response):
 
 
 class DedupSummary(Response):
+    """Totals of the rule deduplication run by a rebuild."""
     total: int
     clusters: int
     canonical: int
@@ -81,11 +89,13 @@ class DedupSummary(Response):
 
 
 class RuleTextSummary(Response):
+    """Rule-text rows that a rebuild stored, and the empty bodies it skipped."""
     rows: int
     empty_bodies: int = Field(description="Rules skipped for an empty body.")
 
 
 class CorpusCount(Response):
+    """Rule counts of one corpus after a rebuild: all its rules, and those kept after deduplication."""
     corpus: str
     license: str | None
     rules: int
@@ -93,6 +103,7 @@ class CorpusCount(Response):
 
 
 class RebuildOut(Response):
+    """Result of a rebuild of the rule store across all corpora."""
     written: dict[str, int] = Field(description="Rules written per corpus.")
     skipped: list[str] = Field(description="Corpora whose clone was missing or not parsed.")
     skip_reasons: dict[str, str] = Field(description="Why each skipped corpus was skipped.")

@@ -29,6 +29,7 @@ logger = get_logger(__name__)
 
 
 def calibration_enabled() -> bool:
+    """True when THRESHOLD_CALIBRATION_ENABLED is on, which is the default."""
     return env_bool("THRESHOLD_CALIBRATION_ENABLED", default=True)
 
 
@@ -64,4 +65,5 @@ def overrides_for(source: str) -> dict[str, float]:
 
 
 def reload() -> None:
+    """Forget the cached thresholds, so that the next lookup reads the table again."""
     _load_all.cache_clear()
