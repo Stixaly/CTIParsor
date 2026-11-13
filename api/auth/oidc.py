@@ -306,7 +306,13 @@ def _account(settings: config.OidcSettings, claims: dict) -> store.User:
         raise OidcError("no_role", "no group of the token is in OIDC_ROLE_MAP")
     if user is not None:
         if user.role != role:
-            store.set_role(user.id, role)
+            try:
+                store.set_role(user.id, role)
+            except store.LastAdminError:
+                # The sign-in goes on with the admin role the account keeps (the last enabled admin is not demoted).
+                logger.warning("[auth] OIDC account %r keeps the admin role: its groups map to %s, "
+                               "and it is the last enabled admin", user.username, role)
+                return user
             logger.info("[auth] OIDC account %r: role %s -> %s", user.username, user.role, role)
             user = store.get_user(user.id) or user
         return user

@@ -508,14 +508,21 @@ def find_oidc_user(subject: str) -> User | None:
 
 
 def set_role(user_id: str, role: str) -> None:
-    """Set the role of an account. Raise AuthError when the role is not one of ROLES.
-    The write takes the admins lock, but the last-admin rule is not applied: the OIDC group
-    mapping (api/auth/oidc.py) is the authority for a role it syncs, so it can leave no enabled admin."""
+    """Set the role of an account, the role the OIDC sign-in syncs from the groups claim (api/auth/oidc.py).
+    Raise AuthError when the role is not one of ROLES, and LastAdminError when the change takes the
+    admin role from the last enabled admin: the role is then left as it is.
+
+    The account is read under the admins lock, in the same transaction as the write, like `update_user`."""
     if role not in ROLES:
         raise AuthError(f"the role must be one of {', '.join(ROLES)}")
     conn = get_conn()
     with transaction(conn):
         _lock_admins(conn)                 # a concurrent last-admin check sees this change
+        row = conn.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id=? FOR UPDATE", (user_id,)).fetchone()
+        if row is None:
+            return
+        user = _user(row)
+        _refuse_if_last_admin(conn, user, role, user.disabled)
         conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
 
 

@@ -195,9 +195,16 @@ How it behaves:
   wins. A person with no mapped group is refused, and an existing account that lost
   every group has its sessions ended. Disabling the account in CTIParsor
   (`python -m api.admin disable`) refuses it too. A group removed at the provider
-  takes effect at the next sign-in, not in a session already open. The last-admin rule
-  does not apply to a role the provider sets: the group mapping decides, so an admin
-  removed at the provider can leave no enabled admin.
+  takes effect at the next sign-in, not in a session already open.
+- The last enabled admin is the exception to the group mapping. When a sign-in would
+  take the admin role from the only enabled admin of the service (its groups map to
+  `analyst` or `reader`), the account keeps the admin role, the sign-in succeeds, and
+  the log gets one `[auth]` warning with the username. A second enabled admin, which
+  can be a local account, lets the mapping demote the account as usual. A sign-in whose
+  groups map to no role is still refused (`no_role`); it changes no role, but its open
+  sessions end. The sign-in
+  callback is a `GET`, which the audit trail does not record (`api/audit.py`), so the
+  warning is the only record of a kept role.
 - `POST /api/auth/logout` ends the CTIParsor session only. There is no logout at the
   provider (no RP-initiated logout): the person stays signed in there.
 - The session cookie is `SameSite=Strict`, so the browser does not send it on the

@@ -133,6 +133,18 @@ def test_admin_exists_ignores_a_disabled_admin(temp_db):
     assert store.admin_exists()
 
 
+def test_set_role_keeps_the_last_enabled_admin_an_admin(temp_db):
+    last = store.create_user("root", "admin", password=GOOD)
+    store.create_user("alice", "analyst", password=GOOD)
+    with pytest.raises(store.LastAdminError):               # the OIDC sync cannot demote the last one
+        store.set_role(last.id, "reader")
+    assert store.get_user(last.id).role == "admin"
+    store.set_role(last.id, "admin")                        # keeping the role is not a change to refuse
+    store.create_user("backup", "admin", password=GOOD)
+    store.set_role(last.id, "reader")                       # another enabled admin exists now
+    assert store.get_user(last.id).role == "reader"
+
+
 # ── Lockout ──────────────────────────────────────────────────────────────────
 
 def test_four_failures_do_not_lock_five_do(temp_db):
