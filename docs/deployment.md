@@ -127,7 +127,15 @@ once, when it is created. Disabling a user ends their sessions and revokes no to
 disabled user's tokens are refused until the account is enabled again. An admin cannot
 disable or demote their own account, and the last enabled admin cannot be disabled or
 demoted. The command line stays available and uses the same functions; it is the way to
-create the first admin, and to recover when no admin can sign in.
+create the first admin, and to recover when no admin can sign in: `python -m api.admin
+disable` refuses the last enabled admin too (`refused: this is the last enabled admin`,
+exit code 1).
+
+Changes of roles and disabled flags are serialised by one database lock, in the same
+transaction as the write. Two changes made at the same time are applied one after the
+other: a change of the display name does not restore a role or an account that another
+admin has just changed, and the last-admin rule is checked on the state the other change
+committed. A change to an account that no longer exists is refused, and nothing is written.
 
 Sessions and tokens travel in clear text over plain HTTP. Authentication beyond the
 loopback address goes through the `proxy` profile (TLS, option C below): the session
@@ -187,7 +195,9 @@ How it behaves:
   wins. A person with no mapped group is refused, and an existing account that lost
   every group has its sessions ended. Disabling the account in CTIParsor
   (`python -m api.admin disable`) refuses it too. A group removed at the provider
-  takes effect at the next sign-in, not in a session already open.
+  takes effect at the next sign-in, not in a session already open. The last-admin rule
+  does not apply to a role the provider sets: the group mapping decides, so an admin
+  removed at the provider can leave no enabled admin.
 - `POST /api/auth/logout` ends the CTIParsor session only. There is no logout at the
   provider (no RP-initiated logout): the person stays signed in there.
 - The session cookie is `SameSite=Strict`, so the browser does not send it on the

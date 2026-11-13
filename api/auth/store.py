@@ -163,29 +163,45 @@ def user_record(user_id: str) -> dict | None:
     return dict(zip(row.keys(), row, strict=True)) if row else None
 
 
+def _lock_admins(conn) -> None:
+    """Take the lock that serialises every change of an account's role or disabled flag.
+    It is transaction-scoped: it is released at the commit or the rollback."""
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('ctiparsor.admins'))")
+
+
+def _refuse_if_last_admin(conn, user: User, new_role: str, new_disabled: bool) -> None:
+    """Raise LastAdminError when the change takes an enabled admin's rights or access away and no
+    other enabled admin is left.  `user` must be read under the admins lock (see _lock_admins)."""
+    if user.role == "admin" and not user.disabled and (new_role != "admin" or new_disabled):
+        others = conn.execute("SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND id<>?",
+                              (user.id,)).fetchone()
+        if others is None:
+            raise LastAdminError("this is the last enabled admin; make another admin first")
+
+
 def update_user(user_id: str, *, role: str | None = None, disabled: bool | None = None,
                 display_name: str | None = None) -> User:
     """Change an account's role, disabled flag and display name (what is None stays).
     Disabling ends the account's sessions; its tokens stay in the table but are refused
     while it is disabled, and work again when it is enabled.  Raises AuthError for an
-    unknown user or role, and LastAdminError when the change would leave no enabled admin."""
-    user = get_user(user_id)
-    if user is None:
-        raise AuthError("no such user")
+    unknown user or role, and LastAdminError when the change would leave no enabled admin.
+
+    The account is read under the admins lock, in the same transaction as the write, so a
+    field left as None keeps the value that is committed when the change runs, not the one
+    read before a concurrent change.  Two changes that overlap are applied one after the other."""
     if role is not None and role not in ROLES:
         raise AuthError(f"the role must be one of {', '.join(ROLES)}")
-    name = user.display_name if display_name is None else display_name.strip() or user.username
-    new_role = user.role if role is None else role
-    new_disabled = user.disabled if disabled is None else disabled
     conn = get_conn()
     with transaction(conn):
-        # One change at a time, so two admins cannot each remove the other.
-        conn.execute("SELECT pg_advisory_xact_lock(hashtext('ctiparsor.admins'))")
-        if user.role == "admin" and not user.disabled and (new_role != "admin" or new_disabled):
-            others = conn.execute("SELECT 1 FROM users WHERE role='admin' AND disabled=0 AND id<>?",
-                                  (user_id,)).fetchone()
-            if others is None:
-                raise LastAdminError("this is the last enabled admin; make another admin first")
+        _lock_admins(conn)
+        row = conn.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id=? FOR UPDATE", (user_id,)).fetchone()
+        if row is None:
+            raise AuthError("no such user")
+        user = _user(row)
+        name = user.display_name if display_name is None else display_name.strip() or user.username
+        new_role = user.role if role is None else role
+        new_disabled = user.disabled if disabled is None else disabled
+        _refuse_if_last_admin(conn, user, new_role, new_disabled)
         conn.execute("UPDATE users SET role=?, disabled=?, display_name=? WHERE id=?",
                      (new_role, 1 if new_disabled else 0, name, user_id))
         if new_disabled:
@@ -216,14 +232,22 @@ def set_password(username: str, password: str) -> None:
 
 def set_disabled(username: str, disabled: bool = True) -> None:
     """Disable (or re-enable) an account; disabling ends its sessions and refuses its tokens.
-    Raises AuthError for an unknown username."""
-    user = find_user(username)
-    if user is None:
+    Raises AuthError for an unknown username, and LastAdminError when disabling would leave no
+    enabled admin.  Runs under the same admins lock and last-admin rule as `update_user`."""
+    found = find_user(username)
+    if found is None:
         raise AuthError("no account with that username")
     conn = get_conn()
-    conn.execute("UPDATE users SET disabled=? WHERE id=?", (1 if disabled else 0, user.id))
-    if disabled:
-        conn.execute("DELETE FROM sessions WHERE user_id=?", (user.id,))
+    with transaction(conn):
+        _lock_admins(conn)
+        row = conn.execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id=? FOR UPDATE", (found.id,)).fetchone()
+        if row is None:
+            raise AuthError("no account with that username")
+        user = _user(row)
+        _refuse_if_last_admin(conn, user, user.role, disabled)
+        conn.execute("UPDATE users SET disabled=? WHERE id=?", (1 if disabled else 0, user.id))
+        if disabled:
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (user.id,))
 
 
 def check_credentials(username: str, password: str) -> User | None:
@@ -484,10 +508,15 @@ def find_oidc_user(subject: str) -> User | None:
 
 
 def set_role(user_id: str, role: str) -> None:
-    """Set the role of an account. Raise AuthError when the role is not one of ROLES."""
+    """Set the role of an account. Raise AuthError when the role is not one of ROLES.
+    The write takes the admins lock, but the last-admin rule is not applied: the OIDC group
+    mapping (api/auth/oidc.py) is the authority for a role it syncs, so it can leave no enabled admin."""
     if role not in ROLES:
         raise AuthError(f"the role must be one of {', '.join(ROLES)}")
-    get_conn().execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
+    conn = get_conn()
+    with transaction(conn):
+        _lock_admins(conn)                 # a concurrent last-admin check sees this change
+        conn.execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
 
 
 def end_sessions(user_id: str) -> None:
