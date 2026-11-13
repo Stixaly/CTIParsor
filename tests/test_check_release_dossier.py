@@ -38,6 +38,11 @@ from scripts.check_release_dossier import (
 
 ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures" / "release_dossier"
+#: .grype.yaml and SECURITY.md as they stood when the GitHub answers were recorded (d1389f7):
+#: the tests read these, so accepting or removing an exception in the repository does not
+#: change what the recorded run is expected to give.  The repository's own files are
+#: checked by test_the_repository_exceptions_are_all_valid.
+RECORDED_ROOT = FIXTURES / "repo"
 REPO = "Stixaly/CTIParsor"
 SHA = "d1389f76b1453789d73512733042d9b858f9d381"
 OTHER_SHA = "f475ca8899dc58bd242d71f5876849d80901dfdb"
@@ -150,7 +155,7 @@ def run_view(**changes: Any) -> str:
     return json.dumps(view)
 
 
-def collect(gh: FakeGh, digest: str | None = DIGEST, root: Path = ROOT, sha: str = SHA) -> dossier.Report:
+def collect(gh: FakeGh, digest: str | None = DIGEST, root: Path = RECORDED_ROOT, sha: str = SHA) -> dossier.Report:
     ctx = dossier.Context(sha=sha, digest=digest, repo=REPO, gh=gh, root=root, ruleset="basic rules")
     return dossier.collect(ctx)
 
@@ -402,8 +407,8 @@ def test_the_repository_exceptions_are_all_valid() -> None:
     rules = dossier.parse_grype_ignore((ROOT / ".grype.yaml").read_text(encoding="utf-8"))
     section = dossier.accepted_section((ROOT / "SECURITY.md").read_text(encoding="utf-8"))
 
-    assert len(rules) == 4
-    assert [dossier.rule_problems(rule, section) for rule in rules] == [[]] * 4
+    assert rules
+    assert [dossier.rule_problems(rule, section) for rule in rules] == [[]] * len(rules)
 
 
 def test_the_repository_exceptions_pass_the_gate() -> None:
@@ -424,7 +429,8 @@ RULE = """ignore:
 
 def _repo_with_grype(tmp_path: Path, grype: str) -> Path:
     (tmp_path / ".grype.yaml").write_text(grype, encoding="utf-8")
-    (tmp_path / "SECURITY.md").write_text((ROOT / "SECURITY.md").read_text(encoding="utf-8"), encoding="utf-8")
+    (tmp_path / "SECURITY.md").write_text((RECORDED_ROOT / "SECURITY.md").read_text(encoding="utf-8"),
+                                          encoding="utf-8")
     return tmp_path
 
 
@@ -538,13 +544,15 @@ def test_the_command_line_refuses_a_bad_sha_or_digest() -> None:
 
 def test_the_command_line_writes_the_report_and_exits_by_verdict(tmp_path: Path) -> None:
     out = tmp_path / "out"
-    code = dossier.main([SHA, "--digest", DIGEST, "--out", str(out)], gh=FakeGh(recorded()))
+    code = dossier.main([SHA, "--digest", DIGEST, "--out", str(out), "--root", str(RECORDED_ROOT)],
+                        gh=FakeGh(recorded()))
 
     assert code == 1
     report = json.loads((out / "report.json").read_text(encoding="utf-8"))
     assert report["verdict"] == "failed" and report["sha"] == SHA
     assert "NOT QUALIFIED: failed" in (out / "report.md").read_text(encoding="utf-8")
 
-    code = dossier.main([SHA, "--digest", DIGEST, "--out", str(tmp_path / "ok")], gh=FakeGh(green()))
+    code = dossier.main([SHA, "--digest", DIGEST, "--out", str(tmp_path / "ok"), "--root", str(RECORDED_ROOT)],
+                        gh=FakeGh(green()))
     assert code == 0
     assert json.loads((tmp_path / "ok" / "report.json").read_text(encoding="utf-8"))["verdict"] == "qualified"
