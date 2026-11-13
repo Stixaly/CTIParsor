@@ -75,6 +75,8 @@ def _load_attack_domains(data_dir: Path) -> dict[str, str]:
         ("mobile", "mobile-attack.json"),
         ("ics", "ics-attack.json"),
     ]
+    # Only references from the three MITRE sources count. The first domain that holds an id
+    # sets its domain, so the file order decides a conflict.
     valid_sources = {"mitre-attack", "mitre-mobile-attack", "mitre-ics-attack"}
 
     for domain, filename in file_specs:

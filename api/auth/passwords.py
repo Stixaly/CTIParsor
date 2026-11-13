@@ -25,6 +25,7 @@ def check_policy(password: str) -> None:
 
 
 def hash_password(password: str) -> str:
+    """Check a new password against the password policy, and return its hash."""
     check_policy(password)
     return _hasher.hash(password)
 
@@ -49,4 +50,6 @@ def rehash(password: str) -> str:
 
 
 def needs_rehash(stored_hash: str) -> bool:
+    """True when a stored hash was made with other hasher parameters than the current ones, so that it should be made
+    again."""
     return _hasher.check_needs_rehash(stored_hash)

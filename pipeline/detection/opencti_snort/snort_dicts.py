@@ -1,9 +1,24 @@
+"""Keyword tables for the Snort parser.
+
+Each method returns one table, or one lookup in a table. The parser checks option
+names against these tables (snort_parser.py, `Parser.validate_options`). The TODO
+comments mark keywords whose arguments are not checked; README.md lists them."""
 from typing import Any, Union
 
 
 class Dicts:
+    """Keyword tables: sets of keyword names, and lookups of one keyword.
+
+    A lookup with an argument returns the keyword when it is known, and False when it
+    is not. `options` is the one lookup that searches every table."""
     @staticmethod
     def classtypes(cltype) -> Union[str, bool]:
+        """Return the description of a Snort classtype, such as "attempted-admin".
+
+        Return False when the classtype is unknown.
+        """
+        # Snort classtype names mapped to their descriptions. The lookup returns the
+        # description, or False for a name that is not in the table.
         classtypes = {
             "attempted-admin": "Attempted Administrator Privilege Gain",
             "attempted-dos": "Attempted Denial of Service",
@@ -51,6 +66,8 @@ class Dicts:
 
     @staticmethod
     def ip_variables(variable):
+        """Return the variable when it is `any` or one of the standard network variables ($HOME_NET, $EXTERNAL_NET and
+        the server variables). Return False otherwise."""
         variables = {
             "$EXTERNAL_NET": "$EXTERNAL_NET",
             "$HTTP_SERVERS": "$HTTP_SERVERS",
@@ -68,6 +85,8 @@ class Dicts:
 
     @staticmethod
     def general_options(option: str = None) -> Any:
+        """With no argument, return the set of general keywords (msg, reference, gid, sid, rev, classtype, priority,
+        metadata). With an argument, return it when it is in that set, and False otherwise."""
         # TODO: maybe add Snort Default Classifications
         general_options = {
             "msg",
@@ -114,6 +133,8 @@ class Dicts:
 
     @staticmethod
     def payload_detection(option: str = None) -> Any:
+        """With no argument, return the set of payload detection keywords (content, protected_content, hash and others).
+        With an argument, return it when it is in that set, and False otherwise."""
         payload_detection = {
             "content",
             # The content keyword allows
@@ -447,6 +468,8 @@ class Dicts:
 
     @staticmethod
     def non_payload_options(option: str = None) -> Any:
+        """With no argument, return the set of non-payload keywords. With an argument, return it when it is in that set,
+        and False otherwise."""
         non_payload_detect = {
             "fragoffset",
             # The fragoffset keyword allows one to compare
@@ -547,6 +570,8 @@ class Dicts:
 
     @staticmethod
     def post_detect_options(option: str = None) -> Any:
+        """With no argument, return the set of post-detection keywords. With an argument, return it when it is in that
+        set, and False otherwise."""
         post_detect = {
             "logto",
             # The logto keyword tells Snort to log all packets
@@ -598,6 +623,10 @@ class Dicts:
 
     @staticmethod
     def content_modifiers(option: str = None) -> Any:
+        """With no argument, return the set of content modifier keywords. With an argument, return it when it is in that
+        set, and False otherwise."""
+        # Keywords that modify the preceding content match. The parser's
+        # validate_options accepts a single-value content modifier without further checks.
         content_modifiers = {
             "nocase",
             "rawbytes",
@@ -654,6 +683,9 @@ class Dicts:
 
     @staticmethod
     def rule_thresholds(option):
+        """Return "threshold" when it is the argument, and False otherwise.
+
+        `options` has its own threshold table and does not call this method."""
         threshold = {"threshold"}
 
         if option in threshold:
@@ -661,6 +693,12 @@ class Dicts:
         return False
 
     def options(self, option):  # pylint: disable=too-many-return-statements
+        """Return (table, keyword) for the first table that holds `option`, or None when none does.
+
+        The tables are checked in this order: payload detection, non-payload, general,
+        threshold, content modifier, post-detection. The table names returned are
+        "payload", "non-payload", "general", "threshold", "content_modifier" and
+        "post_detect"."""
         # TODO: maybe add Snort Default Classifications
         general_options = self.general_options()
         payload_detection = self.payload_detection()
@@ -688,6 +726,10 @@ class Dicts:
         return None
 
     def get_options(self):
+        """Return the union of the general, payload detection, content modifier, non-payload and post-detection keyword
+        sets.
+
+        The threshold keyword is not in the union."""
         return set().union(
             self.general_options(),
             self.payload_detection(),

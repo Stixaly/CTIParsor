@@ -194,6 +194,10 @@ def classify(status: Mapping[tuple[str, str], tuple[str, str | None]],
     original object.  A reachable entry no row came back to is listed with the rows
     that reach it.
     """
+    # `owned_by` maps each object to the entries that hold it in the full index, and
+    # `still_held` does the same for the ablated bundle. `gone` is the set of objects that
+    # left with the drawn entries. `reachable` is what a drawn entry could bring back, and
+    # `recovered` is what a new row actually brought back.
     by_id = {entry.entry_id: entry for entry in index.entries}
     owned_by = owners(index)
     still_held = owners(remaining)
@@ -208,6 +212,8 @@ def classify(status: Mapping[tuple[str, str], tuple[str, str | None]],
     recovered: set[str] = set()
     reaching: dict[str, list[dict]] = {}
     details: dict[str, list[dict]] = {name: [] for name in _DETAILS}
+    # One pass over the reconciled rows. `expected` is the set of entries that hold any of
+    # the row's original objects. A row reaches a drawn entry when that entry is in expected.
     for key, (state, entry_id) in status.items():
         mapped = originals.get(key, frozenset())
         expected = set().union(*(owned_by.get(oid, set()) for oid in mapped))
@@ -246,6 +252,8 @@ def classify(status: Mapping[tuple[str, str], tuple[str, str | None]],
                 counts["mismatch"] += 1
                 details["mismatch"].append({**row, "entry_id": entry_id, "original": sorted(mapped),
                                             "entry_of_original": sorted(expected)})
+    # Tally the recovered and reachable entries by STIX type. Entries that were reachable
+    # but not recovered are listed with the rows that reach them.
     for eid in recovered:
         by_type["recovered"][by_id[eid].stix_type] += 1
     for eid in reachable:

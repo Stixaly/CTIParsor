@@ -60,6 +60,8 @@ def _check_key(source: str, entity_type: str) -> None:
 
 @router.get("", response_model=ThresholdsOut, response_model_exclude_unset=True)
 def get_thresholds() -> dict:
+    """The calibration settings, the audit of the auto-accepted rows, the stage default of each calibrated source, and
+    the stored cutoffs."""
     with get_conn() as conn:
         rows = list_overrides(conn)
         audit = auto_accept_audit(conn)
@@ -77,6 +79,8 @@ def get_thresholds() -> dict:
 
 @router.post("/recalibrate", response_model=RecalibrateOut, response_model_exclude_unset=True)
 def recalibrate(body: RecalibrateIn) -> dict:
+    """Propose cutoffs from the analysts' decisions, for a target precision and a minimum sample size. They are stored
+    only when `apply` is set. Answer 400 for a target or a sample size out of range."""
     if not 0.0 < body.target_precision <= 1.0:
         raise HTTPException(400, "'target_precision' must be in (0, 1]")
     if body.min_samples < 1:
@@ -112,6 +116,7 @@ def recalibrate(body: RecalibrateIn) -> dict:
 
 @router.put("/{source}/{entity_type}", response_model=OverrideOut, response_model_exclude_unset=True)
 def put_threshold(source: str, entity_type: str, body: OverrideIn) -> dict:
+    """Set a manual cutoff for one source and entity type. Answer 400 for a threshold outside [0, 1]."""
     _check_key(source, entity_type)
     if not 0.0 <= body.threshold <= 1.0:
         raise HTTPException(400, "'threshold' must be in [0, 1]")
@@ -124,6 +129,7 @@ def put_threshold(source: str, entity_type: str, body: OverrideIn) -> dict:
 
 @router.delete("/{source}/{entity_type}", response_model=DeletedOut, response_model_exclude_unset=True)
 def delete_threshold(source: str, entity_type: str) -> dict:
+    """Delete a manual cutoff, so that the stage default applies again. Answer 404 when none is stored."""
     _check_key(source, entity_type)
     with _lock:
         with get_conn() as conn:

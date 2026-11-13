@@ -566,6 +566,8 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
     emb_path = out_dir / "attack_retrieval_embeddings.npy"
     print(f"\n[retrieval] Building {corpus_path.name} (neutralise names: {neutralise})…")
 
+    # Read each ATT&CK bundle in turn. The sha256 and the collection version of each bundle
+    # go into `sources`, for the manifest. The CAPEC bundle is not part of retrieval.
     entries: list[dict] = []
     sources: list[dict] = []
     for key, path in bundles.items():
@@ -583,6 +585,8 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
         return
     entries.sort(key=lambda e: (e["id"], e["kind"], e["text"]))
 
+    # The version is a digest of the source hashes and the neutralise option, so the same
+    # sources built the same way always get the same version string.
     model_id = os.getenv("TTP_EMBEDDING_MODEL", "all-MiniLM-L6-v2")
     digest = hashlib.sha256(json.dumps([s["sha256"] for s in sources]).encode()
                             + (b"neutral" if neutralise else b"raw")).hexdigest()[:12]
@@ -598,6 +602,8 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
                                       ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     print(f"  {counts} over {manifest['techniques']} techniques → {corpus_path}")
 
+    # The corpus is written first. Embeddings are optional: without `embed`, or when the
+    # embedding library is missing, the corpus stays and BM25 retrieval still works.
     if not embed:
         return
     try:

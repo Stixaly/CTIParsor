@@ -61,6 +61,8 @@ _ZIP_RESPONSE: dict[int | str, dict[str, Any]] = {
 
 @router.get("/jobs/{job_id}/coverage", response_model=Coverage, response_model_exclude_unset=True)
 def get_coverage(job_id: str):
+    """Detection coverage of a job's report: each technique the report holds, scored from 0 to 3 by how many corpora
+    hold a rule for it. Answer 404 when the job does not exist."""
     with get_conn() as jobs_conn:
         require_job(jobs_conn, job_id)
         return compute_for_job(get_rule_conn(), job_id, jobs_conn=jobs_conn)
@@ -580,5 +582,6 @@ def post_rule_lookup(lookup: RuleLookup):
 
 @router.get("/detection-corpora", response_model=DetectionCorpora, response_model_exclude_unset=True)
 def get_detection_corpora():
+    """The detection corpora, with their rule counts."""
     with get_rule_conn() as conn:
         return {"corpora": corpus_counts(conn)}

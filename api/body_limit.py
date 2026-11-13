@@ -116,6 +116,8 @@ class BodyLimitMiddleware:
         started = False       # the application had begun its response
 
         async def counted_receive() -> Message:
+            """Pass the request body on to the application and count its bytes. Past the budget, answer 413 when no
+            response has started yet, and tell the application that the client has disconnected."""
             nonlocal received, cut, answered
             if cut:
                 return {"type": "http.disconnect"}
@@ -135,6 +137,8 @@ class BodyLimitMiddleware:
             return message
 
         async def guarded_send(message: Message) -> None:
+            """Send a message to the client, unless the request has already been answered with 413. Record when a
+            response starts."""
             nonlocal started
             if answered:
                 return

@@ -1,3 +1,12 @@
+"""Stage 1: read a CTI report file and turn it into normalised text.
+
+ingest() reads PDF, DOCX, HTML and plain text files, rejoins words split by a
+line break, reads scanned PDF pages with OCR and keeps the rows of tables.  The
+module also finds the report's reference date (extract_reference_date(),
+extract_anchor()), reads publication metadata from HTML captures, and splits the
+text into overlapping chunks for Stage 3 (chunk_text()).
+"""
+
 import logging
 import os
 import zipfile

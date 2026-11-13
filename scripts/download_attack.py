@@ -160,8 +160,12 @@ def download_release(version: str, out: Path | None = None) -> None:
     if not isinstance(release, dict) or release.get("tag_name") != tag:
         _refuse(f"The metadata do not describe release {tag}")
     by_name = {a.get("name"): a for a in release.get("assets") or [] if isinstance(a, dict)}
+    # The sha256 digests that the repository's manifests already record for this release.
     recorded = _recorded(version)
 
+    # Check every asset before downloading any: the digest must be published, the URL must
+    # be the release's own download URL, and the size must be known. The digest must also
+    # match the one the manifests record.
     assets: list[dict] = []
     for name in _BUNDLES:
         asset = by_name.get(name)
@@ -182,6 +186,9 @@ def download_release(version: str, out: Path | None = None) -> None:
                 _refuse(f"{name}: GitHub publishes {digest}, but {manifest} records sha256:{sha}")
         assets.append({"name": name, "size": size, "digest": digest, "url": url})
 
+    # Downloads go to `<name>.tmp` first, and are renamed into place only after every
+    # bundle has passed its sha256 check. On any error, the temporary files and the
+    # directories this call created are removed, and the error is raised again.
     made: list[Path] = []
     fetched: list[tuple[Path, Path]] = []
     try:
@@ -189,6 +196,7 @@ def download_release(version: str, out: Path | None = None) -> None:
         for asset in assets:
             target = out / asset["name"]
             want = asset["digest"].removeprefix("sha256:")
+            # A bundle already on disk with the right digest is kept and not fetched again.
             if target.is_file() and _sha256_file(target) == want:
                 print(f"  {asset['name']}: already present, sha256 matches")
                 continue
@@ -213,6 +221,8 @@ def download_release(version: str, out: Path | None = None) -> None:
                 pass
         raise
 
+    # release.json records what was verified: the metadata of the release and the checked
+    # assets. It is written last, after every bundle is in place.
     (out / "release.json").write_text(json.dumps({
         "repository": _REPOSITORY,
         "tag": tag,

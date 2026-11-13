@@ -57,6 +57,8 @@ def _me(user: store.User | None, csrf_token: str | None) -> dict:
 })
 @limiter.limit(login_rate_limit)
 def login(body: LoginRequest, request: Request, response: Response):
+    """Sign in with a username and a password. On success, set the session cookie and answer with the account. Answer
+    401 for a wrong username or password, 403 when local sign-in is off, and 429 after too many failed attempts."""
     mode = config.auth_mode()
     if mode == "off":
         raise HTTPException(404, "Authentication is off")
@@ -131,6 +133,7 @@ def methods():
 
 @router.post("/logout", response_model=SignedOut)
 def logout(request: Request, response: Response, _user: store.User | None = Depends(current_user)):
+    """End the session of this request, if it has one, and clear its cookie."""
     cookie = request.cookies.get(SESSION_COOKIE)
     if cookie:
         store.delete_session(cookie)
@@ -141,6 +144,8 @@ def logout(request: Request, response: Response, _user: store.User | None = Depe
 
 @router.get("/me", response_model=Me)
 def me(request: Request, user: store.User | None = Depends(current_user)):
+    """Describe the caller: the signed-in account and its CSRF token for a session, or the anonymous view when nobody
+    is signed in."""
     csrf = None
     if user is not None:
         _, session = authenticate(request)
@@ -188,6 +193,8 @@ def _refused(code: str, detail: str, request: Request | None = None) -> Redirect
 }, response_class=RedirectResponse)
 @limiter.limit(login_rate_limit)
 def oidc_login(request: Request, next_path: str = Query("/", alias="next")):
+    """Start the OIDC sign-in: redirect to the identity provider and bind the login to this browser with a cookie.
+    Answer 404 when authentication is off and 403 when OIDC is off."""
     _oidc_available()
     try:
         url, binding = oidc.begin_login(next_path)
@@ -210,6 +217,8 @@ def oidc_login(request: Request, next_path: str = Query("/", alias="next")):
 @limiter.limit(login_rate_limit)
 def oidc_callback(request: Request, code: str | None = None, state: str | None = None,
                   error: str | None = None):
+    """Finish the OIDC sign-in: check the answer of the identity provider, create the session, and redirect to the page
+    the sign-in started from. A refused sign-in redirects to /login with an error code."""
     _oidc_available()
     if error:                                       # the identity provider refused; its text is not passed on
         if state:

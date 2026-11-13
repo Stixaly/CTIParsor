@@ -54,6 +54,7 @@ STATUSES: tuple[str, ...] = ("candidate", "active", "ignored")
 
 
 def overrides_enabled() -> bool:
+    """True when ENTITY_OVERRIDES_ENABLED is on, which is the default."""
     return env_bool("ENTITY_OVERRIDES_ENABLED", default=True)
 
 
@@ -97,6 +98,7 @@ def _load_active() -> tuple[frozenset[tuple[str, str]], tuple[dict, ...]]:
 
 
 def denied_keys() -> frozenset[tuple[str, str]]:
+    """The active deny rows, as (normalised value, entity type) pairs."""
     return _load_active()[0]
 
 
@@ -117,6 +119,7 @@ def overrides_fingerprint() -> str:
 
 
 def is_denied(value: str, entity_type: str) -> bool:
+    """True when the value, once normalised, with this entity type is an active deny row."""
     return (normalise(value), entity_type) in denied_keys()
 
 

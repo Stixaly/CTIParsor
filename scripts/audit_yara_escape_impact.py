@@ -101,6 +101,11 @@ def main() -> int:
     samples = []
     impacted_files = set()
 
+    # Walk every .yar and .yara file under the root, outside .git. For each text literal,
+    # compare the atoms the buggy unescape gives with the atoms of the fixed one. Only a
+    # literal whose atoms change counts as impacted, and the atoms that appear on one side
+    # only are counted as recovered (fix) or lost (fix). A crash in one file is recorded and
+    # the walk goes on.
     root = Path(args.root)
     for path in root.rglob("*"):
         if not path.is_file():
@@ -154,6 +159,8 @@ def main() -> int:
             crash_details.append((str(path), str(exc)))
             continue
 
+    # The report: the scan counts, then the atom classes the fix gains and loses, most
+    # frequent first, then the first --show samples.
     print("=== YARA escape-order impact ===")
     print(f"files scanned      : {files_scanned}")
     print(f"unreadable         : {unreadable}")
