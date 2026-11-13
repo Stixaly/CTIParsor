@@ -205,7 +205,9 @@ def captured_env() -> dict[str, str]:
     `auto` instead of leaving the default to be inferred.  The same holds for
     the switches that are on by default (Stages 3d, 3f and 3doc): unset or
     blank, they are recorded as `true`; CYNER_ENABLED, off by default
-    (ADR-0099), is recorded as `false`."""
+    (ADR-0099), is recorded as `false`.  `OCR_LANG` is always recorded, with
+    the languages Stage 1 reads with (see `pipeline.stage1_ingestion.ocr_lang`),
+    not the raw setting."""
     env = {}
     for var_name in _CAPTURED_ENV:
         val = os.getenv(var_name)
@@ -219,6 +221,10 @@ def captured_env() -> dict[str, str]:
             env[var_name] = "true"
     if not env.get("CYNER_ENABLED", "").strip():
         env["CYNER_ENABLED"] = "false"
+    # The OCR languages Stage 1 reads with: the setting after the fallback to
+    # the installed Tesseract data, or the default when it is unset.
+    from pipeline.stage1_ingestion import ocr_lang
+    env["OCR_LANG"] = ocr_lang()
     return env
 
 

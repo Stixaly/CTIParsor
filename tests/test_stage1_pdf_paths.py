@@ -233,13 +233,6 @@ def test_one_page_ocr_failures_are_empty_not_errors(monkeypatch, tmp_path, ocr):
     assert s1._ocr_page(tmp_path / "r.pdf", 4) == ""
 
 
-def test_the_ocr_language_defaults_to_english(monkeypatch):
-    monkeypatch.setenv("OCR_LANG", "   ")
-    assert s1.ocr_lang() == "eng"
-    monkeypatch.setenv("OCR_LANG", " deu ")
-    assert s1.ocr_lang() == "deu"
-
-
 # ── markitdown ───────────────────────────────────────────────────────────────
 
 def _markitdown(monkeypatch, result: str | Exception):

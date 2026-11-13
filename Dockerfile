@@ -82,12 +82,16 @@ ENV PYTHONUNBUFFERED=1 \
 # library — verified via ldd, it links only libstdc++/libgcc_s, both already
 # present in this base image (ADR-0049);
 # tini reaps the Chromium and pipeline subprocesses.
+# The Tesseract packs for French, Ukrainian, Polish and Russian are read when
+# OCR_LANG names them (pipeline/stage1_ingestion.py); the default is English,
+# which comes with tesseract-ocr.
 # `apt-get upgrade` first (ADR-0078): the base image is pinned by digest, so
 # the Debian security updates published since it was built (libpcre2, Grype
 # 2026-10-04) reach this image only here, not when Dependabot next bumps it.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         ca-certificates git tini tesseract-ocr poppler-utils \
+        tesseract-ocr-fra tesseract-ocr-ukr tesseract-ocr-pol tesseract-ocr-rus \
         libxml2 libxslt1.1 libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 

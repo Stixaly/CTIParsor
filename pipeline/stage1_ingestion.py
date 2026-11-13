@@ -377,9 +377,54 @@ def _read_pdf_ocr(path: Path) -> str:
     return "\n".join(t for t in pages_text if t.strip())
 
 
+# The Tesseract language(s) a scanned page is read in when OCR_LANG is unset or
+# blank.  English alone: on the repository's English fixtures, reading with
+# eng+fra+ukr+pol+rus raised the character error rate and took longer per
+# page, so mixed-language teams set OCR_LANG to the larger value.
+OCR_LANG_DEFAULT = "eng"
+
+# OCR_LANG as requested, mapped to the languages Tesseract has data for.
+_ocr_langs_in_use: dict[str, str] = {}
+
+
 def ocr_lang() -> str:
-    """Tesseract language(s), e.g. "eng" or "eng+fra" (OCR_LANG; default eng)."""
-    return (os.getenv("OCR_LANG") or "eng").strip() or "eng"
+    """Tesseract language(s) for a scanned page, e.g. "eng" or "eng+fra":
+    OCR_LANG, or OCR_LANG_DEFAULT when it is unset or blank.  Languages that
+    Tesseract has no data for are left out (see _resolve_ocr_lang)."""
+    requested = (os.getenv("OCR_LANG") or "").strip() or OCR_LANG_DEFAULT
+    if requested not in _ocr_langs_in_use:
+        _ocr_langs_in_use[requested] = _resolve_ocr_lang(requested)
+    return _ocr_langs_in_use[requested]
+
+
+def _resolve_ocr_lang(requested: str) -> str:
+    """The requested languages that Tesseract has installed, joined with "+".
+
+    One warning names the languages left out.  When none is installed, or the
+    installed list cannot be read, the setting is returned unchanged: each
+    page's OCR then fails and logs its own warning, as before."""
+    if not _OCR_AVAILABLE:
+        return requested
+    try:
+        installed = set(pytesseract.get_languages(config=""))
+    except Exception as exc:
+        logger.warning(f"[Stage 1] could not list the Tesseract languages "
+                       f"({type(exc).__name__}: {exc}); OCR_LANG={requested} is used as set")
+        return requested
+    wanted = [lang for lang in requested.split("+") if lang]
+    usable = [lang for lang in wanted if lang in installed]
+    missing = [lang for lang in wanted if lang not in installed]
+    if not missing:
+        return requested
+    if not usable:
+        logger.warning(f"[Stage 1] OCR_LANG={requested}: Tesseract has no data for any of these "
+                       f"languages ({', '.join(missing)}); scanned pages will fail to OCR. "
+                       f"Install the tesseract-ocr-<lang> packages.")
+        return requested
+    logger.warning(f"[Stage 1] OCR_LANG={requested}: Tesseract has no data for "
+                   f"{', '.join(missing)}; scanned pages are read in {'+'.join(usable)}. "
+                   f"Install the tesseract-ocr-<lang> packages for the missing languages.")
+    return "+".join(usable)
 
 
 # A page is read as a scan when it carries almost no text and an image covers

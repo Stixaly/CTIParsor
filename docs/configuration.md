@@ -720,9 +720,18 @@ that name at the project root:
 ## OCR
 
 ```env
-# Tesseract language(s) for scanned PDF pages, e.g. eng+fra.  OCR is decided page by page.
+# Tesseract language(s) for scanned PDF pages, e.g. eng+fra+ukr+pol+rus.  OCR is decided page by page.
 # OCR_LANG=eng
 ```
+
+`OCR_LANG` defaults to `eng`, English only. The image installs the Tesseract
+data for French, Ukrainian, Polish and Russian as well
+(`tesseract-ocr-fra`, `-ukr`, `-pol`, `-rus`): a team that reads sources in
+those languages sets `OCR_LANG=eng+fra+ukr+pol+rus`. The default stays English
+because reading with the larger set lowers the accuracy on English pages and
+takes longer per page. A language whose data is not installed is left out of
+the run, with one warning in the log, so a page is not lost to it. The run
+record keeps the languages that were used.
 
 A page is OCR'd when it has almost no text layer (under 50 characters) and
 either an image covers half of it or its text is drawn as glyph outlines
@@ -730,9 +739,8 @@ either an image covers half of it or its text is drawn as glyph outlines
 page whose fonts it cannot embed). A PDF whose every page is such a page is
 OCR'd whole; otherwise only those pages are, in place.
 
-The image installs Debian's `tesseract-ocr`, which brings English only. Another
-language needs its `tesseract-ocr-<lang>` package added to the `Dockerfile`
-and an image rebuild.
+Another language needs its `tesseract-ocr-<lang>` package added to the
+`Dockerfile` and an image rebuild.
 
 ## Logging
 
