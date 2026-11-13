@@ -6,7 +6,8 @@ The page is hostile until proven otherwise: it is chosen by whoever wrote the
 report, not by the analyst.  Three boundaries stand between it and the host —
 the URL policy in `validate_url` (scheme, port, and every IP the host resolves
 to), the request filter installed on the browser context (resource types, and
-the same URL policy re-applied to every subresource), and the Chromium renderer
+the same URL policy re-applied to every subresource and to every redirect hop),
+and the Chromium renderer
 sandbox, which `capture_url_to_pdf` turns back ON because Playwright ships it
 off by default.
 
@@ -23,9 +24,10 @@ import socket
 import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
+from html import escape as _html_escape
 from pathlib import Path
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit, urlunsplit
+from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from api.logging_config import get_logger
 
@@ -100,6 +102,21 @@ _BLOCKED_LITERAL_HOSTS = frozenset({
 # global, and Alibaba Cloud's metadata endpoint, 100.100.100.200, sits inside it.
 _SHARED_ADDRESS_SPACE = ipaddress.ip_network("100.64.0.0/10")
 
+# Redirect statuses the request filter follows itself (see _fetch_following_redirects).
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+# Hops followed before a redirect chain is refused.  Ten is far more than a
+# legitimate chain needs (http to https to the www host to the page path is three).
+_MAX_REDIRECT_HOPS = 10
+
+# Request headers not copied to a followed hop: Host names the old origin, and
+# Content-Length belongs to the request whose body was dropped or replaced.
+_HOP_DROPPED_REQUEST_HEADERS = frozenset({"host", "content-length"})
+
+# Response headers not copied when the body is rewritten: the body is handed to
+# the browser already decoded, so the encoding and length of the original are wrong.
+_REWRITTEN_RESPONSE_HEADERS = frozenset({"content-length", "content-encoding", "transfer-encoding"})
+
 # Resource types Chromium may fetch while rendering.  `script` is added only
 # when JavaScript is explicitly enabled by the caller.
 _ALLOWED_RESOURCE_TYPES = frozenset({
@@ -153,8 +170,9 @@ _REFUSAL_ERRORS = (
 # cannot grant them can set this variable, and gets a loud warning for it.
 _UNSANDBOXED_ENV = "CTIPARSOR_CAPTURE_UNSANDBOXED"
 
-# Forward proxy Chromium's own traffic through (e.g. http://capture-proxy:3128
-# in compose.yaml) -- an independent, network-layer re-check of the SSRF
+# Forward proxy the capture's traffic through (e.g. http://capture-proxy:3128
+# in compose.yaml), Chromium's requests and the request filter's own fetches
+# alike (#801) -- an independent, network-layer re-check of the SSRF
 # policy below. See _dns_pin_arg's docstring for the gap this closes: a
 # subresource on a different host is re-validated by _route_filter, but
 # Chromium then resolves and connects to it entirely on its own, a second,
@@ -662,22 +680,25 @@ def _dns_pin_arg(host: str) -> str | None:
     exact address already validated closes that gap for the navigated host.
 
     Residual gap, documented rather than silently assumed away: this pins only
-    the hostname passed in *this* call. A redirect target or a subresource on
-    a different host is still re-validated by `_route_filter` on every request,
-    but that re-check has the same TOCTOU shape — it is not itself pinned to a
-    connection. Narrower and harder to exploit than the unpinned entry point
-    (it requires the *second* host's nameserver to also race), but not closed
-    by anything in this module.
+    the hostname passed in *this* call, and only for Chromium's own resolver.
+    Since #801 the request filter fetches every request itself with
+    `route.fetch`, and the Playwright driver resolves the hostname of those
+    fetches, not Chromium. The driver does not read this flag, so the pin does
+    not bind any request the filter makes, the navigated host included. Each
+    request and each redirect hop is still checked by `validate_url` with its
+    own lookup, so a nameserver that answers differently to the second lookup
+    (rebinding) is not closed by anything in this module.
 
     Closed one layer out instead: CTIPARSOR_CAPTURE_PROXY (compose.yaml's
-    `capture-proxy`, docker/squid/squid.conf) routes Chromium's traffic
+    `capture-proxy`, docker/squid/squid.conf) routes the capture's traffic
     through a Squid instance that applies the same IP-range policy as
-    `_ip_is_public` and does its own resolution immediately before connecting
-    — the same coupling this function gives the navigated host, given for
-    free to every subresource and redirect target too, because Squid resolves
-    and connects in one step rather than two. Unset (a host install with no
-    proxy in front), a subresource/redirect DNS race is the one gap this
-    module does not close on its own.
+    `_ip_is_public` and does its own resolution immediately before connecting.
+    Squid resolves and connects in one step rather than two, which gives every
+    request the same coupling this function gives the navigated host. The
+    driver's fetches go through it too (checked with a stub proxy, which received
+    CONNECT requests for them). Unset (a host install with no proxy in
+    front), a DNS race between the check and the connection is open for every
+    request the capture makes; this module does not close it on its own.
     """
     # A literal IP needs no pin. Otherwise the pin uses the first IPv4 answer of the cached
     # resolution, the one validate_url already checked. With no IPv4 answer, nothing is pinned.
@@ -721,6 +742,76 @@ def _load_error_message(url: str, exc: Exception) -> str:
     return msg
 
 
+class _RedirectRefused(Exception):
+    """A redirect hop, or the redirect chain as a whole, was refused by the capture policy."""
+
+
+def _fetch_following_redirects(route, request, *, timeout_ms: int):
+    """
+    Fetch the final response to `request`, checking every redirect hop first.
+
+    `route.continue_()` hands the request to Chromium, and Chromium follows a
+    server-side 3xx by itself without another route event, so a public URL could
+    redirect to an address the policy refuses (#801).  Here the request is
+    fetched with `max_redirects=0` instead.  A 3xx comes back with its `Location`,
+    which is resolved against the URL that answered it and passed through
+    `validate_url` before it is followed.  The fetch runs in the Playwright
+    driver, so the hostnames in it are resolved there (see `_dns_pin_arg`).
+
+    Returns (response, final_url, hops).  Raises _RedirectRefused when a hop fails
+    the policy or the chain is longer than _MAX_REDIRECT_HOPS.
+    """
+    url = request.url
+    method = request.method
+    post_data = request.post_data_buffer
+    headers = {
+        name: value for name, value in request.headers.items()
+        if name.lower() not in _HOP_DROPPED_REQUEST_HEADERS
+    }
+    hops = 0
+    while True:
+        response = route.fetch(
+            url=url, method=method, headers=headers, post_data=post_data,
+            max_redirects=0, timeout=timeout_ms,
+        )
+        location = response.headers.get("location")
+        if response.status not in _REDIRECT_STATUSES or not location:
+            return response, url, hops
+        if hops >= _MAX_REDIRECT_HOPS:
+            raise _RedirectRefused(f"more than {_MAX_REDIRECT_HOPS} redirects from {request.url}")
+        target = urljoin(url, location)
+        try:
+            url = validate_url(target)
+        except CaptureError as exc:
+            raise _RedirectRefused(f"redirect to {target} refused: {exc}") from exc
+        hops += 1
+        # As a browser does: 303 always, and 301/302 after a POST, become a GET.
+        if response.status == 303 or (response.status in (301, 302) and method == "POST"):
+            method, post_data = "GET", None
+
+
+_BASE_ELEMENT = re.compile(rb"<base\b", re.IGNORECASE)
+_HEAD_START_TAG = re.compile(rb"<head\b[^>]*>", re.IGNORECASE)
+
+
+def _with_base_href(body: bytes, base_url: str) -> bytes | None:
+    """
+    `body` with `<base href="base_url">` as the first element of its <head>.
+
+    A document reached through a followed redirect keeps the URL it was requested
+    at as its base in Chromium, so its relative subresources would resolve against
+    the old address.  Returns None when the page already names a base (its own
+    base is left in charge) or has no <head> to hold the element.
+    """
+    if _BASE_ELEMENT.search(body):
+        return None
+    head = _HEAD_START_TAG.search(body)
+    if head is None:
+        return None
+    tag = f'<base href="{_html_escape(base_url, quote=True)}">'.encode("utf-8", "xmlcharrefreplace")
+    return body[: head.end()] + tag + body[head.end():]
+
+
 def capture_url_to_pdf(
     url: str,
     dest: Path,
@@ -746,6 +837,9 @@ def capture_url_to_pdf(
         chromium_args.append(f"--host-resolver-rules={dns_pin}")
 
     blocked = [0]
+    # The main document's URL after its redirects were followed; empty until the
+    # filter sees the navigation.
+    document_final: list[str] = []
 
     def _route_filter(route, request):
         try:
@@ -762,15 +856,51 @@ def capture_url_to_pdf(
             # never reaches the network, so there is no address to validate (#511).
             # Only that scheme is exempt; the resource-type check above still
             # applies, and every http(s) subresource is re-checked here.
-            if not request.url.lower().startswith("data:"):
-                try:
-                    validate_url(request.url)
-                except CaptureError:
-                    blocked[0] += 1
-                    route.abort()
-                    return
+            if request.url.lower().startswith("data:"):
+                route.continue_()
+                return
+            try:
+                validate_url(request.url)
+            except CaptureError:
+                blocked[0] += 1
+                route.abort()
+                return
 
-            route.continue_()
+            # Every redirect hop is checked too (#801): the response is fetched
+            # here, not by Chromium, so Chromium never follows a 3xx unchecked.
+            try:
+                response, final_url, hops = _fetch_following_redirects(
+                    route, request, timeout_ms=timeout_ms,
+                )
+            except _RedirectRefused as exc:
+                blocked[0] += 1
+                logger.info(f"[capture] redirect refused: {exc}")
+                route.abort("blockedbyclient")
+                return
+
+            if request.is_navigation_request() and request.frame.parent_frame is None:
+                document_final[:] = [final_url]
+
+            # Chromium would resolve the document's relative URLs against the URL it
+            # asked for, so an HTML document reached by a redirect gets its final
+            # URL as <base> (see _with_base_href).
+            if (
+                hops
+                and request.resource_type == "document"
+                and "html" in response.headers.get("content-type", "").lower()
+            ):
+                rewritten = _with_base_href(response.body(), final_url)
+                if rewritten is not None:
+                    route.fulfill(
+                        status=response.status,
+                        headers={
+                            name: value for name, value in response.headers.items()
+                            if name.lower() not in _REWRITTEN_RESPONSE_HEADERS
+                        },
+                        body=rewritten,
+                    )
+                    return
+            route.fulfill(response=response)
         except Exception as exc:
             logger.debug(f"[capture] request refused after an error in the route filter: {exc}")
             try:
@@ -871,7 +1001,9 @@ def capture_url_to_pdf(
                                             "'Run page JavaScript' enabled, or paste the report text.")
                 )
 
-            final_url = response.url or safe_url
+            # The filter's own record of the document's final URL: Chromium still
+            # reports the URL it was asked for, because the filter answered the request.
+            final_url = (document_final[0] if document_final else "") or response.url or safe_url
 
             # No `page_ranges` cap: Chromium errors when the range runs past the
             # document, which would fail every capture shorter than the cap.

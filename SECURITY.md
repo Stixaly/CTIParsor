@@ -122,6 +122,18 @@ when the job runs, and an object that fails is left out, not repaired. A request
 body over its route's budget gets a 413 before the application reads the rest
 (`api/body_limit.py`).
 
+### 8. Captured URLs (SSRF)
+An analyst can submit a URL to capture (`POST /api/ingest/url`), and whoever wrote the
+report chose the page. `pipeline/web_capture.py` accepts only http and https, the ports
+80, 443, 8080 and 8443, and hosts whose every address is public (`validate_url`). The
+request filter applies the same check to each subresource and to each redirect hop:
+the capture fetches each response itself, checks the `Location` of a 3xx before it
+follows it, and refuses a chain longer than ten hops. A refused request or hop
+is counted in the capture's `blocked_requests`. `CTIPARSOR_CAPTURE_PROXY` (set by
+compose) puts a Squid egress filter behind these checks. Without it, the address a
+request resolves to is looked up again by the Playwright driver after the check, so
+DNS rebinding is not closed for captured URLs ([docs/configuration.md](docs/configuration.md)).
+
 ## HTTP security headers
 What each layer sends. Checked against `api/main.py`, the routes and `docker/nginx/default.conf`.
 
@@ -171,8 +183,9 @@ operator or an analyst; nothing else leaves the host:
   (`pipeline/stage2f_cve_enrichment.py`);
 - **the detection corpora**: `git` fetches of HTTPS remotes, with the ambient git
   credentials (`scripts/sync_corpora.py`, `pipeline/detection/sync.py`);
-- **URLs an analyst submits** for capture (`POST /api/ingest/url`): the page and the
-  subresources its renderer requests (`pipeline/web_capture.py`);
+- **URLs an analyst submits** for capture (`POST /api/ingest/url`): the page, the
+  subresources its renderer requests and the redirects they answer with
+  (`pipeline/web_capture.py`);
 - **model downloads** from the Hugging Face hub, once, then cached (`docker/entrypoint.sh`).
 
 With no API key the pipeline still produces valid STIX.
