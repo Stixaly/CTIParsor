@@ -9,6 +9,35 @@ theme.
 
 ## [Unreleased]
 
+- **V1 fixes (issues #706, #707, #722–#724).**
+  - *Review:* the page keeps the server's decisions apart from the writes still in flight. A decision the
+    server refuses (403, 500, network) is undone on screen and shown with Retry; Undo all reports the cards it
+    could not undo; a refresh shows decisions made in another session (#706). A reader opens a report
+    read-only: no status change on opening, no write control, no writing shortcut (#707).
+  - *Retention:* a human decision or edit renews a report's retention clock (`jobs.activity_at`, migration 21);
+    reading it does not (#723).
+  - *Deletion:* the files a filesystem error leaves after a report's rows are deleted are recorded in the same
+    transaction (`job_file_cleanups`, migration 22) and removed again at start-up, on each sweep and on a
+    repeated `DELETE`, whose answer carries `files_pending` while files remain (#724).
+  - *CLI:* a batch plans every bundle path before the first file runs, so `report.md`, `report.txt` and
+    `report_txt.md` no longer overwrite one another; the summary prints the path each file wrote (#722).
+  - *OIDC:* a `nonce` claim with a NUL byte or a lone surrogate redirects to `/login?error=token` instead of
+    answering 500 (#646). The sidebar shows `CTIParsor` and the frontend version (#645).
+- **V1 qualification tools.** `scripts/check_release_dossier.py` checks a candidate's delivery proofs before
+  the tag: CI jobs, image digest and attestations, Grype alerts against `.grype.yaml` and SECURITY.md (#712).
+  `scripts/opencti_import_bundle.py` runs the step-7 checks on any bundle and imports it twice to check
+  idempotence (#708). `contract/` records the job statuses, the `X-Bundle-Validation` values, the SSE event
+  names, the detection export layout (`contract/formats.json`) and `x_ctiparsor_enrichment` (#657).
+  `scripts/check_doc_links.py` checks every relative Markdown link and anchor, in `make check-docs` and CI (#654).
+- **Security.** `soupsieve` is floored at 4.0 (CVE-2026-126190). CVE-2026-119170 (CPython 3.14.10, hashlib in
+  FIPS mode only) is accepted until the base image carries 3.14.11: the image runs with FIPS mode off.
+- **Documentation (#647–#662, #713).** Docstrings for every `api/` and `pipeline/` module, public function and
+  response model, the scripts, `models/` and the evaluation commands, with tests that keep them; comments in the
+  long functions; the vendored Snort parser documented, and marked modified in THIRD_PARTY_NOTICES.md. New:
+  routes outside the OpenAPI schema and the internal errors with their answers (`docs/api.md`), the HTTP
+  security headers (SECURITY.md), the log tags (`docs/operations.md`), the `APP_UID`/`APP_GID` build arguments
+  (`docs/docker.md`), and a support table that separates implemented, qualified and limits per capability
+  (`docs/support-policy.md`). The Key-techniques cut-offs of Stage 3's context are named constants.
 - **Project licence changed** from Apache-2.0 to GNU AGPL version 3 only
   (`AGPL-3.0-only`). Third-party components retain their own licences;
   `REUSE.toml` and `THIRD_PARTY_NOTICES.md` identify them.
