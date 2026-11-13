@@ -12,6 +12,12 @@ import pytest
 from pipeline import web_capture
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 class _FakeRoute:
     def __init__(self):
         self.calls: list[str] = []

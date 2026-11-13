@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urljoin, urlsplit, urlunsplit
 
 from api.logging_config import get_logger
+from pipeline.env_flags import env_bool
 
 if TYPE_CHECKING:
     # Type-only: `new_context(viewport=…)` wants the ViewportSize TypedDict, and
@@ -182,6 +183,11 @@ _UNSANDBOXED_ENV = "CTIPARSOR_CAPTURE_UNSANDBOXED"
 # step, closing that window. Optional and unset by default: a host install
 # with no proxy in front of it captures exactly as before.
 _CAPTURE_PROXY_ENV = "CTIPARSOR_CAPTURE_PROXY"
+
+# Development and tests only: capture without the proxy.  Without the proxy the
+# DNS-rebinding gap is open for every request (see _dns_pin_arg), so a capture
+# is refused unless this is set, and then it logs a warning each time.
+_ALLOW_DIRECT_ENV = "CTIPARSOR_CAPTURE_ALLOW_DIRECT"
 
 _DEFAULT_TIMEOUT_MS = 30_000
 _MAX_PDF_BYTES = 50 * 1024 * 1024
@@ -742,6 +748,30 @@ def _load_error_message(url: str, exc: Exception) -> str:
     return msg
 
 
+def capture_proxy() -> str:
+    """The egress proxy the capture sends its traffic through, or "" when unset."""
+    return os.environ.get(_CAPTURE_PROXY_ENV, "").strip()
+
+
+def require_capture_egress() -> None:
+    """
+    Refuse a capture that would reach the network without the egress proxy.
+
+    The proxy is what closes DNS rebinding for the requests the capture makes
+    (see _dns_pin_arg), so it is required.  `CTIPARSOR_CAPTURE_ALLOW_DIRECT=1` is
+    the escape hatch for development and tests; `capture_url_to_pdf` logs a
+    warning for every capture that uses it.  Raises CaptureUnavailable, which the
+    API answers with 503.  Makes no network call and starts no browser.
+    """
+    if capture_proxy() or env_bool(_ALLOW_DIRECT_ENV):
+        return
+    raise CaptureUnavailable(
+        f"URL capture needs its egress proxy: set {_CAPTURE_PROXY_ENV} (compose sets "
+        "it; see docs/configuration.md). For development and tests only, "
+        f"{_ALLOW_DIRECT_ENV}=1 captures without the proxy."
+    )
+
+
 class _RedirectRefused(Exception):
     """A redirect hop, or the redirect chain as a whole, was refused by the capture policy."""
 
@@ -825,6 +855,16 @@ def capture_url_to_pdf(
         raise CaptureError(
             "Web capture is unavailable — Playwright is not installed. "
             "Run: pip install playwright && python -m playwright install chromium"
+        )
+
+    # Before validate_url, which resolves the host: no DNS lookup and no browser
+    # start happen for a capture that is refused here.
+    require_capture_egress()
+    if not capture_proxy():
+        logger.warning(
+            "%s is set and %s is not: the capture of %s goes direct and the "
+            "DNS-rebinding gap is open for it",
+            _ALLOW_DIRECT_ENV, _CAPTURE_PROXY_ENV, url,
         )
 
     safe_url = validate_url(url)

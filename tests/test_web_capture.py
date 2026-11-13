@@ -7,6 +7,12 @@ from pipeline import web_capture
 from pipeline.web_capture import CaptureError, CaptureResult, suggest_filename, validate_url
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 def test_bare_domain_gets_https_prefix(monkeypatch):
     monkeypatch.setattr(web_capture, "_resolve_all", lambda h: ["93.184.216.34"])
     assert validate_url("example.com/a") == "https://example.com/a"

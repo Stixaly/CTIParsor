@@ -281,7 +281,7 @@ async def ingest_text(request: Request, body: TextIngestRequest):
 @limiter.limit("5/minute")
 async def ingest_url(request: Request, body: UrlIngestRequest):
     """Start a job from a web page: render the URL, keep its visible text, and start a job on it. Answer 400 for a URL
-    that is refused and 503 when web capture is not installed."""
+    that is refused and 503 when web capture is not installed or has no egress proxy configured."""
     tlp = _clean_marking(body.tlp_level, "tlp_level")
     pap = _clean_marking(body.pap_level, "pap_level")
     _check_baseline_request(body)
@@ -292,6 +292,13 @@ async def ingest_url(request: Request, body: UrlIngestRequest):
             "Web capture is unavailable on this server — Playwright is not "
             "installed. Paste the report text instead.",
         )
+
+    # Before validate_url: it resolves the host, and a server without the egress
+    # proxy must not make that lookup either (web_capture.require_capture_egress).
+    try:
+        web_capture.require_capture_egress()
+    except web_capture.CaptureUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
 
     try:
         safe_url = web_capture.validate_url(body.url)

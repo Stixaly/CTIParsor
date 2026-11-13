@@ -129,10 +129,16 @@ report chose the page. `pipeline/web_capture.py` accepts only http and https, th
 request filter applies the same check to each subresource and to each redirect hop:
 the capture fetches each response itself, checks the `Location` of a 3xx before it
 follows it, and refuses a chain longer than ten hops. A refused request or hop
-is counted in the capture's `blocked_requests`. `CTIPARSOR_CAPTURE_PROXY` (set by
-compose) puts a Squid egress filter behind these checks. Without it, the address a
-request resolves to is looked up again by the Playwright driver after the check, so
-DNS rebinding is not closed for captured URLs ([docs/configuration.md](docs/configuration.md)).
+is counted in the capture's `blocked_requests`.
+
+The egress proxy is **required**: `CTIPARSOR_CAPTURE_PROXY` (set by compose) names a
+Squid filter that resolves and connects in one step, which closes DNS rebinding for
+every request. Without it the capture is refused (HTTP 503) before any lookup or
+browser start. Each check resolves a name separately from the connection, and the
+driver ignores the Chromium DNS pin, so the checks alone do not stop a nameserver that
+answers differently the second time. `CTIPARSOR_CAPTURE_ALLOW_DIRECT=1` lifts the
+refusal for development and tests and logs a warning on every capture
+([docs/configuration.md](docs/configuration.md)).
 
 ## HTTP security headers
 What each layer sends. Checked against `api/main.py`, the routes and `docker/nginx/default.conf`.

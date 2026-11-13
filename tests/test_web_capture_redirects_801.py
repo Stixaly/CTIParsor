@@ -31,6 +31,12 @@ INTERNAL_MARKER = "INTERNAL-ONLY-MARKER"
 ARTICLE = "Public article text about a threat actor campaign. " * 8
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 def _html(text: str, extra: str = ""):
     body = f"<html><head><title>t</title></head><body><p>{text}</p>{extra}</body></html>"
     return 200, {"Content-Type": "text/html; charset=utf-8"}, body.encode()

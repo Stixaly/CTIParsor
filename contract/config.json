@@ -172,6 +172,12 @@
         "2147483648"
       ]
     },
+    "env CTIPARSOR_CAPTURE_ALLOW_DIRECT": {
+      "set": false,
+      "values": [
+        "false"
+      ]
+    },
     "env CTIPARSOR_CAPTURE_PROXY": {
       "set": false,
       "values": [

@@ -666,8 +666,9 @@ Every variable, with its default and the reasoning behind it:
   (`docker compose --profile proxy up -d`; you create its certificate, key and
   htpasswd, see [docs/docker.md](docs/docker.md)), the `ollama` profile a local LLM
   with no published port;
-- sends the URL tab's Chromium through `capture-proxy`, a Squid egress filter
-  that only lets it reach public addresses;
+- sends the URL tab's traffic through `capture-proxy`, a Squid egress filter
+  that only lets it reach public addresses; a URL capture is refused without
+  that proxy (see [docs/configuration.md](docs/configuration.md));
 - adds isolation; the containers do not authenticate anyone. With the default
   `AUTH_MODE=off`, [docs/deployment.md §2](docs/deployment.md#2-what-no-authentication-actually-means)
   applies unchanged; `AUTH_MODE=local`, `oidc` or `both` turns on sign-in

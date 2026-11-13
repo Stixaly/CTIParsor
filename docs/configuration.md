@@ -896,15 +896,28 @@ Two settings govern the URL-capture tab (ADR-0029):
 # capture, and a renderer exploit on a captured page then runs code on this
 # host.  `on` does not count here.  Unset = the sandbox stays on.
 # CTIPARSOR_CAPTURE_UNSANDBOXED=false
-# The capture's traffic goes through this proxy; empty = connect directly.
-# compose sets http://capture-proxy:3128, a Squid egress filter that lets the
-# capture reach public addresses only and resolves and connects in one step,
-# closing the DNS-rebinding gap for every request the capture makes, redirect
-# hops included.  Unset, the capture code does not close that gap on its own:
-# the Playwright driver resolves the requests the request filter fetches, and
-# it does not honour the Chromium DNS pin.
+# The capture's traffic goes through this proxy, and a URL capture is refused
+# without it (HTTP 503).  compose sets http://capture-proxy:3128, a Squid egress
+# filter that lets the capture reach public addresses only and resolves and
+# connects in one step, closing the DNS-rebinding gap for every request the
+# capture makes, redirect hops included.  Without the proxy, the Playwright
+# driver resolves the requests itself and ignores the Chromium DNS pin.
 # CTIPARSOR_CAPTURE_PROXY=
+# Development and tests only: capture without the proxy.  The DNS-rebinding gap
+# is then open, and each capture logs a warning saying so.
+# CTIPARSOR_CAPTURE_ALLOW_DIRECT=false
 ```
+
+### Why the proxy is required
+
+The capture checks each address a host resolves to, then the browser or the
+driver resolves the name again and connects. An attacker's nameserver can answer
+differently the second time (DNS rebinding), so the check alone does not hold.
+The Squid proxy does its own resolution and connection in one step, which closes
+the gap. The redirect checks (#801) fetch each request through the Playwright
+driver, which ignores the Chromium DNS pin, so without the proxy
+nothing closes it for any request. That is why `CTIPARSOR_CAPTURE_PROXY` is required
+and `CTIPARSOR_CAPTURE_ALLOW_DIRECT=1` exists only for development and tests.
 
 The compose-level settings —
 published ports, image name, `CTI_INSTALL_CAPTURE`, per-container CPU and memory
