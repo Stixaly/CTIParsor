@@ -1168,6 +1168,32 @@ each waits for a state the page or the API shows, within a bound.
 | `refused-bundle.spec.ts` | the report `scripts/browser_e2e_db.py seed` writes as the worker stores a run whose Stage 5 refused the bundle: `GET /bundle` answers 409 with `{"validation": "invalid", "errors": [...]}`; the graph says the build was refused and shows the first error; its Download STIX raises the refusal with that error and saves nothing |
 | `keyboard.spec.ts` | the main journey's operations with the keyboard alone (checklist below) |
 | `accessibility.spec.ts` | axe on each page and dialog of the journey (below) |
+| `auth-roles.spec.ts` | only with `--auth local` (#707): accounts `e2e-reader`, `e2e-analyst`, `e2e-admin` made with `python -m api.admin`, passwords from files under the temporary directory. A reader opens an analyst's report from the dashboard with no write request, no decision control, no key that writes, a direct PATCH answered 403; an analyst accepts a row in the interface and the reader sees it after a reload; sign-out ends the review page's access; the analyst's `/api/admin/users` is 403; an expired session (`browser_e2e_db.py expire-session`) goes to `/login`, and signing in again works; a revoked API token answers 401 |
+| `auth-oidc.spec.ts` | only with `--auth oidc` (#707, not in CI): the sign-in through an OpenID Connect provider (`docker/oidc-test`, see [deployment.md](docs/deployment.md#sign-in-with-an-identity-provider-oidc)): a mapped group gives its role, sign-out, a person with no mapped group is refused at `/login?error=no_role` with no session, a reader's direct review is read-only, an admin reaches `/api/admin/users`, a person moved from the analyst to the reader group has the reader role at the next sign-in, an expired session and a new sign-in through the provider |
+
+**Running the sign-in journeys (#707).** The default run has `AUTH_MODE` unset
+(`off`) and skips both files. `scripts/check_browser_e2e.sh --auth local` starts
+the API with `AUTH_MODE=local` and runs `auth-roles.spec.ts` alone (the other
+journeys do not sign in); it is the second step of CI's `browser-e2e` job,
+about two minutes. `--auth oidc` needs an identity provider on
+`E2E_OIDC_ISSUER`, a client id and a secret file (the variables are listed in the
+script's header). The provider used for the recorded run is
+`docker compose -f docker/oidc-test/compose.yaml up -d` (project
+`ctiparsor-idp`, loopback port 18080), then:
+
+```sh
+CTIPARSOR_TEST_DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5433/DB \
+E2E_OIDC_ISSUER=http://localhost:18080/default \
+E2E_OIDC_CLIENT_ID=ctiparsor-e2e \
+E2E_OIDC_CLIENT_SECRET_FILE=/path/to/a/file/with/the/secret \
+bash scripts/check_browser_e2e.sh --no-build --auth oidc
+docker compose -f docker/oidc-test/compose.yaml down -v
+```
+
+The passwords and the client secret are only read by the scripts and never
+printed; the database each run makes is dropped at the end, as for the default
+run. `--docker` is refused with `--auth`: the account files are read from the
+host.
 
 **The offline profile.** The script starts `python run_api.py` (role `all`:
 the API and its worker, a subprocess per report) on 127.0.0.1:8765 with

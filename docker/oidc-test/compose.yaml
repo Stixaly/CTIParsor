@@ -1,0 +1,24 @@
+# A throwaway OpenID Connect provider for the OIDC qualification of CTIParsor's
+# sign-in (#707; docs/deployment.md, "Sign-in with an identity provider").
+# It is the navikt mock-oauth2-server, pinned by digest.  It signs tokens with a
+# key it makes at start-up and its login page accepts any subject and any
+# claims: a test tool, never for a real account.  Loopback only.
+#
+#   wsl -u root -e docker compose -f docker/oidc-test/compose.yaml up -d
+#   ...   # issuer http://localhost:18080/default
+#   wsl -u root -e docker compose -f docker/oidc-test/compose.yaml down -v
+#
+# scripts/check_browser_e2e.sh --auth oidc drives the sign-in through it.
+name: ctiparsor-idp
+
+services:
+  idp:
+    image: ghcr.io/navikt/mock-oauth2-server@sha256:65d4ed47ce094cc3849e41e03499bfb32372d69c726ec22b3d5a19eba9bc787e
+    restart: "no"
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - ./config.json:/app/config.json:ro
+    environment:
+      JSON_CONFIG_PATH: /app/config.json
+      SERVER_PORT: "8080"

@@ -32,6 +32,22 @@ def test_the_refused_report_is_stored_as_the_worker_stores_one_and_not_served(te
     assert temp_db_client.patch(f"/api/jobs/{job_id}", json={"status": "completed"}).status_code == 409
 
 
+def test_expire_session_ends_every_session_of_the_account_and_no_other(temp_db):
+    from api.auth import store
+
+    password = "correct horse battery staple"
+    ended = store.create_user("e2e-expiry", "reader", password=password)
+    kept = store.create_user("e2e-kept", "reader", password=password)
+    first, _ = store.create_session(ended.id)
+    second, _ = store.create_session(ended.id)
+    other, _ = store.create_session(kept.id)
+
+    assert e2e.expire_sessions("e2e-expiry") == 2
+    assert store.find_session(first) is None and store.find_session(second) is None
+    assert store.find_session(other) is not None
+    assert e2e.expire_sessions("no-such-account") == 0
+
+
 def _row(name: str, *stages: tuple[str, str], status: str = "for_review") -> dict:
     report = [{"stage": s, "status": st, "reason": ""} for s, st in stages]
     return {"original_filename": name, "status": status,
