@@ -101,10 +101,25 @@ def _validation_errors_json(errors: list[str] | None) -> str | None:
     return json.dumps(_stored_validation_errors(errors)) if errors else None
 
 
+# The job states a finalize refuses (#757): the worker owns the job in them, so a rebuild
+# neither reads its rows for a bundle nor publishes one.
+FINALIZE_REFUSED_STATUSES = ("uploaded", "queued", "processing")
+
+
 class FinalizeOvertaken(RuntimeError):
     """Review decisions kept landing while `re_run_final_stages` built (#499): every
     build was stale, none was published.  The API answers 409; finalizing again
     once the review settles publishes the bundle."""
+
+
+class FinalizeRefused(RuntimeError):
+    """The job is uploaded, queued or processing (#757), so `re_run_final_stages`
+    built and published nothing.  The API answers 409 and names the status."""
+
+    def __init__(self, job_id: str, status: str) -> None:
+        self.job_id = job_id
+        self.status = status
+        super().__init__(f"job {job_id} is {status!r}: finalize waits until the worker is done with it")
 
 
 class BundleInvalidError(RuntimeError):
@@ -993,7 +1008,8 @@ def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | 
                 if complete:
                     conn.execute(
                         "UPDATE jobs SET status='completed', updated_at=? "
-                        "WHERE id=? AND bundle_review_revision > ? AND bundle_validation IS DISTINCT FROM 'invalid'",
+                        "WHERE id=? AND bundle_review_revision > ? AND bundle_validation IS DISTINCT FROM 'invalid' "
+                        "AND status NOT IN ('uploaded','queued','processing')",
                         (now_iso(), job_id, revision))
                 stored = conn.execute(
                     "SELECT bundle_json, bundle_validation, bundle_validation_errors, bundle_review_revision "
@@ -1015,6 +1031,14 @@ def _stored_newer_build(job_id: str, revision: int, *, complete: bool) -> str | 
     return stored["bundle_json"]
 
 
+def _job_status(job_id: str) -> str | None:
+    """The job's status as stored now, or None when the job does not exist."""
+    with _lock:
+        with get_conn() as conn:
+            row = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return row["status"] if row else None
+
+
 def _review_moved_on(job_id: str, revision: int) -> bool:
     """Whether the job's decisions changed after `revision` was read (False when the job is gone)."""
     with _lock:
@@ -1031,7 +1055,9 @@ _MAX_REBUILDS = 3
 def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0) -> str | None:
     """
     Re-runs Stage 4+5 using the accepted entities currently in the DB.
-    Returns the new bundle JSON, or None on failure.
+    Returns the new bundle JSON, or None when the job does not exist (or was deleted
+    before the bundle was published).  Raises FinalizeRefused, before any work, for a
+    job that is uploaded, queued or processing (#757): nothing is built or written.
 
     quick=True  — used by the auto-finalize (background debounce): it leaves the
                   job's status alone.  The auto-finalize runs 4 s after every
@@ -1089,6 +1115,9 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
                 job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
                 if not job:
                     return None
+                # A job the worker holds is not finalized: refused before any rows are read (#757).
+                if job["status"] in FINALIZE_REFUSED_STATUSES:
+                    raise FinalizeRefused(job["id"], job["status"])
                 # The id the database holds (a uuid the server generated), not the
                 # request's string: it names the bundle file and goes into the log.
                 job_id = job["id"]
@@ -1459,7 +1488,8 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
                     "status = CASE WHEN ? THEN 'completed' WHEN ? AND status = 'completed' THEN 'for_review' "
                     "ELSE status END, updated_at=? "
                     "WHERE id=? AND (bundle_review_revision IS NULL OR bundle_review_revision <= ?) "
-                    "AND review_revision = ?",
+                    "AND review_revision = ? "
+                    "AND status NOT IN ('uploaded','queued','processing')",
                     (bundle_json, ledger_json, *verdict, build, revision, not quick and not invalid, invalid,
                      now_iso(), job_id, revision, revision),
                 ).rowcount == 1
@@ -1467,6 +1497,13 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
                     export_bundle(bundle_json, out_path, validation)
 
     if not published:
+        # Why nothing was published, read now: the job is gone (None: nothing is stored, the
+        # API answers 404), a worker holds it since the rows were read (FinalizeRefused, #757).
+        status = _job_status(job_id)
+        if status is None:
+            return None
+        if status in FINALIZE_REFUSED_STATUSES:
+            raise FinalizeRefused(job_id, status)
         stored = _stored_newer_build(job_id, revision, complete=not quick)
         if stored is not None:
             return stored
@@ -1478,7 +1515,6 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
             logger.warning(f"[finalize] job {job_id}: overtaken by review decisions {_MAX_REBUILDS + 1} times; "
                            "the bundle is not published, finalize again once the review settles")
             raise FinalizeOvertaken(job_id)
-        # The job was deleted meanwhile: nothing is stored, as before.
 
     if invalid:
         logger.error(f"[finalize] job {job_id}: the rebuilt bundle failed STIX schema validation "

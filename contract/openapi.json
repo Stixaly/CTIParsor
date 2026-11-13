@@ -6509,6 +6509,9 @@
         "string"
       ]
     },
+    "POST /api/jobs/{}/finalize response:404": {
+      "media": []
+    },
     "POST /api/jobs/{}/finalize response:409": {
       "media": []
     },
