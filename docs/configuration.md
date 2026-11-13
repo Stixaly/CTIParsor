@@ -652,8 +652,11 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 # HTTP 503 instead of being silently dropped.  0 = unbounded.
 # API_QUEUE_MAX_DEPTH=50
 
-# Delete finished jobs (rows and files) older than N days.  0 = never.  Queued
-# and running jobs are never swept.  The sweep runs at most every
+# Delete finished jobs (rows and files) idle for more than N days.  0 = never.
+# Queued and running jobs are never swept.  A report is idle when nothing has
+# changed it for N days: no update, and no decision or edit by an analyst on its
+# entities or relationships (see "What counts as activity" in operations.md).
+# Reading a report does not count.  The sweep runs at most every
 # JOB_RETENTION_SWEEP_S seconds.
 # JOB_RETENTION_DAYS=0
 # JOB_RETENTION_SWEEP_S=3600

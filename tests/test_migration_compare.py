@@ -73,15 +73,16 @@ def test_a_seeded_release_migrates_with_every_value_kept(schema, monkeypatch, ve
                                      "sessions", "users", "worker_heartbeats"]
         assert result.new_columns["jobs"] == ["review_revision", "bundle_review_revision", "bundle_build_json",
                                               "pipeline_mode", "resolved_types_json", "attempts",
-                                              "imported_by"]
+                                              "imported_by", "activity_at"]
         assert result.new_columns["rule_techniques"] == ["propagated"]
-        assert result.new_rows == {"schema_migrations": 9}
+        assert result.new_rows == {"schema_migrations": 10}
     elif version == 13:                                     # v0.2.0: versions 14 to 20 apply
         assert (result.new_tables, result.new_columns, result.new_rows) == (
             ["api_tokens", "audit_events", "login_failures", "oidc_logins", "sessions", "users",
              "worker_heartbeats"],
-            {"jobs": ["resolved_types_json", "attempts", "imported_by"], "rule_techniques": ["propagated"]},
-            {"schema_migrations": 7})
+            {"jobs": ["resolved_types_json", "attempts", "imported_by", "activity_at"],
+             "rule_techniques": ["propagated"]},
+            {"schema_migrations": 8})
     else:
         assert (result.new_tables, result.new_columns, result.new_rows) == ([], {}, {})
 

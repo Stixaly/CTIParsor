@@ -58,6 +58,17 @@ def require_job(conn: DBConnection, job_id: str) -> None:
         raise HTTPException(404, "Job not found")
 
 
+def renew_retention(conn: DBConnection, job_id: str) -> None:
+    """Record that an analyst decided or edited this report now (#723).
+
+    The retention sweep counts this time (`jobs.activity_at`, migration 21), so a report
+    an analyst is working on is not deleted as idle.  Call it inside the transaction of
+    the write it records: a rollback takes the renewal back too.  GET and polling never
+    call it.
+    """
+    conn.execute("UPDATE jobs SET activity_at=? WHERE id=?", (now_iso(), job_id))
+
+
 # ── A baseline STIX bundle (ADR-0090) ───────────────────────────────────────
 
 # What a route that reads a baseline can answer besides its own codes.

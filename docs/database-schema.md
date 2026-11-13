@@ -44,6 +44,7 @@ migrations".
 | 18 | `users`, `sessions`, `api_tokens`, `login_failures`; `jobs.imported_by` | 0097 (items 14, 15) |
 | 19 | `oidc_logins`: the sign-ins with an identity provider under way | 0097 (item 14, part B) |
 | 20 | `audit_events`: one row per state-changing request and per command-line change | 0097 (item 17) |
+| 21 | `jobs.activity_at`: the last human decision or edit on the report, the retention sweep's second clock; backfilled from the decision journal | #723 |
 
 ```sql
 CREATE TABLE jobs (
@@ -103,6 +104,10 @@ CREATE TABLE jobs (
     imported_by     TEXT,           -- ADR-0097 item 15: the id of the user who
                                     -- imported the report; NULL for a row stored
                                     -- before version 18, which only an admin deletes
+    activity_at     TEXT,           -- #723: the last human decision or edit on the
+                                    -- report (same transaction as the write); NULL
+                                    -- when none is known. The retention sweep keeps
+                                    -- a report while this or updated_at is recent
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL
 );
