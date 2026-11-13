@@ -14,7 +14,9 @@
 
 CTIParsor reads a threat-intelligence report — a PDF, DOCX, HTML, TXT or
 Markdown file, pasted text, or a URL — and produces a valid **STIX 2.1 bundle**
-ready for OpenCTI, MISP or a SIEM. Given a STIX 2.1 bundle you already hold, it
+ready for OpenCTI (its import is qualified for one OpenCTI version; see the
+[support policy](docs/support-policy.md#capabilities-implemented-qualified-limits)).
+MISP is not supported in 1.0. Given a STIX 2.1 bundle you already hold, it
 enriches that bundle instead: the bundle's objects ship as received (what it
 cannot keep is listed with the reason), CTIParsor adds what the report states,
 and the Report object is re-issued under its id
@@ -83,8 +85,9 @@ Two ways to use it:
   not just its ATT&CK tags, ranked with the evidence behind each rank, and
   exported as a ZIP of exactly the rules you selected.
 - **Self-hosted and offline-capable** — one hardened Docker Compose stack
-  (API, workers, PostgreSQL), local LLMs (Ollama, vLLM, LM Studio), and an
-  air-gapped install bundle.
+  (API, workers, PostgreSQL), local LLMs (vLLM is the one measured; Ollama and
+  LM Studio are wired and not measured), and an air-gapped install bundle
+  (experimental).
 
 ---
 
