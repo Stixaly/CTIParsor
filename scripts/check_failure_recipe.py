@@ -41,6 +41,7 @@ environment error.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import math
@@ -760,6 +761,9 @@ class Stack:
 class Options:
     wait_s: float = 1200.0
     poll_s: float = 5.0
+    #: A dedicated, small, nearly full filesystem for the disk case (see validate_disk_test_fs); None: the
+    #: disk case checks the upload gate and the alert on the state directory as it is.
+    disk_test_fs: Path | None = None
 
 
 class Run:
@@ -817,6 +821,20 @@ class Run:
                 self.check(label, "pass", f"held {now - first_true:.0f} s; {reading.detail}")
                 return
             self.stack.sleep(poll_s)
+
+    def wait_clear(self, name: str, timeout: float = 300.0, poll_s: float = 5.0) -> None:
+        """The alert's condition must become false on a scrape within `timeout` seconds. A condition the evaluator
+        cannot read, or one that stays true, fails the check."""
+        rule = self.rule(name)
+        reached, reading = self.stack.wait_for(
+            lambda: evaluate_rule(rule, self.stack.scrape(), time.time()),
+            lambda r: r is not None and r.state == "false", timeout=timeout, interval=poll_s)
+        label = f"alert {name} back to normal after the cleanup"
+        if reached:
+            self.check(label, "pass", reading.detail)
+        else:
+            detail = f"still {reading.state}: {reading.detail}" if reading is not None else "/metrics unreadable"
+            self.check(label, "fail", detail)
 
 
 def _job_row(stack: Stack, job_id: str) -> tuple[str, int, str] | None:
@@ -955,25 +973,97 @@ def _inventory(stack: Stack) -> tuple[str, str]:
 DISK_ALERT_MIN_FREE = 2 * 1024 ** 3
 DISK_ALERT_RATIO = 0.10
 
+#: A dedicated test filesystem: the marker file it must hold, the largest size it may have (so that the case never
+#: fills a disk that holds other data), and the free space the filler leaves on it, below DISK_ALERT_MIN_FREE.
+DISK_TEST_MARKER = "CTIPARSOR-DISK-TEST"
+DISK_TEST_MAX_TOTAL = 8 * GIB
+DISK_TEST_LEAVE_FREE = 1 * GIB
+FILLER_NAME = ".ctiparsor-disk-filler"
+FILLER_BLOCK = 16 * MIB
+
+
+def _free_bytes(path: Path) -> int:
+    st = os.statvfs(path)
+    return st.f_bavail * st.f_frsize
+
+
+def validate_disk_test_fs(path: Path, *, is_mount: Callable[[str], bool] = os.path.ismount,
+                          statvfs: Callable[[str], Any] = os.statvfs) -> int:
+    """The total size of the dedicated test filesystem at `path`. Raises ValueError when `path` is not one: it must be a
+    mount point, hold the marker file DISK_TEST_MARKER, and be at most DISK_TEST_MAX_TOTAL in size."""
+    text = str(path)
+    if not is_mount(text):
+        raise ValueError(f"{text} is not a mount point")
+    if not (path / DISK_TEST_MARKER).is_file():
+        raise ValueError(f"{text} has no {DISK_TEST_MARKER} file: only a dedicated test filesystem may be filled")
+    st = statvfs(text)
+    total = st.f_blocks * st.f_frsize
+    if total > DISK_TEST_MAX_TOTAL:
+        raise ValueError(f"{text} is {total / GIB:.1f} GiB; the test filesystem may be at most "
+                         f"{DISK_TEST_MAX_TOTAL / GIB:.0f} GiB")
+    return total
+
+
+class DiskFiller:
+    """A filler file on the test filesystem, written until its free space is at most `leave_free` bytes.
+
+    The file is removed on exit, whatever happened inside the `with` block, and before it is written
+    (a filler left by an earlier run)."""
+
+    def __init__(self, path: Path, leave_free: int, *, free_of: Callable[[Path], int] = _free_bytes) -> None:
+        self.path = path
+        self.file = path / FILLER_NAME
+        self.leave_free = leave_free
+        self.free_of = free_of
+        self.written = 0
+
+    def __enter__(self) -> DiskFiller:
+        self.remove()
+        try:
+            with open(self.file, "wb") as out:
+                while True:
+                    spare = self.free_of(self.path) - self.leave_free
+                    if spare <= 0:
+                        break
+                    block = min(FILLER_BLOCK, spare)
+                    try:
+                        out.write(b"\0" * block)
+                        out.flush()
+                    except OSError as exc:
+                        if exc.errno == errno.ENOSPC:
+                            break
+                        raise
+                    self.written += block
+                os.fsync(out.fileno())
+        except BaseException:
+            self.remove()
+            raise
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.remove()
+
+    def remove(self) -> None:
+        try:
+            self.file.unlink(missing_ok=True)
+        except OSError as exc:
+            raise StepError(f"cannot remove the filler {self.file}: {exc}") from exc
+
 
 def case_disk_nearly_full(run: Run) -> None:
     """Restart the app with the minimum free space for uploads set above the free disk space, then check that an upload
-    is refused with 507 and writes nothing, and check the disk alert's condition."""
+    is refused with 507 and writes nothing, and check the disk alert's condition.
+
+    With `--disk-test-fs`, the disk is that dedicated filesystem, filled first: the alert's condition is then checked
+    on a state directory that is nearly full, and the filler is removed afterwards, whatever happened."""
+    if run.opts.disk_test_fs is not None:
+        _disk_case_on_test_filesystem(run, run.opts.disk_test_fs)
+        return
     st = run.stack
     free = gauge(st.scrape(), "ctiparsor_state_dir_free_bytes")
     if free is None:
         raise StepError("/metrics has no ctiparsor_state_dir_free_bytes")
-    threshold = int(free // MIB) + 1
-    override = write_override(run.out_dir / "override-disk.yaml", "app", {"UPLOAD_MIN_FREE_MB": str(threshold)})
-    run.step(f"restart app with UPLOAD_MIN_FREE_MB={threshold}, above the free space")
-    st.compose("up", "-d", "--no-deps", "app", override=override)
-    run.expect("/api/health answers 200 with the override", st.wait_healthy(timeout=240.0))
-    before = _inventory(st)
-    run.step("upload the fixture report")
-    status, text = st.upload_attempt(f"failure-recipe-disk-{uuid4().hex[:8]}.txt", FIXTURE.read_bytes())
-    run.expect("the upload is refused with 507", status == 507, f"status {status}")
-    run.expect("the refusal says why", "Insufficient Storage" in text)
-    run.expect("nothing was written: no file and no job", _inventory(st) == before)
+    _check_upload_gate(run, free)
     run.step("check the disk alert's condition on /metrics")
     total = gauge(st.scrape(), "ctiparsor_state_dir_total_bytes")
     if free >= DISK_ALERT_MIN_FREE and (total is None or free / total >= DISK_ALERT_RATIO):
@@ -986,6 +1076,57 @@ def case_disk_nearly_full(run: Run) -> None:
                     "filesystem that is nearly full to check it")
         return
     run.hold_alert("CtiparsorDiskNearlyFull")
+
+
+def _check_upload_gate(run: Run, free: float) -> None:
+    """Restart app with UPLOAD_MIN_FREE_MB one MB above `free`, then check that an upload is refused with 507, and
+    that nothing is written (no file under uploads, no job row)."""
+    st = run.stack
+    threshold = int(free // MIB) + 1
+    override = write_override(run.out_dir / "override-disk.yaml", "app", {"UPLOAD_MIN_FREE_MB": str(threshold)})
+    run.step(f"restart app with UPLOAD_MIN_FREE_MB={threshold}, above the free space")
+    st.compose("up", "-d", "--no-deps", "app", override=override)
+    run.expect("/api/health answers 200 with the override", st.wait_healthy(timeout=240.0))
+    before = _inventory(st)
+    run.step("upload the fixture report")
+    status, text = st.upload_attempt(f"failure-recipe-disk-{uuid4().hex[:8]}.txt", FIXTURE.read_bytes())
+    run.expect("the upload is refused with 507", status == 507, f"status {status}")
+    run.expect("the refusal says why", "Insufficient Storage" in text)
+    run.expect("nothing was written: no file and no job", _inventory(st) == before)
+
+
+def _disk_case_on_test_filesystem(run: Run, fs: Path) -> None:
+    """The disk case on a dedicated, small filesystem: fill it until the state directory is under the alert's
+    thresholds, check the upload gate and the alert's condition, then remove the filler and check the alert clears.
+
+    The filler is removed in every outcome (`DiskFiller`). The state directory must be that filesystem: its total
+    size on /metrics must match the size of `fs`, or the alert would read another disk."""
+    st = run.stack
+    try:
+        total_fs = validate_disk_test_fs(fs)
+    except ValueError as exc:
+        raise StepError(f"--disk-test-fs: {exc}") from exc
+    run.step(f"fill {fs} until {DISK_TEST_LEAVE_FREE // MIB} MiB are free")
+    with DiskFiller(fs, DISK_TEST_LEAVE_FREE) as filler:
+        run.expect("the filler was written", filler.written > 0, f"{filler.written / MIB:.0f} MiB written")
+        series = st.scrape()
+        free = gauge(series, "ctiparsor_state_dir_free_bytes")
+        total = gauge(series, "ctiparsor_state_dir_total_bytes")
+        if free is None or total is None:
+            raise StepError("/metrics has no state directory gauges")
+        same = abs(total - total_fs) <= total_fs // 100
+        run.expect("the state directory is the test filesystem", same,
+                   f"/metrics total {total / GIB:.2f} GiB, {fs} {total_fs / GIB:.2f} GiB")
+        if not same:
+            return
+        run.expect("the filler took the free space under the alert's 2 GiB", free < DISK_ALERT_MIN_FREE,
+                   f"{free / GIB:.2f} GiB free")
+        _check_upload_gate(run, free)
+        run.step("check the disk alert's condition on /metrics, filler in place")
+        run.hold_alert("CtiparsorDiskNearlyFull")
+        run.step("remove the filler and check the alert clears")
+        filler.remove()
+        run.wait_clear("CtiparsorDiskNearlyFull")
 
 
 def _checksum_of_live_file(stack: Stack, member: str) -> str:
@@ -1226,6 +1367,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="where report.md and report.json go (default: output/failure-recipe/<UTC time>)")
     parser.add_argument("--wait-s", type=float, default=1200.0,
                         help="how long a job may take to end (default: %(default)s)")
+    parser.add_argument("--disk-test-fs", type=Path, default=None, metavar="MOUNTPOINT",
+                        help="a dedicated small filesystem (a mount point holding the file CTIPARSOR-DISK-TEST, "
+                             "at most 8 GiB) that the disk case fills, so that the alert is checked on a nearly "
+                             "full state directory; the state directory must be on it")
     parser.add_argument("--i-know-this-stops-services", action="store_true",
                         help="required: the cases stop and restart app, worker and postgres")
     return parser
@@ -1245,6 +1390,12 @@ def main(argv: list[str] | None = None) -> int:
     host = urlsplit(args.base_url).hostname or ""
     if host not in LOOPBACK_HOSTS:
         parser.error(f"--base-url must be on loopback, not {host!r}")
+    if args.disk_test_fs is not None:
+        try:
+            validate_disk_test_fs(args.disk_test_fs)
+        except ValueError as exc:
+            print(f"check_failure_recipe: --disk-test-fs: {exc}", file=sys.stderr)
+            return 2
     if not args.compose_file.is_file():
         print(f"check_failure_recipe: no compose file at {args.compose_file}", file=sys.stderr)
         return 2
@@ -1268,7 +1419,7 @@ def main(argv: list[str] | None = None) -> int:
     names = args.cases or list(CASE_ORDER)
     out_dir.mkdir(parents=True, exist_ok=True)
     started_at = stamp.isoformat()
-    reports = run_cases(names, stack, Options(wait_s=args.wait_s), out_dir, rules)
+    reports = run_cases(names, stack, Options(wait_s=args.wait_s, disk_test_fs=args.disk_test_fs), out_dir, rules)
     failed = [r for r in reports if r.status != "passed"]
     exit_code = 1 if failed else 0
     meta = {
