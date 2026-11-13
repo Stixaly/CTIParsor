@@ -226,10 +226,17 @@ def check(ref: str, commit: str, admin_url: str) -> bool:
     return True
 
 
+#: Work queues the app drains at its start (as in scripts/check_backup_restore.py): a pending
+#: file cleanup (#724) is retried and its row goes once the file is gone.  After the app's
+#: start, a row of these tables missing is expected; a row changed is not.
+DRAINED = ("job_file_cleanups",)
+
+
 def _content(url: str, connect: Any, before: migration_compare.Snapshot, tables: Iterable[str],
-             label: str) -> tuple[migration_compare.Snapshot, list[str]]:
+             label: str, drained: tuple[str, ...] = ()) -> tuple[migration_compare.Snapshot, list[str]]:
     """Every table read again and compared with `before`, and the sequences of
-    `tables`; printed under `label`.  (The snapshot, its differences.)"""
+    `tables`; printed under `label`.  Rows gone from the `drained` tables are
+    reported, not counted as differences.  (The snapshot, its differences.)"""
     conn = connect(url)
     try:
         now = migration_compare.snapshot(conn)
@@ -237,8 +244,15 @@ def _content(url: str, connect: Any, before: migration_compare.Snapshot, tables:
     finally:
         conn.close()
     result = migration_compare.compare(before, now, EXPECTED_CHANGES)
+    gone = [d for d in result.differences
+            if d.table in drained and d.key and not d.column and d.after == "row missing"]
+    result.differences = [d for d in result.differences if d not in gone]
     for line in migration_compare.summary(result, label):
         print(line)
+    for table in drained:
+        rows = sum(1 for d in gone if d.table == table)
+        if rows:
+            print(f"  drained from {table}: {rows} row(s), the work the app did at its start")
     print(f"{'sequences' if label == 'content' else label + ', sequences'}: {checked} identity column(s); "
           + (f"{len(stuck)} difference(s)" if stuck else "each one's next value above the highest stored"))
     for diff in stuck:
@@ -301,7 +315,7 @@ def _check(commit: str, url: str, tmp: Path, version: int, connect: Any) -> list
     problems += read["mismatches"]
 
     # 7. The app's first start and its read routes changed nothing.
-    _, differences = _content(url, connect, after, before, "after the read-back")
+    _, differences = _content(url, connect, after, before, "after the read-back", DRAINED)
     problems += differences
 
     # 8. The state directory's files.

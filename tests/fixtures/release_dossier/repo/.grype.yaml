@@ -1,0 +1,46 @@
+# Grype's configuration for the image scan (ci.yml, container-image job).
+#
+# Vulnerabilities reviewed and accepted in SECURITY.md ("Accepted
+# vulnerabilities"), with the reason they cannot be reached from CTIParsor.
+# Each rule names the exact package and version it was reviewed for: when the
+# image moves to another Python, the rule stops matching and Grype reports
+# the CVE again, for a new review.  A rule is added here only together with
+# its row in SECURITY.md.
+ignore:
+  # poplib command injection: fixed in 3.15 only.  CTIParsor never imports poplib.
+  - vulnerability: CVE-2025-15367
+    reason: "Unreachable: CTIParsor never imports poplib (SECURITY.md, reviewed 2026-10-31)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  # tempfile.TemporaryDirectory cleanup race: fixed in 3.15 only.  Needs a local
+  # attacker who changes the directory tree while it is cleaned up; the
+  # container's /tmp and model cache are written by the application's user only.
+  - vulnerability: CVE-2026-12345
+    reason: "Not exploitable: needs write access to the container's /tmp or model cache (SECURITY.md, reviewed 2026-10-31)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  # http.client misreads a chunk size that is negative or not hex: fixed in
+  # 3.16 only.  Only the server that sends the response can trigger it, and it
+  # could send any body it wants instead; urllib3 and h11 parse chunks themselves.
+  - vulnerability: CVE-2026-103995
+    reason: "Not exploitable: only the responding server can trigger it, and it already chooses the body (SECURITY.md, reviewed 2026-10-31)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  # socket.getaddrinfo truncates a host or port at a NUL byte: fixed in 3.16
+  # only.  The one place a host from outside reaches it is the web capture's
+  # SSRF check, which refuses a NUL before resolving (pipeline/web_capture.py).
+  - vulnerability: CVE-2026-116566
+    reason: "Unreachable: the only externally supplied host refuses NUL bytes before getaddrinfo (SECURITY.md, reviewed 2026-11-06)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
