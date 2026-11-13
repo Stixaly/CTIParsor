@@ -18,6 +18,7 @@ from api.response_models import Response
 
 
 class PolicyRule(Response):
+    """One rule of the relationship policy: the allowed edge type between two object types, and its mode."""
     src: str | None = Field(default=None, description="A STIX 2.1 object type, SDO or SCO.")
     verb: str | None = Field(default=None, description="A STIX 2.1 relationship type.")
     tgt: str | None = Field(default=None, description="A STIX 2.1 object type, SDO or SCO.")
@@ -26,6 +27,7 @@ class PolicyRule(Response):
 
 
 class PinEvidence(Response):
+    """The pin_evidence block of the relationship policy: how evidence for a pinned edge is found."""
     mode: str | None = Field(default=None, description="'cooccurrence' (default) or 'cartesian'.")
     window: JsonValue = Field(default=None, description="Sentences apart, non-negative.")
 
@@ -33,6 +35,7 @@ class PinEvidence(Response):
 class Completion(Response):
     # Booleans and an integer when the PUT checked them; any JSON value for a
     # body stored before those checks, so a GET never fails on an old row.
+    """The completion block of the relationship policy: the switches of the graph completion step (ADR-0012)."""
     transitive: JsonValue = None
     alias: JsonValue = None
     reference: JsonValue = None
@@ -43,10 +46,12 @@ class Completion(Response):
 
 
 class TemporalExport(Response):
+    """The temporal_export block of the relationship policy: how relationship dates are exported."""
     mode: str | None = Field(default=None, description="'faithful' (default) or 'day'.")
 
 
 class RelationshipPolicy(Response):
+    """The relationship policy: the stored body of the PUT, or the factory default when none is stored."""
     version: JsonValue = None
     global_: JsonValue = Field(
         default=None, alias="global", description="'enforce' (default) or 'auto'.",
@@ -64,6 +69,7 @@ class RelationshipPolicy(Response):
 
 
 class LastRun(Response):
+    """The pin and completion accounting of the most recent job that has a bundle."""
     job_id: str | None
     filename: str | None
     created_at: str | None

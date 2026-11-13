@@ -7,6 +7,7 @@ from api.response_models import Response
 
 
 class AuditEvent(Response):
+    """One row of the audit trail: a write request or a command-line change."""
     id: int = Field(description="The record's number; the cursor orders by it after the time.")
     at: str = Field(description="When the answer was written, UTC, ISO 8601.")
     request_id: str | None = Field(description="The X-Request-ID of the request (or the id the API gave it); "

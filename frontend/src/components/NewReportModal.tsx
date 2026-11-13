@@ -1,3 +1,8 @@
+// Dialog that starts a job from a file, a pasted text or a URL, with the TLP and PAP
+// markings and the pipeline mode (full, or enrich: ADR-0090). The kind of a pasted
+// input is worked out from its content: a bare URL is a capture, anything else is
+// prose. The server makes the real detection (api/routes/ingest.py).
+
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X, Loader2, AlertTriangle } from 'lucide-react'

@@ -1,3 +1,14 @@
+"""Stage 4: map the extracted entities and relationships to a STIX 2.1 bundle.
+
+build_stix_bundle() turns the entities of Stages 2 and 3 into STIX objects: SDOs
+for malware, actors, techniques and identities, SCOs and indicators for the
+observables, and the relationships between them.  The TLP and PAP markings
+(normalise_tlp(), tlp_default()) and the author identity are set on every object.
+Each decision is written to the MappingLedger.  verify_ioc_coverage() checks that
+each IoC reached the bundle.  Detection rules quoted in a report become indicators
+(_add_embedded_rule_indicator()).
+"""
+
 import base64
 import json
 import os
@@ -136,18 +147,22 @@ class PinStats:
 
     @property
     def total_candidates(self) -> int:
+        """The candidates of all pin rules, before the budget is applied."""
         return sum(r.candidates for r in self.rules)
 
     @property
     def total_emitted(self) -> int:
+        """The pairs emitted by all pin rules."""
         return sum(r.emitted for r in self.rules)
 
     @property
     def total_truncated(self) -> int:
+        """The candidates cut by the budget, over all pin rules."""
         return sum(r.truncated for r in self.rules)
 
     @property
     def total_blocked(self) -> int:
+        """The pairs the evidence gate refused, over all pin rules."""
         return sum(r.blocked for r in self.rules)
 
     def to_dict(self) -> dict:

@@ -996,6 +996,9 @@ def _checksum_of_live_file(stack: Stack, member: str) -> str:
 def case_restore_drill(run: Run) -> None:
     """Run the backup commands of the documented procedure in a scratch folder and check the dump and archive they
     write. The restore checks follow them."""
+    # The drill runs the documented backup, check and restore commands exactly as written,
+    # in a private work directory. It restores the dump into a new database, compares the
+    # jobs table with the live one, and drops the database and the files at the end.
     st = run.stack
     work = run.out_dir / "restore-drill"
     work.mkdir(parents=True, exist_ok=True)
@@ -1013,11 +1016,14 @@ def case_restore_drill(run: Run) -> None:
     archives = sorted(work.glob("cti-state-*.tgz"))
     if not (dumps and archives):
         raise StepError("the backup commands wrote no dump or no archive")
+    # The stamp is the timestamp in the file names. It fills the placeholder in each
+    # documented command, so the check and the restore read exactly these files.
     stamp = dumps[-1].name[len("ctiparsor-"):-len(".dump")]
     sizes = (dumps[-1].stat().st_size, archives[-1].stat().st_size)
     run.expect("the dump and the archive were written", min(sizes) > 0,
                f"{sizes[0]} and {sizes[1]} bytes")
     run.step("check the backup with the documented commands")
+    # Each check command must print a count of at least 1; its count is kept in the report.
     for line in CHECK_COMMANDS:
         shown = line.replace("YYYY-MM-DD-HHMMSS", stamp)
         print(f"    $ {shown}", flush=True)
@@ -1026,6 +1032,8 @@ def case_restore_drill(run: Run) -> None:
         if rc or int(out.strip() or 0) < 1:
             raise StepError(f"{shown} exited {rc} with {out.strip()!r}: {tail(err)}")
         run.report.extra.setdefault("check_counts", []).append(int(out.strip()))
+    # The restore goes into a new database named after the stamp, so the live database is
+    # never the target. The restore time is recorded.
     drill = f"ctiparsor_drill_{re.sub(r'[^0-9]', '_', stamp)}"
     run.step(f"create the empty database {drill}")
     st.psql(f'CREATE DATABASE "{_safe_name(drill)}";')
@@ -1039,6 +1047,8 @@ def case_restore_drill(run: Run) -> None:
     run.report.extra["restore_seconds"] = restore_seconds
     run.expect("pg_restore exited 0 and printed nothing", rc == 0 and not err.strip(),
                f"exit {rc}; {tail(err, 3)}")
+    # The jobs table is compared by a digest of id, status and file name, in id order: the
+    # source and the restored copy must give the same count and the same digest.
     try:
         probe = (
             "SELECT count(*) || '|' || COALESCE(md5(string_agg("
@@ -1225,6 +1235,9 @@ def main(argv: list[str] | None = None) -> int:
     """Run the selected cases against a stack on loopback and return the exit code: 0 when every case passed, 1
     otherwise, 2 when the compose file or the rules cannot be read. Refuses to run without --i-know-this-stops-
     services."""
+    # Argument errors exit through the parser (code 2). Missing inputs, or a stack that does
+    # not answer /api/health with 200, exit 2 before any case runs. Exit 1 means at least one
+    # case did not pass; the reports are written in either case.
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.i_know_this_stops_services:

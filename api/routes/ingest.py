@@ -198,6 +198,8 @@ def _timestamp_slug() -> str:
 @router.post("/text", response_model=IngestJob, response_model_exclude_unset=True, responses=BASELINE_REFUSED)
 @limiter.limit("20/minute")
 async def ingest_text(request: Request, body: TextIngestRequest):
+    """Start a job from pasted text. Answer 400 when the text is too short, holds a NUL character or is not UTF-8, and
+    413 when it is too large."""
     tlp = _clean_marking(body.tlp_level, "tlp_level")
     pap = _clean_marking(body.pap_level, "pap_level")
     _check_baseline_request(body)
@@ -278,6 +280,8 @@ async def ingest_text(request: Request, body: TextIngestRequest):
 @router.post("/url", response_model=IngestUrlJob, response_model_exclude_unset=True, responses=BASELINE_REFUSED)
 @limiter.limit("5/minute")
 async def ingest_url(request: Request, body: UrlIngestRequest):
+    """Start a job from a web page: render the URL, keep its visible text, and start a job on it. Answer 400 for a URL
+    that is refused and 503 when web capture is not installed."""
     tlp = _clean_marking(body.tlp_level, "tlp_level")
     pap = _clean_marking(body.pap_level, "pap_level")
     _check_baseline_request(body)

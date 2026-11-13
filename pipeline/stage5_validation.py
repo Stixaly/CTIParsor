@@ -1,3 +1,14 @@
+"""Stage 5: validate a STIX bundle and write it to disk.
+
+validate_bundle() checks a serialised bundle against the STIX 2.1 JSON schemas
+vendored under pipeline/data (pinned to SCHEMA_COMMIT) and against the stix2
+library.  The verdict is a ValidationResult: validated, invalid, or unverified
+when the schemas are not installed.  validate_and_export() validates the bundle
+and writes it; an invalid bundle is written under a name with an _invalid suffix
+(export_path()).  install_schemas() copies the vendored schemas into the
+stix2-validator package.  Nothing is downloaded.
+"""
+
 from __future__ import annotations
 
 import os

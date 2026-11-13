@@ -1,3 +1,5 @@
+"""Relationship routes of a job (/api/jobs/{job_id}/relationships): list, create, edit and delete, with the
+valid relationship types."""
 from typing import Any
 from uuid import uuid4
 
@@ -180,6 +182,7 @@ def _row_to_dict(row) -> dict:
 
 @router.get("", response_model=list[RelationshipOut], response_model_exclude_unset=True)
 def list_relationships(job_id: str):
+    """List the relationships of a job, ordered by type. Answer 404 when the job does not exist."""
     with get_conn() as conn:
         require_job(conn, job_id)
         rows = conn.execute(
@@ -194,11 +197,14 @@ def get_valid_types(job_id: str):
     # The types are the same for every job. `job_id` comes from the router's
     # prefix: declared here, it is in the OpenAPI schema, which was otherwise
     # invalid for this path (found by tests/test_api_schema.py).
+    """The relationship types that a relationship can have. The list is the same for every job."""
     return VALID_REL_TYPES
 
 
 @router.post("", response_model=RelationshipOut, response_model_exclude_unset=True)
 def create_relationship(job_id: str, body: RelCreate):
+    """Add a relationship to a job. Answer 400 for an unknown type, a blank end, or a stop_time that is not later than
+    start_time."""
     if body.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{body.relationship_type}'. "
                                  f"Valid types: {', '.join(VALID_REL_TYPES)}")
@@ -284,6 +290,7 @@ def bulk_update_relationships(job_id: str, body: RelBulk):
 @router.patch("/{rel_id}", response_model=RelationshipOut, response_model_exclude_unset=True, responses=_IMPORTED_ROW)
 def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
     # `is not None`, not truthiness: '' used to skip this check and was stored as the verb (issue #438).
+    """Change a relationship: its type, its ends, its dates or its decision. Answer 400 for an invalid value."""
     if patch.relationship_type is not None and patch.relationship_type not in VALID_REL_TYPES:
         raise HTTPException(400, f"Unknown relationship_type '{patch.relationship_type}'")
     if patch.decision_origin not in decisions.CLIENT_ORIGINS:
@@ -424,6 +431,8 @@ def update_relationship(job_id: str, rel_id: str, patch: RelPatch):
 @router.delete("/{rel_id}", response_model=RelationshipDeleted, response_model_exclude_unset=True,
                responses=_IMPORTED_ROW)
 def delete_relationship(job_id: str, rel_id: str):
+    """Delete a relationship. Answer 409 for a row of the analyst's STIX bundle, which can only be rejected, and 404
+    when it does not exist."""
     with _lock:
         with get_conn() as conn:
             # A deleted row could no longer say whether the baseline object leaves the bundle.

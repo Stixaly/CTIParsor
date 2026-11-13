@@ -1,3 +1,7 @@
+// Selection of the coverage rules for export, per job. Every rule starts selected;
+// the ids the analyst removed are kept in localStorage (coverage.selection.<job id>,
+// through ./sets). Also gives the counts and the byte total of the selection.
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { loadStringSet, saveStringSet } from './sets'

@@ -1,3 +1,9 @@
+// Progress stream of one job. Opens an EventSource on /api/jobs/{id}/progress and
+// listens to `stage` (a progress event), `partial_graph` (a graph fragment) and `done`
+// (the end). The server sends `connected` first; the hook does not listen to it.
+// After MAX_ERRORS errors in a row the stream is given up with `lost` set, which is
+// not a success.
+
 import { useEffect, useRef, useState } from 'react'
 import { checkSession } from '../api/client'
 import type { PartialGraphEvent, ProgressEvent } from '../types'

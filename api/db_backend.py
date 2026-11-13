@@ -1,3 +1,7 @@
+"""Database connection layer: the DBConnection protocol that the API, the worker and the pipeline use,
+and PgConnection, its PostgreSQL implementation on psycopg (ADR-0053: PostgreSQL is the only backend).
+The module also holds the URL check, the translation of '?' placeholders to psycopg's '%s', and the
+row class that gives name access to a row."""
 from __future__ import annotations
 
 import re
@@ -13,11 +17,21 @@ class DBConnection(Protocol):
     # Parameter types are Any on purpose: typeshed's sqlite3.Connection.execute
     # takes SupportsLenAndGetItem | Mapping, and a Protocol member must accept
     # at least what its implementations accept for them to satisfy it.
-    def execute(self, sql: str, params: Any = ..., /) -> Any: ...
-    def executemany(self, sql: str, seq_of_params: Any, /) -> Any: ...
-    def commit(self) -> None: ...
-    def rollback(self) -> None: ...
-    def close(self) -> None: ...
+    def execute(self, sql: str, params: Any = ..., /) -> Any:
+        """Run one SQL statement, with optional parameters, and return the result."""
+        ...
+    def executemany(self, sql: str, seq_of_params: Any, /) -> Any:
+        """Run one SQL statement once for each parameter set."""
+        ...
+    def commit(self) -> None:
+        """Commit the current transaction."""
+        ...
+    def rollback(self) -> None:
+        """Roll back the current transaction."""
+        ...
+    def close(self) -> None:
+        """Close the connection."""
+        ...
     def __enter__(self) -> Any: ...
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Any: ...
 
@@ -103,6 +117,7 @@ def row_class(names: tuple[str, ...]) -> type:
             return tuple.__getitem__(self, key)
 
         def keys(self) -> list[str]:
+            """Return the column names of the row, in order."""
             return list(self._names)
 
     return Row
@@ -157,34 +172,43 @@ class PgConnection:
 
     @property
     def closed(self) -> bool:
+        """True when the connection is closed or was never opened."""
         return self._conn is None or self._conn.closed
 
     def execute(self, sql: str, params: Sequence[Any] | None = None) -> Any:
+        """Run one statement. Without parameters the SQL is sent unchanged; with parameters the '?' placeholders are
+        translated first. Return the psycopg cursor."""
         conn = self._ensure()
         if params is None:
             return conn.execute(sql)
         return conn.execute(translate_placeholders(sql), tuple(params) if not isinstance(params, dict) else params)
 
     def executemany(self, sql: str, seq_of_params: Iterable[Sequence[Any]]) -> Any:
+        """Run the statement once for each parameter sequence and return the cursor."""
         cur = self._ensure().cursor()
         cur.executemany(translate_placeholders(sql), [tuple(p) for p in seq_of_params])
         return cur
 
     def execute_script(self, sql: str) -> None:
+        """Run SQL text without parameters and without placeholder translation; the result is discarded."""
         self._ensure().execute(sql)
 
     def cursor(self) -> Any:
+        """Return a new cursor on the connection."""
         return self._ensure().cursor()
 
     def commit(self) -> None:
+        """Commit the current transaction when the connection is open."""
         if self._conn is not None and not self._conn.closed:
             self._conn.commit()
 
     def rollback(self) -> None:
+        """Roll back the current transaction when the connection is open."""
         if self._conn is not None and not self._conn.closed:
             self._conn.rollback()
 
     def close(self) -> None:
+        """Close the connection when it is open, and forget it. A later use opens it again."""
         if self._conn is not None and not self._conn.closed:
             self._conn.close()
         self._conn = None

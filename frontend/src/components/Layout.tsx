@@ -1,3 +1,8 @@
+// Sidebar shell of the pages that have the navigation. The links show for the
+// signed-in role (Policy, Settings and Access for administrators only), then the
+// user with Sign out, then the footer: CTIParsor and the frontend package version.
+// Review, Graph and Coverage are full-window routes and sit outside this layout (App.tsx).
+
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { KeyRound, LayoutDashboard, Link2, LogOut, Settings as SettingsIcon, Tag, Users } from 'lucide-react'
@@ -101,7 +106,7 @@ export default function Layout() {
         }}>
           {/* lucide-react 1.x has no brand icons; this was a GitHub mark, not a link */}
           <Tag size={11} />
-          cti-to-stix v1.0
+          CTIParsor {__APP_VERSION__}
         </div>
       </aside>
 

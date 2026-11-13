@@ -246,6 +246,9 @@ def main() -> None:
     parser.add_argument("--max-pinned", type=int, default=200)
     args = parser.parse_args()
 
+    # The policy is built from the --pin options only: global enforce, and the cap on
+    # pinned edges. The bundle is rebuilt in memory from the stored job, not read back from
+    # the store.
     rules = []
     if args.pin:
         for spec in args.pin:
@@ -271,6 +274,8 @@ def main() -> None:
     raw_entities, llm_result, report_text, filename = loaded
     bundle = _build_bundle(raw_entities, llm_result, filename, report_text, policy)
 
+    # The census counts the shipped edges by evidence label. The pinned count and the cap are
+    # checked against the policy's max_pinned_edges.
     census = _label_census(bundle)
     pinned = _pinned_count(bundle)
     total = sum(census.values())

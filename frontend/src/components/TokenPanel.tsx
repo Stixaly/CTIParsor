@@ -1,3 +1,8 @@
+// Token list with create and revoke, used by the Access page (admin tokens) and the
+// Account page (the own tokens of the signed-in user). Also exports the form styles
+// and cell helpers the two pages share, tokenState (active, expired or revoked), and
+// the notice shown once after a token is created.
+
 import { useId, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorDetail } from '../api/client'

@@ -50,6 +50,7 @@ def consensus_enabled() -> bool:
 
 
 def consensus_provider() -> str:
+    """The provider named by CONSENSUS_PROVIDER, in lower case. Empty when it is not set."""
     return os.getenv("CONSENSUS_PROVIDER", "").strip().lower()
 
 

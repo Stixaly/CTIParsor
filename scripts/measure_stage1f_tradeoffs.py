@@ -257,6 +257,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--skip-crops", action="store_true", help="Skip Question B (crop comparison).")
     args = parser.parse_args(argv)
 
+    # Collect the PDFs: each path is a file or a directory (not recursive). Files over 200 MB
+    # are skipped with a message. Question A compares extracted text, Question B compares a
+    # whole page with its figure crops. Each question has its own skip flag.
     pdf_files: list[Path] = []
     for p in args.paths:
         path = Path(p)

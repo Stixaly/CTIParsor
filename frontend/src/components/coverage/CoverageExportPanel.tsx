@@ -1,3 +1,7 @@
+// Export panel of the coverage page. The rules picked in the selection (by format,
+// corpus, license and severity: ExportAxis) are downloaded as one archive through
+// downloadExportSelection, or the report's whole export through detectionsExportUrl.
+
 import { useMemo, useState, type JSX } from 'react'
 import type { DetectionFormat } from '../../types'
 import { DETECTION_FORMATS } from '../../types'

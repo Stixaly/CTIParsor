@@ -1,3 +1,12 @@
+"""Stage 2f: CVSS score and description for CVE identifiers, from the CIRCL CVE API.
+
+enrich_cves() answers from the database cache first (get_cached()), then fetches
+the missing identifiers from cve.circl.lu (_fetch_from_circl()), within
+_MAX_FETCH requests and _MAX_TOTAL_SECONDS, and stores the answers
+(save_to_cache()).  enrichment_enabled() is the switch, and is_valid_cve() checks
+the identifier's form before any request.
+"""
+
 # pipeline/stage2f_cve_enrichment.py
 from __future__ import annotations
 
@@ -201,6 +210,9 @@ def enrich_cves(cve_ids: set[str]) -> dict[str, dict]:
     those caps a report carrying 200 CVEs would add minutes of sequential
     5-second timeouts to the pipeline.
     """
+    # The ids are normalised (stripped, upper case) and invalid ones dropped. The cache is
+    # read first, and cached answers are returned even when enrichment
+    # is off. Only the ids that are not in the cache can reach the network.
     valid_ids = {cve.strip().upper() for cve in cve_ids if is_valid_cve(cve)}
     invalid_count = len(cve_ids) - len(valid_ids)
     if invalid_count > 0:
@@ -215,6 +227,10 @@ def enrich_cves(cve_ids: set[str]) -> dict[str, dict]:
     if not missing:
         return data
 
+    # Fetch in sorted order. The loop stops at _MAX_FETCH answers or _MAX_TOTAL_SECONDS of
+    # wall time, whichever comes first; the ids left over are counted as skipped. A
+    # CIRCL outage stops the loop without a skip count, and the ids are asked again on the
+    # next run. Each answer, including a miss, is saved to the cache.
     start_time = time.monotonic()
     fetch_count = 0
     skipped = 0

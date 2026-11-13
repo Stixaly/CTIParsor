@@ -1,3 +1,8 @@
+// Administration page (route /settings, administrators only): the detection corpora
+// (add, enable or disable, sync, remove, rebuild) and the formats they feed. A sync or
+// a rebuild that could not read every file reports the files and the corpora it
+// skipped, each with its reason.
+
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { fetchCorpora, fetchFormats, addCorpus, setCorpusEnabled, removeCorpus, syncCorpus, rebuildCorpora, errorDetail } from '../api/client'

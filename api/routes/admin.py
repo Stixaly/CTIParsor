@@ -117,6 +117,7 @@ def _user(user_id: str) -> dict:
 
 @router.get("/admin/users", response_model=list[UserRecord], response_model_exclude_unset=True, responses=_OFF)
 def list_users(_user_: store.User | None = Depends(current_user)):
+    """List every account."""
     _on()
     return store.list_users()
 
@@ -125,6 +126,8 @@ def list_users(_user_: store.User | None = Depends(current_user)):
              responses={**_OFF, 400: {"description": "A bad username or password, or local accounts are off."},
                         409: {"description": "The username is taken."}})
 def create_user(body: NewUser, user: store.User | None = Depends(current_user)):
+    """Create a local account. Answer 400 when local accounts are off (AUTH_MODE is oidc) or the request is refused,
+    and 409 when the username is taken."""
     _on()
     if not config.local_enabled():
         raise HTTPException(400, "Local accounts are not enabled (AUTH_MODE is oidc)")
@@ -180,6 +183,7 @@ def set_user_password(user_id: str, body: NewPassword, user: store.User | None =
 
 @router.get("/admin/tokens", response_model=list[TokenRecord], response_model_exclude_unset=True, responses=_OFF)
 def list_all_tokens(_user_: store.User | None = Depends(current_user)):
+    """List the API tokens of every account. The answer has no token values."""
     _on()
     return store.list_tokens()
 
@@ -198,6 +202,7 @@ def create_token_for(body: NewToken, request: Request, user: store.User | None =
 @router.delete("/admin/tokens/{token_id}", response_model=TokenRevoked, response_model_exclude_unset=True,
                responses={**_OFF, 404: {"description": "No active token with that id."}})
 def revoke_any_token(token_id: str, user: store.User | None = Depends(current_user)):
+    """Revoke an active API token by its id. Answer 404 when no active token has that id."""
     _on()
     if not store.revoke_token(token_id):
         raise HTTPException(404, "No active token with that id")
@@ -209,6 +214,7 @@ def revoke_any_token(token_id: str, user: store.User | None = Depends(current_us
 
 @router.get("/auth/tokens", response_model=list[TokenRecord], response_model_exclude_unset=True, responses=_OFF)
 def list_own_tokens(user: store.User | None = Depends(current_user)):
+    """List the API tokens of the signed-in account. The answer has no token values."""
     _on()
     return store.list_tokens(user_id=_actor(user).id)
 
@@ -228,6 +234,7 @@ def create_own_token(body: NewOwnToken, request: Request, user: store.User | Non
 @router.delete("/auth/tokens/{token_id}", response_model=TokenRevoked, response_model_exclude_unset=True,
                responses={**_OFF, 404: {"description": "No active token of yours with that id."}})
 def revoke_own_token(token_id: str, user: store.User | None = Depends(current_user)):
+    """Revoke one of the signed-in account's active API tokens. Answer 404 when no such token exists."""
     _on()
     actor = _actor(user)
     if not store.revoke_token(token_id, user_id=actor.id):

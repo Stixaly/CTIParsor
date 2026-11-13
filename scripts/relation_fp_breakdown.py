@@ -173,6 +173,9 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
     raw_total = 0
     problems: list[str] = []
 
+    # One pass per document. A document is skipped when it has no gold, and recorded as
+    # unscored when its bundle projection cannot be built. The projection is the bundle's
+    # relationships as the scorer sees them, so the breakdown below matches the score file.
     for p in sorted((run_dir / "docs").glob("*.json")):
         rec = json.loads(p.read_text(encoding="utf-8"))
         doc = p.stem
@@ -190,6 +193,9 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
         names = gold_names(g)
         types = gold_end_types(g)
 
+        # The bundle's relationships, in file order. `based-on` links are not counted as
+        # relationships. Each bundle_relations row must describe the relationship at the
+        # same position, and the projection must list them in the same order.
         bundle_file = (run_dir / str(rec["bundle_file"])).resolve()
         bundle = json.loads(bundle_file.read_text(encoding="utf-8"))
         objs = [o for o in bundle["objects"] if isinstance(o, dict)]
@@ -207,16 +213,22 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
                 raise SystemExit(f"{doc}: bundle_relations row does not match relationship {o.get('id')}")
         position = {id(o): i for i, o in enumerate(all_rel)}
 
+        # The stage 3 rows that hold the same claim, by names and by quote, and the rows that
+        # verification held back in rel_review. They tell which stage produced each found row.
         s3_names = {(r.get("source"), r.get("type"), r.get("target")) for r in _rows(rec, "relations")}
         s3_quotes = {r["evidence_text"] for r in _rows(rec, "relations") if r.get("evidence_text")}
         rv_names = {(r.get("source"), r.get("type"), r.get("target")) for r in _rows(rec, "rel_review")}
         rv_quotes = {r["evidence_text"] for r in _rows(rec, "rel_review") if r.get("evidence_text")}
 
+        # Gold relations as normalised triples, and as unordered name pairs (for the
+        # "same pair, other type" and "reversed pair" link checks further down).
         gold_norm = {metrics.norm_triple((gold_end(names, r["source"]), r["type"], gold_end(names, r["target"])))
                      for r in g.get("relations", [])}
         gold_pairs = {_pair(gold_end(names, r["source"]), gold_end(names, r["target"]))
                       for r in g.get("relations", [])}
 
+        # Collapse duplicates: `firsts` keeps the first bundle relationship for each triple,
+        # and `counts` holds how many relationships share it. Each extra copy is a duplicate.
         firsts: dict[tuple[str, str, str], dict[str, Any]] = {}
         counts: Counter[tuple[str, str, str]] = Counter()
         for raw, pr in zip(raw_rels, projection["relations"], strict=True):
@@ -229,6 +241,8 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
                 firsts[key] = {"raw": raw, "pr": pr, "position": position[id(raw)]}
         duplicates += sum(c - 1 for c in counts.values())
 
+        # Strict TP, FP and FN over the collapsed triples. The breakdown must agree with the
+        # scorer's counts, or the run stops: a disagreement would make every table wrong.
         tp_keys = set(firsts) & gold_norm
         fp_keys = set(firsts) - gold_norm
         fn_keys = gold_norm - set(firsts)
@@ -239,6 +253,8 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
         per_doc[doc] = {"found": len(firsts), "tp": len(tp_keys), "fp": len(fp_keys),
                         "gold": len(gold_norm), "fn": len(fn_keys)}
 
+        # One row per found triple, with the attributes the tables group by: the stage that
+        # wrote it, how its endpoints relate to gold names, and how it links to gold.
         for key, f in firsts.items():
             raw, pr = f["raw"], f["pr"]
             st = str(by_id.get(raw.get("source_ref"), {}).get("type", "unknown"))
@@ -292,6 +308,7 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
                 "evidence_text": quote[:300],
             })
 
+        # False negatives: gold relations with no found triple, listed once each.
         seen_fn: set[tuple[str, str, str]] = set()
         for r in g.get("relations", []):
             ns, nt = gold_end(names, r["source"]), gold_end(names, r["target"])
@@ -302,6 +319,9 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
                                 "relationship_type": r["type"],
                                 "pair": f"{types.get(ns, 'unknown')}->{types.get(nt, 'unknown')}"})
 
+    # Cross-check against the score file: the same documents unscored, the same per-document
+    # tp/fp/fn, and the same micro totals. Each mismatch is recorded in `problems`, and the
+    # result's scorer_check reports them.
     if sorted(unscored) != sorted(score.get("documents_unscored", {})):
         problems.append(f"unscored documents {sorted(unscored)} differ from the score file's "
                         f"{sorted(score.get('documents_unscored', {}))}")
@@ -323,6 +343,8 @@ def analyse(run_dir: Path, gold_dir: Path) -> dict[str, Any]:
         problems.append(f"totals tp/fp/fn {(tot['tp'], tot['fp'], tot['fn'])} != score file micro "
                         f"{(micro['tp'], micro['fp'], micro['fn'])}")
 
+    # The tables: each attribute's share of the false positives, the top three reasons for
+    # them, and a fixed-seed sample of the false positives for manual reading.
     fp_rows = [r for r in found if not r["matched"]]
     tp_rows = [r for r in found if r["matched"]]
     fp_total = len(fp_rows)

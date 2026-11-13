@@ -1,3 +1,7 @@
+// Administration page (route /access, administrators only): creates user accounts,
+// changes a user's role, display name or disabled flag, sets a password, and holds
+// the admin token list (TokenPanel). Every change is sent through api/admin.ts.
+
 import { useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { errorDetail } from '../api/client'

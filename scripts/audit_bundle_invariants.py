@@ -389,6 +389,10 @@ def check_indicator_pattern_wellformed(bundles: list[tuple[str, dict]]) -> Findi
         unbalanced = 0
         no_comparison = 0
         total = 0
+        # Each indicator is checked in order: a pattern must be present, bracketed, have
+        # balanced brackets outside quoted strings, and contain a comparison outside strings.
+        # The first failure counts the indicator and stops its other checks. A non-stix
+        # pattern type is not checked. Each failing job is recorded in `faulty`.
         for job_id, bundle in bundles:
             for obj in _objects(bundle):
                 if not isinstance(obj, dict) or obj.get("type") != "indicator":

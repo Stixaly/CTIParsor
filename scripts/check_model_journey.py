@@ -624,6 +624,8 @@ def _usage(message: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     """Run the journey against the running stack and return the exit code: 0 when every journey passed, 1 when one did
     not, 2 for a usage error or a stack that does not answer."""
+    # Arguments are checked before any request is sent: the URLs, the stage ids and a
+    # non-empty PDF. A bad argument returns the usage code without contacting the server.
     parser = build_parser()
     args = parser.parse_args(argv)
     error = base_url_error(args.base_url) or url_error(args.url) or pdf_error(args.pdf)
@@ -636,6 +638,8 @@ def main(argv: list[str] | None = None) -> int:
     if not pdf_bytes:
         return _usage(f"empty file: {args.pdf}")
 
+    # The server must answer /api/health with 200 before the journeys start. Exit code 2
+    # covers an unreachable server or a non-200 answer; the server facts are read after.
     token = os.environ.get(TOKEN_ENV) or None  # sent as a bearer, never printed or written
     api = Api(args.base_url, token)
     started = datetime.now(timezone.utc)
@@ -650,6 +654,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     server = server_facts(api)
 
+    # Two journeys run in turn: a PDF upload and a URL ingest. Each submit closure sends one
+    # request. A request error is recorded as a failed check on its journey, not raised, so
+    # the other journey still runs.
     journeys: list[Journey] = []
     pdf_journey = Journey("pdf", {"file": args.pdf.name, "sha256": hashlib.sha256(pdf_bytes).hexdigest(),
                                   "bytes": len(pdf_bytes)})
@@ -682,6 +689,8 @@ def main(argv: list[str] | None = None) -> int:
             journey.checks.append(Check("request failed", FAIL, str(exc)))
             journeys.append(journey)
 
+    # Exit 0 only when every journey passed (and at least one ran). The report goes to
+    # --report-dir, or to a timestamped directory under output/model-journey.
     exit_code = 0 if journeys and all(j.status == "passed" for j in journeys) else 1
     out_dir = args.report_dir or ROOT / "output" / "model-journey" / started.strftime("%Y%m%dT%H%M%SZ")
     meta = {

@@ -433,9 +433,12 @@ def cmd_score(args) -> None:
     ATT&CK release) with the per-document rows, the TTP technique and entity metrics, the
     evidence figures and the LLM health. Prints the headline metrics and the stages that
     did not run."""
+    # Score one run: per-document rows come from per_doc_scores; this function adds the
+    # micro and per-document metrics, the evidence checks, and the LLM health counts.
     s = per_doc_scores(args.name, args.attack_release)
     modified = _modified_files(args.name, s["meta"])
     rows, preds, docs, canonical = s["rows"], s["preds"], s["docs"], s["canonical"]
+    # One value per document for each TTP measure, in the order of the rows.
     tech = [r["ttp"].technique for r in rows.values()]
     sub = [r["ttp"].subtechnique for r in rows.values()]
     exp = [r["ttp"].explicit_recall for r in rows.values()]
@@ -448,6 +451,9 @@ def cmd_score(args) -> None:
                                          for r in rows.values()).as_dict()}
             for t in ent_types}
 
+    # Evidence check per document. The gold spans are grouped by technique family (the
+    # part of the id before the dot), so a predicted id is checked against the spans of
+    # its own family.
     ev_rows = []
     for doc_id in rows:
         d = docs[doc_id]
@@ -461,6 +467,9 @@ def cmd_score(args) -> None:
                 spans.setdefault(c.split(".", 1)[0], []).append((m.start, m.end))
         ev_rows += evidence.check(doc_id, d.text, preds[doc_id]["ttps"], spans, canonical, gold_techs)
 
+    # Stage status counts across the documents. The LLM health counts come from the
+    # stages 3, 3d and 3f only, and the stage 3d and 3f keys are prefixed with their stage
+    # so that they do not merge with the stage 3 keys.
     stages: dict[str, dict[str, int]] = {}
     llm_health: dict[str, int] = {}
     for p in preds.values():
@@ -478,6 +487,8 @@ def cmd_score(args) -> None:
         found, gold = sum(a for a, _ in pairs), sum(b for _, b in pairs)
         return {"found": found, "gold": gold, "recall": round(found / gold, 4) if gold else None}
 
+    # The report is written to runs/<name>/score.json. A score taken against an ATT&CK
+    # release other than the one the run used goes to a separate file.
     report = {
         "run": args.name, "split": s["meta"]["split"], "documents_scored": len(rows),
         "documents_failed": sorted(k for k, p in preds.items() if "error" in p),
@@ -500,6 +511,8 @@ def cmd_score(args) -> None:
         "llm_health": llm_health,
         "seconds_per_document": round(sum(p.get("seconds", 0) for p in preds.values()) / max(1, len(preds)), 1),
     }
+    # `release` is the ATT&CK release the gold was mapped with, `own` the one the run used.
+    # They differ when the score was taken against another release (see the note below).
     release, own = report["attack_mapping"]["release"], run_release(s["meta"])
     _write(OUT / "runs" / args.name / ("score.json" if release == own else f"score-attack-{release}.json"),
            report)
@@ -531,6 +544,9 @@ def cmd_score(args) -> None:
 def cmd_ttp_errors(args) -> None:
     """Split a run's technique errors by where they arise (ADR-0072): never
     retrieved, retrieved but not selected, and false positives by origin."""
+    # Each document is split by metrics.ttp_error_split. Documents that errored in the run
+    # are left out. The per-category tallies, the reasons of missed gold, and the candidate
+    # ceiling (found plus retrieved-but-not-selected, over all gold) are then summed.
     meta, preds = _load_run(args.name)
     modified = _modified_files(args.name, meta)
     canonical, catalogue = _canonical_fn(args.attack_release or run_release(meta))
@@ -681,6 +697,8 @@ def cmd_release_effect(args) -> None:
     the change in TP / FP / FN, and the F1 A would have if only that class came
     from B.  Documents whose gazetteer entities or candidates differ are listed:
     the rest of the difference is not the taxonomy's."""
+    # Both runs are scored with one ATT&CK release (`_shared_release`). The two releases
+    # `old` and `new` are the ones the taxonomy comparison is made between.
     old, new = _compared_releases(args.a, args.b, args.old, args.new)
     release = _shared_release(args.a, args.b, args.attack_release)
     a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
@@ -688,10 +706,14 @@ def cmd_release_effect(args) -> None:
     common = sorted(set(a["rows"]) & set(b["rows"]))
     if not common:
         sys.exit("no document scored in both runs")
+    # `classify` maps each technique id to the class of change it had between the two
+    # releases. `by_source` is True when every entity of both runs records its source.
     classify = attack.release_change(
         attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA)))
     by_source = all("source" in e for s in (a, b) for d in common for e in s["preds"][d]["entities"])
 
+    # Per document: the parent-level gold set and the predicted parent sets of both runs.
+    # The check against score_ttps stops the report if the two computations disagree.
     counts_a, counts_b = [], []
     classes: dict[str, dict] = {c: {"ids": set(), "differences": 0, "hybrid": []} for c in attack.CHANGE_CLASSES}
     detail = []
@@ -703,6 +725,9 @@ def cmd_release_effect(args) -> None:
                 raise RuntimeError(f"{doc_id}: parent-level sets differ from metrics.score_ttps")
         counts_a.append(metrics.set_counts(pa, gold))
         counts_b.append(metrics.set_counts(pb, gold))
+        # Ids in only one run are the differences, counted by their class of change. For
+        # each class, the hybrid run takes that class's ids from b and every other id from a,
+        # so its counts show the F1 a would have if only that class had changed.
         why = {t: classify(t) for t in pa | pb}
         for t in pa ^ pb:
             classes[why[t]]["ids"].add(t)
@@ -710,6 +735,9 @@ def cmd_release_effect(args) -> None:
         for c, row in classes.items():
             row["hybrid"].append(metrics.set_counts(
                 {t for t in pa if why[t] != c} | {t for t in pb if why[t] == c}, gold))
+        # Upstream differences that are not the taxonomy's: gazetteer entities and TTP
+        # candidates. `_only` returns None when the two runs agree, and the values each run
+        # has alone otherwise. A document is listed when any of the three differs.
         gazetteer = _only(*(_gazetteer_entities(s["preds"][doc_id], by_source) for s in (a, b)))
         candidates = _only(*(set(s["preds"][doc_id].get("ttp_candidates") or []) for s in (a, b)))
         if pa != pb or gazetteer or candidates:
@@ -746,6 +774,8 @@ def cmd_release_effect(args) -> None:
             1 for d in differ if d["gazetteer_entities"] or d["candidates"]),
         "documents_detail": detail,
     }
+    # The report is written to compare/<a>__vs__<b>__release-effect.json, and the summary
+    # is printed after it.
     path = OUT / "compare" / f"{args.a}__vs__{args.b}__release-effect.json"
     _write(path, report)
     print(f"{args.b} − {args.a} on {len(common)} documents, parent techniques, gold mapped with ATT&CK "

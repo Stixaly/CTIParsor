@@ -168,6 +168,8 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
     stix_dir = stix_dir or _ROOT / "data" / "attack-stix" / f"v{release}"
     out_dir = out_dir or attack_data.TRACKS_DIR / release
     capec_index = capec_index or attack_data.DATA_DIR / "mitre_index.json"
+    # Refuse an existing track unless --force is given. The sources are verified before
+    # anything is written.
     if out_dir.exists() and not force:
         raise BuildError(f"{out_dir} exists: pass --force to replace it")
 
@@ -179,11 +181,15 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
     if not capec:
         raise BuildError(f"{capec_index} holds no CAPEC technique to carry over")
 
+    # The embedding model comes from the environment. The manifest records it only when it
+    # differs from the default model.
     from dotenv import load_dotenv
     load_dotenv()
     model_id = os.getenv("TTP_EMBEDDING_MODEL", _DEFAULT_MODEL)
     write_manifest = model_id != _DEFAULT_MODEL
 
+    # Enterprise, mobile and ICS feed the indexes. Retrieval and revoked objects use the
+    # enterprise domain only.
     paths = {s["domain"]: stix_dir / f"{s['domain']}.json" for s in sources}
     all_domains: dict[str, Path | None] = {
         "enterprise": paths["enterprise-attack"],
@@ -192,6 +198,8 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
     }
     enterprise_only: dict[str, Path | None] = {"enterprise": paths["enterprise-attack"]}
 
+    # Everything is built in a `.building` directory next to the track. The track is
+    # replaced only when the build is complete; on any error the directory is removed.
     out_dir.parent.mkdir(parents=True, exist_ok=True)
     building = out_dir.parent / f".{out_dir.name}.building"
     shutil.rmtree(building, ignore_errors=True)
@@ -206,6 +214,8 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
         build_indexes.build_retrieval(enterprise_only, neutralise=True, out_dir=building,
                                       embed=not skip_embeddings)
 
+        # The file list must match what this build is expected to write, so a missing
+        # embedding (for example sentence-transformers not installed) is refused here.
         names = sorted(p.name for p in building.iterdir() if p.is_file())
         expected = set(_TRACK_FILES)
         if skip_embeddings:
@@ -241,6 +251,8 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
         (building / attack_data.MANIFEST_NAME).write_text(
             json.dumps(manifest, indent=1, ensure_ascii=False) + "\n", encoding="utf-8")
 
+        # Swap the finished build into place. An existing track is first moved aside as
+        # `.previous`, and put back if the rename of the new build fails.
         if out_dir.exists():
             previous = out_dir.parent / f".{out_dir.name}.previous"
             shutil.rmtree(previous, ignore_errors=True)
@@ -257,6 +269,7 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
         shutil.rmtree(building, ignore_errors=True)
         raise
 
+    # The summary is printed from the finished track only.
     _summary(out_dir)
     return out_dir
 

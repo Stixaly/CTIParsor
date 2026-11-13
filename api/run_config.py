@@ -193,6 +193,7 @@ BuildKind = Literal["run", "finalize", "quick"]
 
 
 def utc_stamp() -> str:
+    """The current UTC time, formatted as YYYY-MM-DDTHH:MM:SSZ."""
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
