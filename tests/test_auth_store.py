@@ -124,9 +124,13 @@ def test_admin_exists_ignores_a_disabled_admin(temp_db):
     store.create_user("alice", "analyst", password=GOOD)
     assert not store.admin_exists()
     store.create_user("root", "admin", password=GOOD)
+    store.create_user("backup", "admin", password=GOOD)
     assert store.admin_exists()
-    store.set_disabled("root")
-    assert not store.admin_exists()
+    store.set_disabled("root")                              # backup stays an enabled admin
+    assert store.admin_exists()
+    with pytest.raises(store.LastAdminError):               # the last enabled admin cannot be disabled (#739)
+        store.set_disabled("backup")
+    assert store.admin_exists()
 
 
 # ── Lockout ──────────────────────────────────────────────────────────────────

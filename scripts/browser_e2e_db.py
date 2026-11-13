@@ -3,6 +3,7 @@
     python scripts/browser_e2e_db.py create
     python scripts/browser_e2e_db.py seed URL
     python scripts/browser_e2e_db.py stages URL
+    python scripts/browser_e2e_db.py expire-session URL USERNAME
     python scripts/browser_e2e_db.py drop URL
 
 create  makes a new, empty database on the PostgreSQL server
@@ -17,9 +18,13 @@ seed    writes the one report no upload can make, once the API has built the
 stages  prints, for every report, which stages ran and which were skipped and
         why (the run's stage report, ADR-0059); exit 1 when a stage
         PIPELINE_DISABLED_STAGES turns off ran, or when no report ran at all.
+expire-session
+        sets the expiry of every session of the account USERNAME to a minute
+        ago: the next request of its browser finds the session ended (the
+        journey of frontend/e2e/auth-roles.spec.ts, #707).  Says how many.
 drop    removes the database, connections and all.
 
-seed, stages and drop take only a database create made (its name starts with
+seed, stages, expire-session and drop take only a database create made (its name starts with
 PREFIX).  Exit 0 on success, 1 on a failed check, 2 when it cannot run (no
 CTIPARSOR_TEST_DATABASE_URL, a server it cannot reach or create a database
 on, a database it did not make).
@@ -155,6 +160,21 @@ def stage_problems(reports: Iterable[Mapping[str, Any]], disabled: set[str],
     return problems
 
 
+def expire_sessions(username: str) -> int:
+    """Ends every session of the account `username` (its expiry goes a minute back).  How many."""
+    from datetime import timedelta
+
+    from api.auth import store
+    from api.db import get_conn
+
+    moment = store._ts(store._now() - timedelta(minutes=1))
+    conn = get_conn()
+    cursor = conn.execute("UPDATE sessions SET expires_at=? WHERE user_id IN "
+                          "(SELECT id FROM users WHERE username=?)", (moment, username))
+    conn.commit()
+    return cursor.rowcount
+
+
 def _use(url: str) -> None:
     """Points api.db at `url`: before anything imports it."""
     database(url)
@@ -163,8 +183,9 @@ def _use(url: str) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="The database of the browser journey.")
-    parser.add_argument("command", choices=("create", "seed", "stages", "drop"))
+    parser.add_argument("command", choices=("create", "seed", "stages", "drop", "expire-session"))
     parser.add_argument("url", nargs="?", help="the URL create printed")
+    parser.add_argument("username", nargs="?", help="expire-session: the account whose sessions end")
     args = parser.parse_args(argv)
     try:
         if args.command == "create":
@@ -178,6 +199,11 @@ def main(argv: list[str] | None = None) -> int:
         _use(args.url)
         if args.command == "seed":
             print(f"seeded {REFUSED_FILENAME}: job {write_refused_report()}")
+            return 0
+        if args.command == "expire-session":
+            if not args.username:
+                raise Unusable("expire-session needs the account's username")
+            print(f"{expire_sessions(args.username)} session(s) of {args.username} ended")
             return 0
         from api.db import get_conn
         with get_conn() as conn:

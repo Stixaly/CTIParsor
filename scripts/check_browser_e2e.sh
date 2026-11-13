@@ -2,7 +2,7 @@
 # The browser journey (ADR-0094 item 4): Playwright drives the built interface
 # against the real API, its worker and PostgreSQL, offline.
 #
-#   scripts/check_browser_e2e.sh [--no-build] [--docker] [--network-guard] [-- PLAYWRIGHT ARGS]
+#   scripts/check_browser_e2e.sh [--no-build] [--docker] [--network-guard] [--auth local|oidc] [-- PLAYWRIGHT ARGS]
 #
 # 1. builds the interface (cd frontend && npm run build), unless --no-build;
 # 2. creates a new database on the PostgreSQL server CTIPARSOR_TEST_DATABASE_URL
@@ -43,9 +43,23 @@
 #                     (the version of frontend/node_modules/@playwright/test),
 #                     with --network host: no browser to install on this host
 #   --network-guard   step 7
+#   --auth local      the API runs with AUTH_MODE=local, three local accounts are
+#                     created with python -m api.admin (e2e-reader, e2e-analyst,
+#                     e2e-admin; their passwords are random, written under the
+#                     temporary directory and never printed), and by default the
+#                     run is frontend/e2e/auth-roles.spec.ts alone: the other
+#                     journeys do not sign in.  Not with --docker.
+#   --auth oidc       the API runs with AUTH_MODE=oidc against the identity
+#                     provider E2E_OIDC_ISSUER (see docs/deployment.md, OIDC), with
+#                     OIDC_ROLE_MAP=E2E_OIDC_ROLE_MAP; by default the run is
+#                     frontend/e2e/auth-oidc.spec.ts.  Not with --docker.
 # Environment: CTIPARSOR_TEST_DATABASE_URL (required), PYTHON (default
 #   .venv/bin/python, else python3), E2E_PORT (default 8765),
 #   E2E_HEALTH_TIMEOUT, E2E_GUARD_GID, DOCKER_BIN (default docker).
+#   For --auth oidc: E2E_OIDC_ISSUER (required: the issuer URL, https or
+#   http on localhost), E2E_OIDC_CLIENT_ID, E2E_OIDC_CLIENT_SECRET_FILE (a file
+#   holding the client secret), E2E_OIDC_ROLE_MAP (default
+#   e2e-readers=reader,e2e-analysts=analyst,e2e-admins=admin).
 # Needs frontend/node_modules (npm ci) and, without --docker, Playwright's
 # Chromium (npx playwright install --with-deps chromium).
 #
@@ -72,12 +86,16 @@ DISABLED_STAGES="1f,2c,2d,2e,3,3d,3f,3e,3doc,2f,4c"
 BUILD=1
 USE_DOCKER=0
 GUARD=0
+AUTH=""
 PW_ARGS=()
 while [ $# -gt 0 ]; do
     case "$1" in
         --no-build) BUILD=0 ;;
         --docker) USE_DOCKER=1 ;;
         --network-guard) GUARD=1 ;;
+        --auth)
+            [ $# -ge 2 ] || { echo "check_browser_e2e: --auth takes local or oidc" >&2; exit 2; }
+            AUTH="$2"; shift ;;
         --) shift; PW_ARGS=("$@"); break ;;
         -h|--help) sed -n '2,/^$/p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) echo "check_browser_e2e: unknown option $1 (see --help)" >&2; exit 2 ;;
@@ -87,6 +105,29 @@ done
 
 say() { echo "== $*"; }
 unusable() { echo "check_browser_e2e: $*" >&2; exit 2; }
+
+case "$AUTH" in
+    ""|local|oidc) ;;
+    *) unusable "--auth takes local or oidc, got: ${AUTH:-(nothing)}" ;;
+esac
+if [ -n "$AUTH" ] && [ "$USE_DOCKER" = 1 ]; then
+    unusable "--auth needs Playwright on this host (the account passwords are read from the temporary directory): not with --docker"
+fi
+if [ "$AUTH" = oidc ]; then
+    [ -n "${E2E_OIDC_ISSUER:-}" ] || unusable "--auth oidc needs E2E_OIDC_ISSUER (the identity provider's issuer URL)"
+    [ -n "${E2E_OIDC_CLIENT_ID:-}" ] || unusable "--auth oidc needs E2E_OIDC_CLIENT_ID"
+    [ -r "${E2E_OIDC_CLIENT_SECRET_FILE:-}" ] || unusable "--auth oidc needs E2E_OIDC_CLIENT_SECRET_FILE: a readable file with the client secret"
+    E2E_OIDC_ROLE_MAP="${E2E_OIDC_ROLE_MAP:-e2e-readers=reader,e2e-analysts=analyst,e2e-admins=admin}"
+    curl -fsS -o /dev/null "${E2E_OIDC_ISSUER%/}/.well-known/openid-configuration" 2>/dev/null \
+        || unusable "no OpenID discovery document at ${E2E_OIDC_ISSUER%/}/.well-known/openid-configuration: start the identity provider first"
+fi
+# With --auth and no Playwright arguments, the run is the one journey of that mode.
+if [ -n "$AUTH" ] && [ "${#PW_ARGS[@]}" -eq 0 ]; then
+    case "$AUTH" in
+        local) PW_ARGS=(e2e/auth-roles.spec.ts) ;;
+        oidc) PW_ARGS=(e2e/auth-oidc.spec.ts) ;;
+    esac
+fi
 
 if [ -z "${PYTHON:-}" ]; then
     if [ -x "$ROOT/.venv/bin/python" ]; then PYTHON="$ROOT/.venv/bin/python"; else PYTHON="$(command -v python3 || true)"; fi
@@ -232,7 +273,36 @@ if [ "$GUARD" = 1 ]; then
 elif [ "$(id -u)" = 0 ]; then
     APP_AS=(setpriv --reuid="$APP_UID" --regid="$APP_GID" --clear-groups --)
 fi
+# Sign-in (--auth): the authentication settings join the API's environment.
+if [ "$AUTH" = local ]; then
+    API_ENV+=("AUTH_MODE=local")
+elif [ "$AUTH" = oidc ]; then
+    API_ENV+=("AUTH_MODE=oidc" "OIDC_ISSUER_URL=$E2E_OIDC_ISSUER" "OIDC_CLIENT_ID=$E2E_OIDC_CLIENT_ID"
+              "OIDC_CLIENT_SECRET_FILE=$E2E_OIDC_CLIENT_SECRET_FILE"
+              "OIDC_REDIRECT_URI=$BASE_URL/api/auth/oidc/callback" "OIDC_ROLE_MAP=$E2E_OIDC_ROLE_MAP")
+fi
 as_app() { "${APP_AS[@]}" env -i "${API_ENV[@]}" "$@"; }
+
+# --auth local: three accounts, through python -m api.admin, with random passwords
+# written to files under the temporary directory (never printed).
+ACCOUNTS=""
+if [ "$AUTH" = local ]; then
+    say "creating the test accounts (python -m api.admin)"
+    ACCOUNTS="$TMP/accounts"
+    mkdir -p "$ACCOUNTS" && chmod 700 "$ACCOUNTS" || unusable "cannot create $ACCOUNTS"
+    for role in reader analyst admin; do
+        (umask 077 && "$PYTHON" -c 'import secrets; print(secrets.token_urlsafe(18))' > "$ACCOUNTS/$role.pw") \
+            || unusable "cannot write the password file of $role"
+    done
+    # Under root the API reads the password files as the user it runs as.
+    if [ "$(id -u)" = 0 ]; then chown -R "$APP_UID:$APP_GID" "$ACCOUNTS"; fi
+    (cd "$ROOT" && as_app "$PYTHON" -m api.admin create-admin --username e2e-admin \
+        --password-file "$ACCOUNTS/admin.pw") >/dev/null || unusable "cannot create the admin account"
+    for role in reader analyst; do
+        (cd "$ROOT" && as_app "$PYTHON" -m api.admin create-user --username "e2e-$role" --role "$role" \
+            --password-file "$ACCOUNTS/$role.pw") >/dev/null || unusable "cannot create the $role account"
+    done
+fi
 
 if [ "$GUARD" = 1 ]; then
     say "network guard: group $GUARD_GID, every packet off loopback rejected and counted"
@@ -285,7 +355,10 @@ if [ "$USE_DOCKER" = 1 ]; then
         "mcr.microsoft.com/playwright:v$version-noble" npx playwright test "${PW_ARGS[@]}"
     PW_CODE=$?
 else
-    (cd "$FRONTEND" && E2E_BASE_URL="$BASE_URL" npx playwright test "${PW_ARGS[@]}")
+    # The authentication journeys read the account passwords from E2E_ACCOUNTS_DIR and
+    # end sessions with scripts/browser_e2e_db.py (E2E_PYTHON, E2E_DB_URL).
+    (cd "$FRONTEND" && E2E_BASE_URL="$BASE_URL" E2E_AUTH="$AUTH" E2E_ACCOUNTS_DIR="$ACCOUNTS" \
+        E2E_PYTHON="$PYTHON" E2E_DB_URL="$DB_URL" npx playwright test "${PW_ARGS[@]}")
     PW_CODE=$?
 fi
 echo "Playwright exited $PW_CODE"

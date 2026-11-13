@@ -37,7 +37,7 @@ own rule whatever the mode: loopback clients, or the `METRICS_TOKEN` bearer (see
   |---|---|---|
   | `GET` | `/api/admin/users` | Every user: `id`, `username`, `display_name`, `auth_source`, `role`, `disabled`, `created_at`, `last_login_at`. Never a hash |
   | `POST` | `/api/admin/users` | Create a local user `{ username, role, display_name?, password }` (201). The password policy of the CLI applies (12 characters or more). 400 for a bad username, a weak password, or when local accounts are off (`AUTH_MODE=oidc`); 409 for a username that is taken |
-  | `PATCH` | `/api/admin/users/{id}` | `{ role?, disabled?, display_name? }`. Disabling ends the user's sessions and revokes no token: a disabled user's tokens are refused until the account is enabled again. 409 when an admin disables or demotes themself, and when the change would leave no enabled admin |
+  | `PATCH` | `/api/admin/users/{id}` | `{ role?, disabled?, display_name? }`. Disabling ends the user's sessions and revokes no token: a disabled user's tokens are refused until the account is enabled again. Concurrent changes are applied one after the other, each on the state committed before it; a field left out keeps its committed value. 409 when an admin disables or demotes themself, and when the change would leave no enabled admin |
   | `POST` | `/api/admin/users/{id}/password` | `{ password }`: set a local user's password. It ends that user's sessions and clears their sign-in lock. 400 for a weak password and for an OIDC user |
   | `GET` | `/api/admin/tokens` | Every token: `id`, `name`, `user_id`, `username`, `created_at`, `expires_at`, `revoked_at`, `last_used_at`. Never the secret or its hash |
   | `POST` | `/api/admin/tokens` | `{ user_id, name, days? }` (1 to 365, default 90) → 201 with the record and `token`, the only time the token is sent. 404 for an unknown user |
@@ -611,7 +611,7 @@ the docstring of each class says the same. The table is checked against the clas
 |---|---|---|
 | `AuthError` (`api/auth/store.py`) | An account, password or token change is refused (bad username, role, password, token name or lifetime, unknown user) | 400 with the message (`api/routes/admin.py`); the admin CLI prints `refused: <message>` and exits 1 |
 | `UsernameTakenError` (`api/auth/store.py`) | The username of a new account is taken | 409 with the message (`POST /api/admin/users`) |
-| `LastAdminError` (`api/auth/store.py`) | A change would leave no enabled admin | 409 with the message (`PATCH /api/admin/users/{user_id}`) |
+| `LastAdminError` (`api/auth/store.py`) | A change would leave no enabled admin | 409 with the message (`PATCH /api/admin/users/{user_id}`); the admin CLI prints `refused: <message>` and exits 1 (`disable`) |
 | `AuthConfigError` (`api/auth/config.py`) | An authentication setting is refused | At start-up the process does not start. In the OIDC login and callback, 302 to `/login?error=config` |
 | `OidcError` (`api/auth/oidc.py`) | A sign-in is refused (`state`, `idp`, `token`, `disabled`, `no_role`, `account`, `busy`) | 302 to `/login?error=<code>`; the callback also clears the binding cookie |
 | `MigrationError` (`api/migrate.py`) | The database cannot be brought to this code's schema version | The process does not start (`api.db.init_db`); `python -m api.migrate up` prints `migration refused: <message>` and exits 1 |

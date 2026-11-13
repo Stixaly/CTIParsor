@@ -94,6 +94,7 @@ def test_set_password_changes_it_and_signs_the_user_out(cli, password_file, tmp_
 
 def test_disable_and_enable(cli, password_file):
     cli("create-admin", "--username", "alice", "--password-file", password_file())
+    cli("create-user", "--username", "bob", "--role", "admin", "--password-file", password_file())
     assert cli("disable", "--username", "alice")[0] == 0
     assert store.check_credentials("alice", GOOD) is None
     assert cli("disable", "--username", "alice", "--enable")[0] == 0

@@ -16,7 +16,7 @@ shows a username and password form when local accounts are on, and a "Sign in wi
 link when an identity provider is configured. After a sign-in you land on `next` when it is a path of
 this site, else on the dashboard. A wrong password reads "Invalid username or password."; five failures
 for a username lock it for 15 minutes, and the page says how long to wait. The sidebar shows your name
-and role and a "Sign out" button. The interface hides what your role cannot use (no "New report" for a
+and role and a "Sign out" button (the Review page has no sidebar: sign out from the dashboard). The interface hides what your role cannot use (no "New report" for a
 reader; Policy and Settings only for an admin; a reader's report opens read-only, see "Reader" under the
 Review page); the server refuses it in any case. When the session
 ends while you work (it lasts 12 hours from the last request), the next request takes you back to the
