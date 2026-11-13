@@ -1,20 +1,30 @@
-"""Measure the default provider (ADR-0094 item 11, decision 13).
+"""Measure the qualified LLM configuration (ADR-0100, amending ADR-0094 item 11
+and decision 13).
 
-Two runs with `anthropic`, the default `LLM_PROVIDER`, at `LLM_TEMPERATURE=0`
-on the AnnoCTR test split, and two on the in-house set; then the scores, and
-the spread between the two runs of each set. Every run is billed per call.
-Anthropic takes no seed, so the spread between the two runs is what gets
-published.
+By default (`--provider vllm`): two runs of the qualified configuration on the
+AnnoCTR test split, and two on the in-house set, with figure reading on
+(`VISION_PROVIDER=vllm`), at `LLM_TEMPERATURE=0` and `LLM_SEED=13`, with a local
+vLLM serving `Inferact/Qwen3.8-27B-NVFP4`, thinking off. vLLM is not billed.
+
+`--provider anthropic` runs the same steps with the default `LLM_PROVIDER` of
+the code. Every run of it is billed per call, and Anthropic takes no seed.
+
+In both cases the scores and the spread between the two runs of each set are
+written, and the spread is what gets published.
 
     python scripts/measure_default_provider.py --dry-run
     python scripts/measure_default_provider.py
-    python scripts/measure_default_provider.py --estimate default-provider-inhouse-1 \
-        --price-in <USD per million input tokens> --price-out <USD per million output tokens>
+    python scripts/measure_default_provider.py --provider anthropic --dry-run
+    python scripts/measure_default_provider.py --estimate qualified-vllm-inhouse-1 \
+        --provider anthropic --price-in <USD per million input tokens> --price-out <USD per million output tokens>
 
-Refuses to start unless: ANTHROPIC_API_KEY is set; LLM_PROVIDER is anthropic
-(or unset, its default); LLM_TEMPERATURE is 0; VISION_PROVIDER does not turn
-figure reading off (none) nor send figures to another provider; ANTHROPIC_MODEL
-is the code's default; and none of the four run names exists yet.
+Refuses to start unless the environment (or `.env`) names the chosen provider
+as LLM_PROVIDER, LLM_TEMPERATURE is 0, and VISION_PROVIDER does not turn figure
+reading off (none) nor send figures to another provider. For vllm it also
+requires VLLM_BASE_URL, VLLM_MODEL=Inferact/Qwen3.8-27B-NVFP4,
+VLLM_ENABLE_THINKING=false, LLM_TIMEOUT=600 and LLM_SEED=13. For anthropic it
+requires ANTHROPIC_API_KEY and ANTHROPIC_MODEL to be the code's default. In both
+cases none of the four run names exists yet.
 
 The environment is read as `python -m evaluation` reads it: the process
 environment first, then `.env` (python-dotenv does not override a variable
@@ -63,8 +73,22 @@ def _code_default_model() -> str:
 
 DEFAULT_MODEL = _code_default_model()
 
-ANNOCTR_RUNS = ("default-provider-annoctr-1", "default-provider-annoctr-2")
-INHOUSE_RUNS = ("default-provider-inhouse-1", "default-provider-inhouse-2")
+#: The qualified configuration of ADR-0100 (the maintainer's decision of 2026-11-13).
+QUALIFIED_VLLM_MODEL = "Inferact/Qwen3.8-27B-NVFP4"
+QUALIFIED_VLLM_SEED = "13"
+QUALIFIED_VLLM_TIMEOUT = "600"
+
+PROVIDERS = ("vllm", "anthropic")
+#: Run names per provider: the qualified runs and the anthropic option keep
+#: apart, so a run of one never blocks the other.
+RUN_PREFIX = {"vllm": "qualified-vllm", "anthropic": "default-provider"}
+
+
+def run_names(provider: str) -> dict[str, tuple[str, str]]:
+    """The two AnnoCTR test runs and the two in-house runs of a provider."""
+    prefix = RUN_PREFIX[provider]
+    return {"annoctr": (f"{prefix}-annoctr-1", f"{prefix}-annoctr-2"),
+            "inhouse": (f"{prefix}-inhouse-1", f"{prefix}-inhouse-2")}
 
 # Rule of thumb for prose, approximate: no tokenizer is run here.
 CHARS_PER_TOKEN = 4
@@ -113,18 +137,41 @@ def run_exists(name: str) -> bool:
     return (EVAL / "runs" / name).exists() or (EVAL / "inhouse-runs" / name).exists()
 
 
-def check(environ: dict, dotenv: dict) -> tuple[dict, list[str]]:
+def check(environ: dict, dotenv: dict, provider: str = "vllm") -> tuple[dict, list[str]]:
     """The settings the measurement runs with, and why it must not start."""
     def get(key: str, default: str | None = None) -> str | None:
         return effective(key, environ, dotenv, default)
 
     problems: list[str] = []
-    if not (get("ANTHROPIC_API_KEY") or "").strip():
-        problems.append("ANTHROPIC_API_KEY is not set (in the environment or .env)")
+    chosen = (get("LLM_PROVIDER", DEFAULT_PROVIDER) or "").strip().lower()
+    if chosen != provider:
+        problems.append(f"LLM_PROVIDER is {chosen!r}: the measurement is of {provider!r}")
 
-    provider = (get("LLM_PROVIDER", DEFAULT_PROVIDER) or "").strip().lower()
-    if provider != DEFAULT_PROVIDER:
-        problems.append(f"LLM_PROVIDER is {provider!r}: the measurement is of {DEFAULT_PROVIDER!r}, the default")
+    if provider == "anthropic":
+        if not (get("ANTHROPIC_API_KEY") or "").strip():
+            problems.append("ANTHROPIC_API_KEY is not set (in the environment or .env)")
+        model = (get("ANTHROPIC_MODEL", DEFAULT_MODEL) or "").strip()
+        if model != DEFAULT_MODEL:
+            problems.append(f"ANTHROPIC_MODEL is {model!r}: the decision is about the default, {DEFAULT_MODEL!r}")
+        model_or_default = model or DEFAULT_MODEL
+        vision_allowed = VISION_ALLOWED
+    else:
+        if not (get("VLLM_BASE_URL") or "").strip():
+            problems.append("VLLM_BASE_URL is not set (in the environment or .env)")
+        model = (get("VLLM_MODEL") or "").strip()
+        if model != QUALIFIED_VLLM_MODEL:
+            problems.append(f"VLLM_MODEL is {model!r}: the qualified model is {QUALIFIED_VLLM_MODEL!r}")
+        thinking = (get("VLLM_ENABLE_THINKING") or "").strip().lower()
+        if thinking not in ("false", "0", "no", "off"):
+            problems.append(f"VLLM_ENABLE_THINKING is {thinking!r}: the qualified configuration has it off")
+        timeout = (get("LLM_TIMEOUT") or "").strip()
+        if timeout != QUALIFIED_VLLM_TIMEOUT:
+            problems.append(f"LLM_TIMEOUT is {timeout!r}: the qualified configuration uses {QUALIFIED_VLLM_TIMEOUT}")
+        seed = (get("LLM_SEED") or "").strip()
+        if seed != QUALIFIED_VLLM_SEED:
+            problems.append(f"LLM_SEED is {seed!r}: the qualified configuration uses {QUALIFIED_VLLM_SEED}")
+        model_or_default = QUALIFIED_VLLM_MODEL
+        vision_allowed = ("", "auto", "vllm")
 
     temperature = get("LLM_TEMPERATURE")
     try:
@@ -138,19 +185,20 @@ def check(environ: dict, dotenv: dict) -> tuple[dict, list[str]]:
     vision = (get("VISION_PROVIDER", "") or "").strip().lower()
     if vision == "none":
         problems.append("VISION_PROVIDER=none turns figure reading off: the default journey reads figures (item 12)")
-    elif vision not in VISION_ALLOWED:
+    elif vision not in vision_allowed:
         problems.append(f"VISION_PROVIDER is {vision!r}: figures would go to another provider than the text's")
 
-    model = (get("ANTHROPIC_MODEL", DEFAULT_MODEL) or "").strip()
-    if model != DEFAULT_MODEL:
-        problems.append(f"ANTHROPIC_MODEL is {model!r}: the decision is about the default, {DEFAULT_MODEL!r}")
-
-    for name in (*ANNOCTR_RUNS, *INHOUSE_RUNS):
+    for name in (n for pair in run_names(provider).values() for n in pair):
         if run_exists(name):
             problems.append(f"run {name!r} already exists: a measurement uses fresh run names")
 
-    settings = {"provider": DEFAULT_PROVIDER, "temperature": "0",
-                "vision_provider": vision or "auto", "model": model or DEFAULT_MODEL}
+    if provider == "anthropic":
+        settings = {"provider": provider, "temperature": "0",
+                    "vision_provider": vision or "auto", "model": model_or_default}
+    else:
+        settings = {"provider": provider, "temperature": "0", "seed": QUALIFIED_VLLM_SEED,
+                    "timeout": QUALIFIED_VLLM_TIMEOUT, "vision_provider": "vllm",
+                    "model": model_or_default}
     return settings, problems
 
 
@@ -160,22 +208,29 @@ def child_environment(settings: dict, environ: dict) -> dict:
     env["LLM_PROVIDER"] = settings["provider"]
     env["LLM_TEMPERATURE"] = settings["temperature"]
     env["VISION_PROVIDER"] = settings["vision_provider"]
-    env["ANTHROPIC_MODEL"] = settings["model"]
+    if settings["provider"] == "anthropic":
+        env["ANTHROPIC_MODEL"] = settings["model"]
+    else:
+        env["VLLM_MODEL"] = settings["model"]
+        env["VLLM_ENABLE_THINKING"] = "false"
+        env["LLM_TIMEOUT"] = settings["timeout"]
+        env["LLM_SEED"] = settings["seed"]
     return env
 
 
 # ── the steps ────────────────────────────────────────────────────────────────
 
-def plan(python: str) -> list[tuple[str, list[str], bool]]:
+def plan(python: str, provider: str = "vllm") -> list[tuple[str, list[str], bool]]:
     """(label, argv, capture stdout). Only inhouse-compare prints its result."""
     ev = [python, "-m", "evaluation"]
-    a1, a2 = ANNOCTR_RUNS
-    i1, i2 = INHOUSE_RUNS
+    annoctr, inhouse = run_names(provider)["annoctr"], run_names(provider)["inhouse"]
+    a1, a2 = annoctr
+    i1, i2 = inhouse
     steps: list[tuple[str, list[str], bool]] = []
-    for name in ANNOCTR_RUNS:
+    for name in annoctr:
         steps.append((f"run {name}", [*ev, "run", "--split", "test", "--name", name], False))
         steps.append((f"score {name}", [*ev, "score", "--name", name], False))
-    for name in INHOUSE_RUNS:
+    for name in inhouse:
         steps.append((f"inhouse-run {name}", [*ev, "inhouse-run", "--name", name], False))
         steps.append((f"inhouse-score {name}", [*ev, "inhouse-score", "--name", name, "--from", "bundle"], False))
     steps.append(("compare AnnoCTR", [*ev, "compare", "--a", a1, "--b", a2, "--task", "ttp"], False))
@@ -217,8 +272,9 @@ def _llm_manifest(run_json: Path) -> dict | None:
 
 def summarise(settings: dict) -> dict:
     """The summary of the four runs, read from the files the steps wrote."""
+    names = run_names(settings["provider"])
     annoctr = {}
-    for name in ANNOCTR_RUNS:
+    for name in names["annoctr"]:
         score = _load(EVAL / "runs" / name / "score.json")
         annoctr[name] = {"documents_scored": score.get("documents_scored"),
                          "documents_failed": score.get("documents_failed"),
@@ -226,25 +282,28 @@ def summarise(settings: dict) -> dict:
                          "seconds_per_document": score.get("seconds_per_document"),
                          "llm": score.get("llm")}
     inhouse = {}
-    for name in INHOUSE_RUNS:
+    for name in names["inhouse"]:
         score = _load(EVAL / "inhouse-runs" / name / "score-bundle.json")
         inhouse[name] = {"documents": score.get("documents"),
                          "documents_failed": score.get("documents_failed"),
                          "documents_unscored": score.get("documents_unscored"),
                          "micro": score.get("micro"),
                          "llm": _llm_manifest(EVAL / "inhouse-runs" / name / "run.json")}
-    a1, a2 = ANNOCTR_RUNS
-    i1, i2 = INHOUSE_RUNS
+    a1, a2 = names["annoctr"]
+    i1, i2 = names["inhouse"]
     compare_file = EVAL / "compare" / f"{a1}__vs__{a2}__ttp.json"
+    qualified = settings["provider"] == "vllm"
     return {
         "measured_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "decision": "ADR-0094 item 11 (decision 13)",
+        "decision": ("ADR-0100 (the qualified configuration; amends ADR-0094 item 11)" if qualified
+                     else "ADR-0094 item 11 (decision 13), the anthropic option"),
         "commit": git_head(),
         "provider": settings["provider"],
         "model": settings["model"],
         "llm_temperature": 0,
+        "llm_seed": int(settings["seed"]) if qualified else None,
         "vision_provider": settings["vision_provider"],
-        "billed": True,
+        "billed": not qualified,
         "annoctr_test": {
             "runs": annoctr,
             "spread_technique_micro": spread(annoctr[a1]["technique_micro"], annoctr[a2]["technique_micro"]),
@@ -332,7 +391,7 @@ def price_total(runs: list[dict], price_in: float | None, price_out: float | Non
     return total
 
 
-def print_estimate(result: dict, price_in: float | None, price_out: float | None) -> None:
+def print_estimate(result: dict, price_in: float | None, price_out: float | None, billed: bool = True) -> None:
     print(f"{result['name']}: estimate from the recorded run(s)")
     print(f"  rule: input tokens = report characters / {CHARS_PER_TOKEN} (approximate; the prompt "
           "template and entity list added per call are not counted)")
@@ -346,7 +405,9 @@ def print_estimate(result: dict, price_in: float | None, price_out: float | None
     print("total:")
     for key, value in total.items():
         print(f"  {key}: {value}")
-    if total["output_tokens_estimated"] is None:
+    if not billed:
+        print("  vLLM is not billed: the local server has no per-token price, so no cost is estimated")
+    elif total["output_tokens_estimated"] is None:
         print("  output tokens are not recorded: pass --out-tokens-per-call to estimate them")
 
 
@@ -355,10 +416,12 @@ def print_estimate(result: dict, price_in: float | None, price_out: float | None
 def main(argv: list[str] | None = None, environ: dict | None = None,
          dotenv: dict | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--provider", choices=PROVIDERS, default="vllm",
+                        help="the configuration measured: vllm (the qualified one, ADR-0100) or anthropic (billed)")
     parser.add_argument("--dry-run", action="store_true", help="check, then print the commands; run nothing")
     parser.add_argument("--estimate", metavar="NAME", help="estimate the cost of a run already made")
-    parser.add_argument("--price-in", type=float, help="USD per million input tokens (estimate)")
-    parser.add_argument("--price-out", type=float, help="USD per million output tokens (estimate)")
+    parser.add_argument("--price-in", type=float, help="USD per million input tokens (estimate, anthropic only)")
+    parser.add_argument("--price-out", type=float, help="USD per million output tokens (estimate, anthropic only)")
     parser.add_argument("--out-tokens-per-call", type=int,
                         help="assumed output tokens per LLM request (estimate; not recorded)")
     args = parser.parse_args(argv)
@@ -369,17 +432,19 @@ def main(argv: list[str] | None = None, environ: dict | None = None,
             print(f"no run named {args.estimate!r} with docs/ under data/eval/runs or data/eval/inhouse-runs",
                   file=sys.stderr)
             return 1
-        print_estimate(result, args.price_in, args.price_out)
+        billed = args.provider == "anthropic"
+        print_estimate(result, args.price_in if billed else None,
+                       args.price_out if billed else None, billed=billed)
         return 0
 
     environ = dict(os.environ) if environ is None else environ
     dotenv = read_dotenv(REPO / ".env") if dotenv is None else dotenv
-    settings, problems = check(environ, dotenv)
+    settings, problems = check(environ, dotenv, args.provider)
     if problems:
         for p in problems:
             print(f"refused: {p}", file=sys.stderr)
         return 1
-    steps = plan(sys.executable)
+    steps = plan(sys.executable, args.provider)
     if args.dry_run:
         print(f"settings: {settings}")
         for label, cmd, _ in steps:

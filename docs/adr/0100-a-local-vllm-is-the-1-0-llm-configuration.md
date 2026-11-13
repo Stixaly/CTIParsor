@@ -96,9 +96,9 @@ The configuration is written in `docs/configuration.md` instead.
   changes it. Whether AnnoCTR test is read again for this gate is a new decision
   under ADR-0060, which allows one reading of test per decision; the October runs
   already read it with this server. The maintainer decides.
-- **Measurement tooling.** `scripts/measure_default_provider.py` runs the
-  anthropic configuration and refuses any other provider. It is not the gate's
-  run until it is changed. This ADR does not change it.
+- **Measurement tooling.** `scripts/measure_default_provider.py` defaults to this
+  configuration (`--provider vllm`), and keeps the billed anthropic option as
+  `--provider anthropic`. Its runs are named `qualified-vllm-*`.
 - **Egress.** A vLLM server on a private address is local: its text and figures
   may go to it for an AMBER, AMBER+STRICT or RED report. A server named by a
   host name must be listed in `LLM_LOCAL_HOSTS`, or it is external and refused.
