@@ -1,3 +1,5 @@
+import { useReadOnly } from './readOnly'
+
 interface Props {
   count: number
   threshold: number
@@ -5,6 +7,7 @@ interface Props {
 }
 
 export default function AutoAcceptBanner({ count, threshold, onUndo }: Props) {
+  const readOnly = useReadOnly()
   if (count === 0) return null
   return (
     <div className="auto-banner">
@@ -13,7 +16,7 @@ export default function AutoAcceptBanner({ count, threshold, onUndo }: Props) {
         <strong>{count} high-confidence entities</strong> auto-accepted (≥ {threshold}% confidence).
         Review the ambiguous middle below.
       </span>
-      <button className="link" onClick={onUndo}>Undo all</button>
+      {!readOnly && <button className="link" onClick={onUndo}>Undo all</button>}
     </div>
   )
 }

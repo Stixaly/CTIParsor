@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from 'react'
 import { enrichmentView, isImported, type EnrichmentStatus, type Relationship, type TemporalAssertion } from '../../types'
 import { ENRICH_FILTERS, REL_TYPES, confPct, heldPending, heldTitle, relNeedsReview, typeDot, typeLabel, verbsForPair, type EnrichFilter } from './tokens'
 import { EnrichmentBadge, IMPORTED_TITLE } from './MarginaliaCard'
+import { useReadOnly } from './readOnly'
 
 export type BulkAction = 'accept' | 'reject' | 'reset'
 
@@ -143,6 +144,8 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
   getEntityType?: (value: string) => string | undefined
   getEntityEnrichment?: (value: string) => EnrichmentStatus | null
 }) {
+  // A reader sees the relationship without the controls that change it (#707).
+  const readOnly = useReadOnly()
   const [editing, setEditing] = useState(false)
   const [editingDates, setEditingDates] = useState(false)
 
@@ -193,7 +196,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           <button
             className="rel-edge"
             onClick={() => setEditing(true)}
-            disabled={imported}
+            disabled={imported || readOnly}
             style={imported ? { opacity: 0.4 } : undefined}
             title={imported ? IMPORTED_TITLE : 'Click to change relationship type'}
           >
@@ -218,7 +221,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
           </span>
         )}
         {view && <EnrichmentBadge view={view} title={endsByName ? ENDS_BY_NAME_TITLE : undefined} />}
-        <div className="rel-actions">
+        {!readOnly && <div className="rel-actions">
           <button
             className={`mbtn ok ${acceptedByPerson ? 'on' : ''}`}
             onClick={() => acceptedByPerson ? onReset(r.id) : onAccept(r.id)}
@@ -229,7 +232,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
             onClick={() => r.accepted === false ? onReset(r.id) : onReject(r.id)}
             title="Reject"
           >✗</button>
-        </div>
+        </div>}
       </div>
       {/* An imported row shows its dates read-only, and only when it has some. */}
       {imported ? (
@@ -257,6 +260,7 @@ function RelCard({ r, onAccept, onReject, onReset, onJump, onChangeType, onChang
         <button
           className="rel-dates"
           onClick={() => setEditingDates(true)}
+          disabled={readOnly}
           title="Click to set when this relationship began and ended, at the precision you know"
         >
           {datesText}
@@ -301,6 +305,8 @@ export default function RelationshipRail({
   rels, onAccept, onReject, onReset, onJump, onChangeType, onChangeDates,
   showInDoc, setShowInDoc, onNewRelationship, getEntityType, onBulk, getEntityEnrichment,
 }: Props) {
+  // A reader gets no bulk decision and no new relationship (#707).
+  const readOnly = useReadOnly()
   const [filter, setFilter] = useState<Filter>('pending')
   // ── STIX bundle filter (ADR-0090): combined with `filter`, both apply ──
   const [enrichFilter, setEnrichFilter] = useState<EnrichFilter>('all')
@@ -473,7 +479,7 @@ export default function RelationshipRail({
           by target
         </button>
 
-        <button
+        {!readOnly && <button
           className="rel-new"
           onClick={e => onNewRelationship(e.clientX, e.clientY)}
           title="Add a relationship"
@@ -482,7 +488,7 @@ export default function RelationshipRail({
             <path d="M12 5v14M5 12h14" />
           </svg>
           New
-        </button>
+        </button>}
       </header>
 
       {!collapsed && (
@@ -502,7 +508,7 @@ export default function RelationshipRail({
                     })()}
                     <button className="rel-node" onClick={() => onJump(g.target)}>{g.target}</button>
                     <span className="rel-group-count">{g.rows.length} relationships</span>
-                    {onBulk && (
+                    {onBulk && !readOnly && (
                       <div className="rel-actions">
                         <button
                           className="mbtn ok rel-group-btn"

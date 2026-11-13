@@ -6,6 +6,7 @@
 import { useState, useMemo, useEffect } from 'react'
 import { enrichmentView, type Entity } from '../../types'
 import { ENRICH_FILTERS, heldPending, typeDot, typeLabel, type EnrichFilter } from './tokens'
+import { useReadOnly } from './readOnly'
 import MarginaliaCard from './MarginaliaCard'
 import { toggleInSet } from '../../hooks/sets'
 
@@ -32,6 +33,8 @@ export default function Marginalia({
   onAccept, onReject, onReset, onChangeType,
   sortMode, setSortMode, onClose,
 }: Props) {
+  // A reader sees the list without the bulk and selection controls (#707).
+  const readOnly = useReadOnly()
   // ── STIX bundle filter (ADR-0090) ──────────────────────────────────────
   // It filters what the column lists; the groups, the sort and the selection
   // all work on what it leaves.  Shown only when some row has a bundle status.
@@ -175,7 +178,7 @@ export default function Marginalia({
       <div className="marg-header">
         <div className="marg-header-left">
           {/* Select-all checkbox */}
-          <button
+          {!readOnly && <button
             className={`marg-check marg-check-header ${allVisibleSelected ? 'marg-check-on' : ''}`}
             onClick={toggleSelectAll}
             title={allVisibleSelected ? 'Deselect all' : 'Select all'}
@@ -183,7 +186,7 @@ export default function Marginalia({
             aria-checked={allVisibleSelected}
           >
             {allVisibleSelected ? '✓' : selCount > 0 ? '—' : ''}
-          </button>
+          </button>}
           <span className="marg-header-title">
             Margin notes <em>({entities.length})</em>
           </span>
@@ -225,7 +228,7 @@ export default function Marginalia({
       )}
 
       {/* ── Bulk selection action bar ──────────────────────────────────── */}
-      {selCount > 0 && (
+      {selCount > 0 && !readOnly && (
         <div className="marg-sel-bar">
           <span className="marg-sel-count">{selCount} selected</span>
           <button
@@ -274,7 +277,7 @@ export default function Marginalia({
                   <span className="marg-group-name">{typeLabel(grp.type)}</span>
                   <span className="marg-group-n">{grp.entities.length}</span>
 
-                  {!hidden && acceptableCount > 0 && (
+                  {!readOnly && !hidden && acceptableCount > 0 && (
                     <button
                       className="marg-group-action marg-group-ok"
                       onClick={() => acceptGroup(grp.entities)}
@@ -283,7 +286,7 @@ export default function Marginalia({
                       ✓ {acceptableCount}
                     </button>
                   )}
-                  {!hidden && rejectedCount < grp.entities.length && (
+                  {!readOnly && !hidden && rejectedCount < grp.entities.length && (
                     <button
                       className="marg-group-action marg-group-no"
                       onClick={() => rejectGroup(grp.entities)}
@@ -310,7 +313,7 @@ export default function Marginalia({
                 onReset={() => onReset(e.id)}
                 onChangeType={t => onChangeType(e.id, t)}
                 selected={selectedIds.has(e.id)}
-                onToggleSelect={() => toggleSelect(e.id)}
+                onToggleSelect={readOnly ? undefined : () => toggleSelect(e.id)}
               />
             ))}
           </div>

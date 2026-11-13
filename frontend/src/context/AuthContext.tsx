@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { fetchMe, roleAtLeast, signOut as apiSignOut, type Me, type Role } from '../api/auth'
+import { canWrite, fetchMe, roleAtLeast, signOut as apiSignOut, type Me, type Role } from '../api/auth'
 
 /** loading: /me not answered yet · off: AUTH_MODE=off, no sign-in at all ·
  *  anonymous: authentication is on and nobody is signed in · signed-in. */
@@ -70,4 +70,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }), [status, me, setMe, signOut, refresh])
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
+/** May the signed-in user change reports (analyst and above, api/auth.ts `canWrite`)?
+ *  True when authentication is off. A reader gets the report read-only (#707). */
+export function useCanWrite(): boolean {
+  const { status, me } = useAuth()
+  return status === 'off' || (status === 'signed-in' && canWrite(me?.role, me?.auth_mode))
 }

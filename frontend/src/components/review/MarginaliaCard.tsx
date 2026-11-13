@@ -1,6 +1,7 @@
 import { useState, useEffect, useLayoutEffect, useRef } from 'react'
 import { enrichmentView, isImported, type Entity, type EnrichmentView } from '../../types'
 import { typeDot, typeLabel, typeSoft, typeInk, confPct, heldPending, heldTitle, SOURCE_LABEL, TYPE_GROUPS, ENRICHMENT_BADGE } from './tokens'
+import { useReadOnly } from './readOnly'
 
 /** Why an imported row (ADR-0090) cannot be edited here: the server answers 409. */
 export const IMPORTED_TITLE = 'From your STIX bundle: accept or reject it; edit it in the source bundle'
@@ -29,6 +30,8 @@ export default function MarginaliaCard({
   onClick, onToggleCollapse, onAccept, onReject, onReset, onChangeType,
   selected = false, onToggleSelect,
 }: Props) {
+  // A reader sees the card without its decision, type or selection controls (#707).
+  const readOnly = useReadOnly()
   const accepted = e.accepted === true
   const rejected = e.accepted === false
   const [menuOpen, setMenuOpen] = useState(false)
@@ -107,7 +110,7 @@ export default function MarginaliaCard({
       <div className="marg-row">
 
         {/* ── Selection checkbox ──────────────────────────────────────── */}
-        {onToggleSelect && (
+        {onToggleSelect && !readOnly && (
           <button
             className={`marg-check ${selected ? 'marg-check-on' : ''}`}
             onClick={ev => { ev.stopPropagation(); onToggleSelect() }}
@@ -179,7 +182,7 @@ export default function MarginaliaCard({
               )}
               <div className="marg-foot">
                 <span className="marg-src" title={src.hint}>{src.label}</span>
-                <div className="marg-actions">
+                {!readOnly && <div className="marg-actions">
                   <button
                     className={`mbtn ok ${accepted ? 'on' : ''}`}
                     onClick={ev => { ev.stopPropagation(); accepted ? onReset() : onAccept() }}
@@ -199,7 +202,7 @@ export default function MarginaliaCard({
                     style={imported ? { opacity: 0.4 } : undefined}
                     title={imported ? IMPORTED_TITLE : 'Change type'}
                   >⋯</button>
-                </div>
+                </div>}
               </div>
             </>
           )}
@@ -207,7 +210,7 @@ export default function MarginaliaCard({
       </div>
 
       {/* ── Type-picker popup ─────────────────────────────────────────── */}
-      {menuOpen && (
+      {menuOpen && !readOnly && (
         <div
           ref={popupRef}
           className="type-picker-popup"

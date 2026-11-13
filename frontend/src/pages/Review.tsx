@@ -41,6 +41,8 @@ import { heldPending, typeLabel } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
 import { RowWrites, trackWrite, type WriteResult } from '../components/review/rowWrites'
+import { ReadOnlyContext } from '../components/review/readOnly'
+import { useCanWrite } from '../context/AuthContext'
 
 // ── Review-specific types ─────────────────────────────────────────────────────
 type SortMode = 'position' | 'type'
@@ -97,6 +99,9 @@ export default function Review() {
   const { jobId } = useParams<{ jobId: string }>()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  // A reader (#707) reads the report: every function below that writes returns at once,
+  // and the page shows no control that writes (ReadOnlyContext, components/review).
+  const readOnly = !useCanWrite()
 
   // ── prefs (persisted) ───────────────────────────────────────────────────
   // theme + accent come from the shared ThemeContext (TopChrome reads it).
@@ -410,6 +415,7 @@ export default function Review() {
   // A failed decision puts the card back on the server's copy and says so (#286,
   // #706); the alert is kept for a single card, the banner also offers a retry.
   const setAccepted = (id: string, val: boolean | null, bulk = false) => {
+    if (readOnly) return
     const decision_origin: ClientDecisionOrigin = bulk ? 'human_bulk' : 'human'
     const value = localEntitiesRef.current.find(e => e.id === id)?.value ?? id
     setLocalEntities(es => es.map(e => e.id === id
@@ -444,6 +450,7 @@ export default function Review() {
   }
 
   const changeType = (id: string, entity_type: string) => {
+    if (readOnly) return
     // Every entry point (chip, reader, type rail) lands here.
     const entity = localEntitiesRef.current.find(e => e.id === id)
     if (entity && isImported(entity.enrichment_status)) {
@@ -460,6 +467,7 @@ export default function Review() {
   }
 
   const undoAutoAccept = () => {
+    if (readOnly) return
     // The rows auto-accept holds, read before the screen changes.
     const ids = localEntitiesRef.current.filter(e => e.autoAccepted).map(e => e.id)
     if (ids.length === 0) return
@@ -489,6 +497,7 @@ export default function Review() {
   /** Accept all pending entities of type `t` — local-first, single API call.
    *  Held rows (ADR-0082) stay pending: the server skips them too. */
   const acceptAllOfType = (t: string) => {
+    if (readOnly) return
     const ids = localEntitiesRef.current
       .filter(e => e.entity_type === t && e.accepted === null && !heldPending(e))
       .map(e => e.id)
@@ -506,6 +515,7 @@ export default function Review() {
 
   /** Reject all pending entities of type `t` — local-first, single API call. */
   const rejectAllOfType = (t: string) => {
+    if (readOnly) return
     const ids = localEntitiesRef.current
       .filter(e => e.entity_type === t && e.accepted === null)
       .map(e => e.id)
@@ -526,6 +536,7 @@ export default function Review() {
 
   // ── relationship mutations ───────────────────────────────────────────────
   const setRelAccepted = (id: string, val: boolean | null) => {
+    if (readOnly) return
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, accepted: val, decision_origin: 'human' } : r))
     // Use the always-current ref so we never read stale localRels from a closure
     if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
@@ -538,6 +549,7 @@ export default function Review() {
   // (ADR-0065).  `human_bulk`, like the entity groups: calibration does not
   // read it.
   const setRelsBulk = (ids: string[], action: BulkAction) => {
+    if (readOnly) return
     const val = action === 'accept' ? true : action === 'reject' ? false : null
     // A held claim (ADR-0082) is accepted on its own card only; the server
     // skips it too.  Rejecting a group may include it.
@@ -555,6 +567,7 @@ export default function Review() {
   }
 
   const setRelType = (id: string, relationship_type: string) => {
+    if (readOnly) return
     const rel = localRelsRef.current.find(r => r.id === id)
     if (rel && isImported(rel.enrichment_status)) {
       hintFromBundle(`"${rel.source_value} → ${rel.target_value}"`)
@@ -570,6 +583,7 @@ export default function Review() {
   // Only the bound that changed is sent (ADR-0063 §9): the API turns each bound
   // it receives into the analyst's date, replacing the model's.
   const setRelDates = (id: string, patch: DatePatch) => {
+    if (readOnly) return
     const rel = localRelsRef.current.find(r => r.id === id)
     if (rel && isImported(rel.enrichment_status)) {
       hintFromBundle(`"${rel.source_value} → ${rel.target_value}"`)
@@ -583,6 +597,7 @@ export default function Review() {
   }
 
   const createRel = ({ src, tgt, type, evidence }: { src: string; tgt: string; type: string; evidence: string }) => {
+    if (readOnly) return
     setRelCreator(null)
     createRelMutation.mutate({
       source_value: src,
@@ -609,6 +624,7 @@ export default function Review() {
 
   // ── drag-to-relate ───────────────────────────────────────────────────────
   const onMarkDragStart = (eid: string, fromPoint: Point, evt: PointerEvent) => {
+    if (readOnly) return
     let moved = false
     const startX = evt.clientX, startY = evt.clientY
     dragStateRef.current = { srcId: eid, from: fromPoint, to: fromPoint }
@@ -641,6 +657,7 @@ export default function Review() {
 
   // ── shift-click to relate ─────────────────────────────────────────────────
   const openRelCreatorFromShiftClick = (eid: string, x: number, y: number) => {
+    if (readOnly) return
     if (!relCreator) {
       setRelCreator({ srcId: eid, x, y })
     } else if (!relCreator.tgtId && relCreator.srcId !== eid) {
@@ -684,7 +701,7 @@ export default function Review() {
   // ── finalize ──────────────────────────────────────────────────────────────
   // Declared before the keyboard effect so the dep array reference is valid.
   const handleFinalize = useCallback(async () => {
-    if (!jobId) return
+    if (!jobId || readOnly) return
     // Cancel any pending auto-finalize — manual takes precedence and, unlike
     // the quick auto-finalize, completes the report.
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
@@ -716,7 +733,7 @@ export default function Review() {
     } finally {
       setFinalizing(false)
     }
-  }, [jobId, qc])
+  }, [jobId, qc, readOnly])
 
   // ── download the finalized STIX bundle ────────────────────────────────────
   // Available once the review is completed; the bundle is guaranteed current in
@@ -782,9 +799,10 @@ export default function Review() {
       else if (e.key === 'Escape')                    { setKbdOpen(false); setFocusedId(null); setDrawer(null) }
       else if (e.key === 'j' || e.key === 'ArrowDown') { goNextPending(1); e.preventDefault() }
       else if (e.key === 'k' || e.key === 'ArrowUp')  { goNextPending(-1); e.preventDefault() }
-      else if (focusedId && (e.key === 'a' || e.key === 'A')) { accept(focusedId); goNextPending(1) }
-      else if (focusedId && (e.key === 'r' || e.key === 'R')) { reject(focusedId); goNextPending(1) }
-      else if (focusedId && (e.key === 'u' || e.key === 'U')) { reset(focusedId) }
+      // The keys that write are not taken by a reader (#707); the others read.
+      else if (!readOnly && focusedId && (e.key === 'a' || e.key === 'A')) { accept(focusedId); goNextPending(1) }
+      else if (!readOnly && focusedId && (e.key === 'r' || e.key === 'R')) { reject(focusedId); goNextPending(1) }
+      else if (!readOnly && focusedId && (e.key === 'u' || e.key === 'U')) { reset(focusedId) }
       else if (e.key === 'g' || e.key === 'G')        { navigate(`/graph/${jobId}`) }
       else if (e.key === 'c' || e.key === 'C')        { navigate(`/coverage/${jobId}`) }
       else if (e.key === 'f' || e.key === 'F')        { reviewCompleted ? handleDownload() : handleFinalize() }
@@ -792,7 +810,7 @@ export default function Review() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [focusedId, orderedEntityIds, goNextPending, handleFinalize, handleDownload, reviewCompleted,
-      accept, reject, reset, navigate, jobId])
+      accept, reject, reset, navigate, jobId, readOnly])
 
   // ── auto-finalize (debounced) ─────────────────────────────────────────────
   //
@@ -869,6 +887,7 @@ export default function Review() {
   // ── create entity from text selection ────────────────────────────────────
   // value = technique name (ATT&CK) or selected text (other types)
   const finishCreate = (value: string, type: string, mitreId?: string) => {
+    if (readOnly) return
     createEntityMutation.mutate({
       value, entity_type: type,
       context: '', confidence: 1.0, source: 'manual', mitre_id: mitreId ?? null,
@@ -914,6 +933,7 @@ export default function Review() {
     : []
 
   return (
+    <ReadOnlyContext.Provider value={readOnly}>
     <div className="app">
       {/* ── top chrome ── */}
       <TopChrome
@@ -1270,5 +1290,6 @@ export default function Review() {
         </div>
       )}
     </div>
+    </ReadOnlyContext.Provider>
   )
 }
