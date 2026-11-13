@@ -329,27 +329,70 @@ they were not produced by that run, and names DIR and the run that made them.
 hand (`--env-file`, by default `docker/opencti-test/.env`, filled in from
 `.env.example`; git-ignored).
 
-**Any bundle (ADR-0094 item 10).** `scripts/opencti_import_bundle.py` imports one
-bundle into a running OpenCTI, as the token's user, waits until OpenCTI shows
-its objects, then reads back every object by STIX id. It needs the pycti venv
-above and an admin token (the import of marking definitions and of the
-bundle's objects needs the capabilities the A4 check grants):
+**Any bundle (ADR-0094 item 10, #708).** `scripts/opencti_import_bundle.py`
+imports one bundle into a running OpenCTI, as the token's user, and runs the
+checks of step 7 of [the real-use protocol](docs/releases/1.0-real-use.md) on
+what OpenCTI holds. It needs the pycti venv above and an admin token (the import
+of marking definitions and of the bundle's objects needs the capabilities the
+A4 check grants):
 
 ```bash
 ~/.cache/ctiparsor-pycti-7.260930.0/bin/python scripts/opencti_import_bundle.py BUNDLE.json \
-    --token-file TOKEN_FILE [--url http://127.0.0.1:4000] [--timeout 120]
+    --token-file TOKEN_FILE [--url http://127.0.0.1:4000] [--timeout 120] \
+    [--image-digest sha256:<64 hex>]
 ```
 
 `--token-file` holds the token alone, or a `KEY=VALUE` file with
 `OPENCTI_ADMIN_TOKEN`; without it the token is read from
-`docker/opencti-test/.env`. The token is never printed. The report gives, per
-STIX type, the objects sent, found, missing and refused (the import's errors,
-as OpenCTI returned them). It goes to `output/opencti-import/<UTC time>/`:
-`report.md` and `report.json`, written whatever the result. Exit 0 when nothing
-is missing or refused, 1 otherwise, 2 when the run cannot start or OpenCTI fails
-a call. It does not check duplicates by name or alias, a second import, markings
-or the Report's fields: `scripts/opencti_import_check.py` does, for its fixtures.
-Use it on the throwaway instance only.
+`docker/opencti-test/.env`. The token is never printed. The run, in order:
+
+1. **Inventory**, taken from the bundle before anything is sent: each object
+   (id, type, name or value, description), each relationship's type and ends,
+   and each Report's `object_refs`, description and `x_opencti_files` names.
+2. **Import**, as the token's user, the way the OpenCTI worker imports a bundle.
+3. **Read-back** of the whole platform, repeated until two readings in a row
+   agree, within `--timeout` seconds.
+4. **Checks** (`scripts/opencti_expectations.py`) on that reading: every object
+   once; no second object under its name, value or alias; each relationship on
+   an object of its own, joining the objects the bundle names; the author
+   (`created_by_ref`) and the markings (TLP, PAP) as the bundle set them; no
+   description emptied; one Report in the bundle, holding its references, its
+   description, its file (once, name and MIME type) and its confidence when the
+   bundle sets one.
+5. **Second import** of the same bundle, a second read-back, and the checks of
+   step 4 again. A second import must refuse nothing, add nothing (same counts
+   per type) and change no attribute (`no attribute changed by a second import`).
+
+Each check is `pass`, `fail` or `not_checked`. A required check that did not
+run is `not_checked`, never `pass`, and the run fails on it. The list of
+required checks is `REQUIRED` in the script.
+
+The report goes to `output/opencti-import/<UTC time>/`: `report.md` for people
+and `report.json` for the record. It holds the bundle's sha256, the OpenCTI and
+pycti versions, the image digest when `--image-digest` gives one, the inventory,
+the checks with their observed values, the count per STIX type (sent, found,
+missing, refused, the import's errors as OpenCTI returned them), and what OpenCTI
+holds differently from the bundle (informational). It is written whatever the
+result.
+
+Exit codes: 0 when every check passed; 1 when a check failed or was not run
+(the report names it); 2 when the run cannot start or OpenCTI fails a call.
+
+Limits: the script compares one bundle with its own inventory and with the
+platform, not with CTIParsor's baseline and enriched bundles (that is
+`scripts/opencti_import_check.py`, for its fixtures). A duplicate is found by
+name, value or alias among the objects of the platform, so the instance must be
+a throwaway one. Use it on the throwaway instance only.
+
+The tests (`tests/test_opencti_import_bundle.py`) run the script against a fake
+client: a clean import, a missing and a refused object, a refusal alone, a
+duplicate on the second import, an attribute changed by it, a dropped
+description, a lost marking, two objects merged by alias, a missing attachment,
+a missing relationship endpoint, two Reports, a bundle without a Report (its
+report checks `not_checked`), a reading that never settles, and the exit codes
+for an unreadable bundle or token. No OpenCTI runs in the test suite: a real
+run on the stack of `docker/opencti-test` is a separate proof, recorded with
+the step 7 of the real-use protocol.
 
 ---
 

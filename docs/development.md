@@ -278,7 +278,7 @@ CTIParsor/
 │   ├── check_opencti_candidate.sh # The OpenCTI import of a candidate image: its bundles, a throwaway OpenCTI, the report (ADR-0094 item 8, TESTING.md § Measuring baseline reconciliation and the OpenCTI import)
 │   ├── opencti_candidate_bundles.py # Its three bundles, produced through the candidate's API
 │   ├── opencti_import_check.py    # Check A4 (ADR-0090), extended: imports the bundles into OpenCTI and reads back what it kept (pycti venv)
-│   ├── opencti_import_bundle.py  # Imports one bundle into OpenCTI and reads every object back by STIX id (ADR-0094 item 10, pycti venv)
+│   ├── opencti_import_bundle.py  # Imports one bundle into OpenCTI, runs the step 7 checks on what it kept, and re-imports it (ADR-0094 item 10, #708, pycti venv)
 │   ├── opencti_expectations.py    # What that check expects of what OpenCTI kept, and the report: standard library only, tested without OpenCTI
 │   │  ── read-only audits and measurements (the numbers quoted in the ADRs) ──
 │   ├── audit_api_edge_cases.py    # GET-only API edge-case conformance harness
