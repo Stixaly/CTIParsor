@@ -198,6 +198,24 @@ How it behaves:
   A group name cannot contain a comma. If the provider sends groups outside the ID
   token (Entra ID with many groups), they are not read.
 
+**What is qualified (2026-11-13, #707).** The sign-in above was run end to end
+against `ghcr.io/navikt/mock-oauth2-server` 2.1.10, pinned by digest in
+`docker/oidc-test/compose.yaml`: a test provider that signs with a key it makes at
+start-up and whose login page takes any subject and any claims. With
+`AUTH_MODE=oidc` and `OIDC_ROLE_MAP=e2e-readers=reader,e2e-analysts=analyst,e2e-admins=admin`,
+the browser signs in through the provider; the groups claim gives the role; a
+person in no mapped group is refused at `/login?error=no_role` with no session; a
+person moved between groups has the new role at the next sign-in; sign-out ends the
+session; an expired session goes back to the sign-in page, and signing in again
+works (`scripts/check_browser_e2e.sh --auth oidc`, `frontend/e2e/auth-oidc.spec.ts`,
+4 of 4 passed). The issuer was `http://localhost:18080/default`, the redirect URI
+`http://127.0.0.1:8765/api/auth/oidc/callback`, the client secret read from a file.
+**Not qualified:** Keycloak, Entra ID or any other production provider; an issuer
+over https (the code path is the same, but no run was made); the provider's own
+logout; a group claim outside the ID token; discovery and key rotation at a real
+provider. The provider's login page is not a test of the provider's password or
+MFA policy. The commands are in [TESTING.md](../TESTING.md#browser-journey-adr-0094-item-4).
+
 Keycloak: create a client with *Client authentication* on and the callback as valid
 redirect URI, add a *Group Membership* mapper to the client scope (token claim name
 `groups`, *Full group path* off, added to the ID token), and use
