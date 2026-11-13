@@ -341,7 +341,7 @@ def test_check_runs_the_documented_commands_and_finds_everything_back(monkeypatc
     assert silent == [False, False, False, True, False]                       # pg_restore must print nothing
     out = capsys.readouterr().out
     for pattern in (r"restored: \d+ tables, \d+ rows, \d+ values compared; every one kept",
-                    r"restored, sequences: 3; each one where the source's stood",
+                    r"restored, sequences: 4; each one where the source's stood",
                     r"restored, schema: \d+ objects .*; each one defined as in the source",
                     r"restored, files: 12 files and directories; each one as in the source, byte for byte",
                     r"read-back: 7 values read back through the routes; every one as seeded",
@@ -447,3 +447,16 @@ def test_after_the_start_a_missing_row_or_a_sequence_moved_back_still_fails():
     assert cbr.differences(before, _read([1], ["j1", "j2"], 2), "x", cbr.APPEND_ONLY)       # an audit row lost
     assert cbr.differences(before, _read([1, 2], ["j1", "j2"], 1), "x", cbr.APPEND_ONLY)    # sequence back
     assert cbr.differences(before, _read([1, 2, 3], ["j1", "j2"], 3), "x")                  # a restore adds nothing
+
+
+def test_after_the_start_a_drained_cleanup_row_is_expected_and_a_lost_job_still_fails():
+    from scripts import migration_compare as mc
+    def read(cleanups: list[int], jobs: list[str]) -> cbr.Read:
+        tables = {"job_file_cleanups": mc.Table({"id": "bigint"}, ("id",), {(i,): {"id": i} for i in cleanups}),
+                  "jobs": mc.Table({"id": "text"}, ("id",), {(j,): {"id": j} for j in jobs})}
+        return cbr.Read(tables, {}, {})
+    before = read([1], ["j1"])
+    assert cbr.differences(before, read([], ["j1"]), "after the app's start", (), cbr.DRAINED) == []
+    assert cbr.differences(before, read([], []), "x", (), cbr.DRAINED)               # a job lost still fails
+    assert cbr.differences(before, read([1, 2], ["j1"]), "x", (), cbr.DRAINED)      # a row added fails
+    assert cbr.differences(before, read([], ["j1"]), "x")                             # a restore drains nothing

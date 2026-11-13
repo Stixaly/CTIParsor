@@ -126,6 +126,11 @@ class DeleteResult(ApiResponse):
     """DELETE /api/jobs/{id}."""
 
     deleted: str = Field(description="The id of the deleted job.")
+    files_pending: int | None = Field(
+        default=None,
+        description="Present only when files of the deleted job are still on disk after the DELETE: how many. "
+                    "They are retried at start-up, on each retention sweep and by a DELETE of the same id.",
+    )
 
 
 # The ledger is stored inside each bundle, written by every release since

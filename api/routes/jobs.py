@@ -3,6 +3,7 @@ bundle-ledger routes of a job."""
 import base64
 import json
 import mimetypes
+import os
 import re
 from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
@@ -44,42 +45,142 @@ JOB_RETENTION_DAYS = env_int("JOB_RETENTION_DAYS", default=0)
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
 
-def _delete_job_files(job_id: str, original_filename: str) -> None:
-    """
-    Remove all files that were produced for this job:
+def _job_file_paths(job_id: str, original_filename: str) -> list[Path]:
+    """The files that exist for one job, as canonical paths (#724).
+
+    The names are the ones the worker writes:
       • uploads/{job_id}.*                              — original uploaded document
+      • uploads/meta/{job_id}.json                       — a URL capture's publication metadata (ADR-0063)
       • output/{report_name}_{job_id}_bundle.json         — valid STIX bundle
       • output/{report_name}_{job_id}_bundle_invalid.json — bundle written when validation fails
+      • output/{report_name}_bundle.json and _bundle_invalid.json — legacy names of older builds,
+        not job-scoped: they collided across same-filename jobs, so they are removed best-effort
       • output/{job_id}_stage3.ckpt.json                  — LLM checkpoint (deleted on clean finish,
                                                             kept on crash — clean it up now)
       • output/{job_id}_stage3.ckpt.tmp                   — atomic-rename temp file if crash mid-save
 
-    All unlinks use missing_ok=True so a partially-created job (e.g. pipeline
-    crashed before writing the bundle) doesn't raise.
+    A path is kept only if it resolves directly inside the uploads, uploads/meta or output
+    directory and is a file (or a link to one).  Nothing is removed here.
     """
     from api.worker import bundle_output_path
 
-    # 1 — Original uploaded file (glob so we don't need to know the extension)
-    uploads, output = uploads_dir(), output_dir()
-    for f in uploads.glob(f"{job_id}.*"):
-        f.unlink(missing_ok=True)
-    # …and a URL capture's publication metadata (ADR-0063), kept in a
-    # subdirectory so the glob above never mistakes it for the source.
-    (uploads / "meta" / f"{job_id}.json").unlink(missing_ok=True)
-
-    # 2 — STIX bundle(s) — reconstruct report_name the same way the worker does
+    uploads, output = uploads_dir().resolve(), output_dir().resolve()
     report_name = re.sub(r"[^\w\-]", "_", Path(original_filename).stem)
-    out_path = bundle_output_path(job_id, report_name)
-    out_path.unlink(missing_ok=True)
-    out_path.with_stem(out_path.stem + "_invalid").unlink(missing_ok=True)
-    # Best-effort cleanup of the legacy non-job-scoped names written by older
-    # builds (these collided across same-filename jobs — see bundle_output_path).
-    (output / f"{report_name}_bundle.json").unlink(missing_ok=True)
-    (output / f"{report_name}_bundle_invalid.json").unlink(missing_ok=True)
+    bundle = bundle_output_path(job_id, report_name)
+    candidates = [
+        *uploads.glob(f"{job_id}.*"),
+        uploads / "meta" / f"{job_id}.json",
+        bundle,
+        bundle.with_stem(bundle.stem + "_invalid"),
+        output / f"{report_name}_bundle.json",
+        output / f"{report_name}_bundle_invalid.json",
+        output / f"{job_id}_stage3.ckpt.json",
+        output / f"{job_id}_stage3.ckpt.tmp",
+    ]
+    allowed = {uploads, uploads / "meta", output}
+    found: list[Path] = []
+    for candidate in candidates:
+        path = candidate.resolve()
+        if path.parent in allowed and os.path.lexists(path) and not path.is_dir() and path not in found:
+            found.append(path)
+    return found
 
-    # 3 — Stage 3 LLM checkpoint (and its .tmp rename-in-progress counterpart)
-    (output / f"{job_id}_stage3.ckpt.json").unlink(missing_ok=True)
-    (output / f"{job_id}_stage3.ckpt.tmp").unlink(missing_ok=True)
+
+def _record_file_cleanups(conn, job_id: str, paths: list[Path]) -> None:
+    """Write the intent to remove `paths` for `job_id`.  The caller's transaction commits or rolls it back
+    together with the job's rows (#724)."""
+    now = now_iso()
+    for path in paths:
+        conn.execute(
+            "INSERT INTO job_file_cleanups (job_id, path, created_at, updated_at) VALUES (?,?,?,?) "
+            "ON CONFLICT (job_id, path) DO NOTHING",
+            (job_id, str(path), now, now),
+        )
+
+
+def _in_job_directory(path: Path) -> bool:
+    """Whether `path`, resolved, sits directly in the uploads, uploads/meta or output directory."""
+    uploads, output = uploads_dir().resolve(), output_dir().resolve()
+    return path.resolve().parent in {uploads, uploads / "meta", output}
+
+
+def _run_file_cleanups(job_id: str | None = None) -> None:
+    """Try once to remove each recorded file, of one job or of every job (#724).
+
+    A file already gone counts as removed, and its row is deleted.  A failed unlink adds an attempt
+    and its error to the row, and the row stays for the next pass.  A row whose path is outside the
+    job directories is dropped without touching the file.  Each step is logged with the tag [cleanup].
+    Never raises: a store or filesystem error stops the pass and is logged.
+    """
+    try:
+        with get_conn() as conn:
+            if job_id is None:
+                rows = conn.execute(
+                    "SELECT id, job_id, path, attempts FROM job_file_cleanups ORDER BY id").fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, job_id, path, attempts FROM job_file_cleanups WHERE job_id=? ORDER BY id",
+                    (job_id,)).fetchall()
+        for row in rows:
+            path = Path(row["path"])
+            if not _in_job_directory(path):
+                logger.error(f"[cleanup] {path} is outside the job directories; the record is dropped, "
+                             "the file is not removed")
+                with get_conn() as conn:
+                    conn.execute("DELETE FROM job_file_cleanups WHERE id=?", (row["id"],))
+                continue
+            try:
+                path.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.error(f"[cleanup] could not remove {path} of job {row['job_id']} "
+                             f"(attempt {row['attempts'] + 1}): {exc}")
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE job_file_cleanups SET attempts=attempts+1, last_error=?, updated_at=? WHERE id=?",
+                        (str(exc)[:500], now_iso(), row["id"]),
+                    )
+                continue
+            with get_conn() as conn:
+                conn.execute("DELETE FROM job_file_cleanups WHERE id=?", (row["id"],))
+    except Exception as exc:
+        logger.error(f"[cleanup] pass stopped: {exc}")
+
+
+def _pending_file_count(job_id: str | None = None) -> int:
+    """How many recorded files still wait to be removed, of one job or of every job."""
+    with get_conn() as conn:
+        if job_id is None:
+            row = conn.execute("SELECT COUNT(*) FROM job_file_cleanups").fetchone()
+        else:
+            row = conn.execute("SELECT COUNT(*) FROM job_file_cleanups WHERE job_id=?", (job_id,)).fetchone()
+    return int(row[0])
+
+
+def retry_pending_cleanups() -> int:
+    """Retry every recorded file of every deleted job once, and return how many still wait (#724).
+
+    Called at API start-up, at each retention sweep (also when retention is off) and, for one job, by a
+    DELETE of that job's id.  Never raises.
+    """
+    _run_file_cleanups(None)
+    try:
+        remaining = _pending_file_count()
+    except Exception as exc:
+        logger.error(f"[cleanup] could not count pending file cleanups: {exc}")
+        return 0
+    if remaining:
+        logger.warning(f"[cleanup] {remaining} file(s) of deleted jobs are still on disk; "
+                       "the next pass retries them (table job_file_cleanups)")
+    return remaining
+
+
+def _delete_job_files(job_id: str, original_filename: str) -> None:
+    """Remove the files of one job now, through the same intent records as a DELETE (#724)."""
+    files = _job_file_paths(job_id, original_filename)
+    with get_conn() as conn:
+        with transaction(conn):
+            _record_file_cleanups(conn, job_id, files)
+    _run_file_cleanups(job_id)
 
 
 class StatusPatch(BaseModel):
@@ -440,6 +541,9 @@ def _delete_job(job_id: str) -> bool:
             # From here on the id is the one the database holds (a uuid the
             # server generated), never the request's string: it names files.
             job_id, original_filename = row["id"], row["original_filename"]
+            # The files are listed now, while the job still names them; their removal
+            # is recorded in the transaction below and done after its commit (#724).
+            files = _job_file_paths(job_id, original_filename)
 
             # One transaction: the connection is autocommit, so without this
             # each DELETE would commit separately and a crash mid-delete would
@@ -471,15 +575,18 @@ def _delete_job(job_id: str) -> bool:
                         )
                     if cur.rowcount == 0:
                         raise _NotDeleted
+                    # The intent to remove each file commits with the deletes (#724): a failure
+                    # after the commit leaves a row that names the file, and a retry finds it.
+                    _record_file_cleanups(conn, job_id, files)
             except _NotDeleted:
                 again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
                 if not again or cutoff is not None:
                     return False
                 raise HTTPException(409, _PROCESSING_DETAIL) from None
 
-    # Delete associated files AFTER the DB transaction commits successfully.
-    # If file deletion partially fails the DB is already clean — no orphaned rows.
-    _delete_job_files(job_id, original_filename)
+    # The files go AFTER the commit.  A file that cannot be removed keeps its intent row
+    # (job_file_cleanups) and is retried; the rows of the job are already gone.
+    _run_file_cleanups(job_id)
     return True
 
 
@@ -499,8 +606,14 @@ def delete_job(job_id: str, user: User | None = Depends(current_user)):
         if row is not None and not may_delete(user, row["imported_by"]):
             raise HTTPException(403, "Only an admin, or the analyst who imported this report, may delete it")
     if not _delete_job(job_id):
+        # The job's rows are gone already: a file an earlier DELETE could not remove is retried now (#724).
+        # The answer stays 404.
+        _run_file_cleanups(job_id)
         raise HTTPException(404, "Job not found")
-    return {"deleted": job_id}
+    # 200 once the rows are gone.  `files_pending` appears only while files of the job remain on disk:
+    # the removal is retried at start-up, on each retention sweep and by a DELETE of this id (#724).
+    pending = _pending_file_count(job_id)
+    return {"deleted": job_id, **({"files_pending": pending} if pending else {})}
 
 
 def sweep_expired_jobs(retention_days: int | None = None) -> int:
@@ -516,8 +629,10 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
     clearing rather than a job to protect.
 
     Returns the number of jobs deleted. A no-op when retention is disabled
-    (the default: JOB_RETENTION_DAYS=0).
+    (the default: JOB_RETENTION_DAYS=0), except for the retry of the files
+    that deleted jobs still hold, which runs first in every case (#724).
     """
+    retry_pending_cleanups()
     days = JOB_RETENTION_DAYS if retention_days is None else retention_days
     if days <= 0:
         return 0

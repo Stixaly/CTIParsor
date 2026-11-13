@@ -185,6 +185,12 @@ def read(url: str, connect: Any) -> Read:
 #: the source missing or changed is not.
 APPEND_ONLY = ("audit_events",)
 
+#: Work queues the app drains at its start: a file cleanup that a filesystem error
+#: left (api/routes/jobs.py, `retry_pending_cleanups`, #724) is retried, and its row
+#: goes once the file is gone.  After the app's start, a row of these tables missing
+#: is expected; a row added or changed is not.
+DRAINED = ("job_file_cleanups",)
+
 
 def _last_value(state: str | None) -> int | None:
     """N of "last_value N, is_called B" (`migration_compare.sequence_states`)."""
@@ -193,19 +199,27 @@ def _last_value(state: str | None) -> int | None:
     return int(state.split(",")[0].removeprefix("last_value "))
 
 
-def differences(source: Read, target: Read, label: str, appended: tuple[str, ...] = ()) -> list[str]:
+def differences(source: Read, target: Read, label: str, appended: tuple[str, ...] = (),
+                drained: tuple[str, ...] = ()) -> list[str]:
     """The target against the source, exactly, but for rows added to the
-    `appended` tables and their id sequence moved forward; printed under `label`."""
+    `appended` tables and their id sequence moved forward, and rows gone from the
+    `drained` tables; printed under `label`."""
     result = migration_compare.compare(source.content, target.content, strict=True)
     grown = [d for d in result.differences
              if d.table in appended and d.key and not d.column and d.after == "row added"]
-    result.differences = [d for d in result.differences if d not in grown]
+    gone = [d for d in result.differences
+            if d.table in drained and d.key and not d.column and d.after == "row missing"]
+    result.differences = [d for d in result.differences if d not in grown and d not in gone]
     for line in migration_compare.summary(result, label):
         print(line)
     for table in appended:
         rows = sum(1 for d in grown if d.table == table)
         if rows:
             print(f"  appended to {table}: {rows} row(s), the record of the requests made since the start")
+    for table in drained:
+        rows = sum(1 for d in gone if d.table == table)
+        if rows:
+            print(f"  drained from {table}: {rows} row(s), the work the app did at its start")
     forward = set()
     for table in appended:
         name = f"sequence {table}_id_seq state"
@@ -316,7 +330,7 @@ def _check(admin_url: str, user: str, source: str, target: str, tmp: Path, pg: T
     problems += result["mismatches"]
 
     # 6. The app's start changed nothing, but db-identity.json.
-    problems += differences(before, read(url(target), connect), "after the app's start", APPEND_ONLY)
+    problems += differences(before, read(url(target), connect), "after the app's start", APPEND_ONLY, DRAINED)
     kept = {k: v for k, v in files.items() if k != f"file {IDENTITY_FILE}"}
     now = {k: v for k, v in state_tree(restored).items() if k != f"file {IDENTITY_FILE}"}
     changed_lines = [d.line() for d in migration_compare.object_differences(kept, now)]
