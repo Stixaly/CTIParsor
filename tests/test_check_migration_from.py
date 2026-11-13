@@ -291,3 +291,27 @@ def test_a_read_back_that_breaks_fails_the_ref_with_its_stderr(monkeypatch, tmp_
     lines = str(caught.value).splitlines()
     assert lines[0] == "the read-back exited 1 without a result:"
     assert lines[-1] == "ValueError: STIX_TLP 'bogus'" and len(lines) == 41
+
+
+def test_after_the_read_back_a_drained_cleanup_row_is_expected_and_a_lost_job_still_fails(monkeypatch):
+    """The app's start retries the pending file cleanups (#724): their rows may go; nothing else may."""
+    def tables(cleanups: list[int], jobs: list[str]) -> mc.Snapshot:
+        return {"job_file_cleanups": mc.Table({"id": "bigint"}, ("id",), {(i,): {"id": i} for i in cleanups}),
+                "jobs": mc.Table({"id": "text"}, ("id",), {(j,): {"id": j} for j in jobs})}
+
+    class _Conn:
+        def close(self) -> None:
+            pass
+
+    before = tables([1], ["j1"])
+    monkeypatch.setattr(mc, "sequence_differences", lambda conn, names: (0, []))
+    for now, expected in ((tables([], ["j1"]), []), (tables([], []), None)):
+        monkeypatch.setattr(mc, "snapshot", lambda conn, now=now: now)
+        _, differences = cmf._content("url", lambda url: _Conn(), before, [], "after the read-back", cmf.DRAINED)
+        if expected is None:
+            assert differences                          # a job lost still fails
+        else:
+            assert differences == expected
+    monkeypatch.setattr(mc, "snapshot", lambda conn: tables([], ["j1"]))
+    _, differences = cmf._content("url", lambda url: _Conn(), before, [], "content")
+    assert differences                                  # outside the app's start, a row gone is a difference
