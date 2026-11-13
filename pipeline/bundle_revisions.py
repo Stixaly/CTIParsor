@@ -211,6 +211,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2e (GLiNER) asks for sectors and countries by default: the identities and locations "
      "it finds ship, unless GLINER_ENTITY_TYPES is set to an empty value (ADR-0098)",
      "extraction"),
+    ("74eddfd", "2026-11-13",
+     "OCR_LANG defaults to auto: a scanned page is read in the languages of its script, found by "
+     "Tesseract's script detection, instead of English alone; OCR_LANG=eng restores the old reading",
+     "extraction"),
 )
 
 
