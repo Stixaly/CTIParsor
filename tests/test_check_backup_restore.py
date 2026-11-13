@@ -447,3 +447,16 @@ def test_after_the_start_a_missing_row_or_a_sequence_moved_back_still_fails():
     assert cbr.differences(before, _read([1], ["j1", "j2"], 2), "x", cbr.APPEND_ONLY)       # an audit row lost
     assert cbr.differences(before, _read([1, 2], ["j1", "j2"], 1), "x", cbr.APPEND_ONLY)    # sequence back
     assert cbr.differences(before, _read([1, 2, 3], ["j1", "j2"], 3), "x")                  # a restore adds nothing
+
+
+def test_after_the_start_a_drained_cleanup_row_is_expected_and_a_lost_job_still_fails():
+    from scripts import migration_compare as mc
+    def read(cleanups: list[int], jobs: list[str]) -> cbr.Read:
+        tables = {"job_file_cleanups": mc.Table({"id": "bigint"}, ("id",), {(i,): {"id": i} for i in cleanups}),
+                  "jobs": mc.Table({"id": "text"}, ("id",), {(j,): {"id": j} for j in jobs})}
+        return cbr.Read(tables, {}, {})
+    before = read([1], ["j1"])
+    assert cbr.differences(before, read([], ["j1"]), "after the app's start", (), cbr.DRAINED) == []
+    assert cbr.differences(before, read([], []), "x", (), cbr.DRAINED)               # a job lost still fails
+    assert cbr.differences(before, read([1, 2], ["j1"]), "x", (), cbr.DRAINED)      # a row added fails
+    assert cbr.differences(before, read([], ["j1"]), "x")                             # a restore drains nothing
