@@ -44,3 +44,14 @@ ignore:
       name: python
       version: 3.14.10
       type: binary
+
+  # hashlib's FIPS enforcement regressed in 3.14.10 only, fixed in 3.14.11.  It
+  # matters only with OpenSSL in FIPS mode; the image's OpenSSL 3.0.22 (Debian
+  # bookworm) runs with FIPS mode off and CTIParsor sets no OpenSSL configuration.
+  # Remove this rule when the base image carries 3.14.11.
+  - vulnerability: CVE-2026-119170
+    reason: "Not reachable: only OpenSSL in FIPS mode is affected, and the image runs with FIPS mode off (SECURITY.md, reviewed 2026-11-13)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
