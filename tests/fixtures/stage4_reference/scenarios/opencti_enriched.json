@@ -1,0 +1,28 @@
+{
+ "_comment": "The OpenCTI baseline of tests/fixtures/baselines enriched by a document: the Report is re-issued with x_ctiparsor_enrichment (ADR-0090).",
+ "baseline": "baselines/opencti_report.json",
+ "entities": [
+  {
+   "entity_type": "sha256",
+   "value": "9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972"
+  }
+ ],
+ "llm_result": {
+  "malware_families": [
+   "SUNBURST"
+  ],
+  "relationships": [
+   {
+    "relationship_type": "uses",
+    "source_value": "Cozy Bear",
+    "target_value": "SUNBURST"
+   }
+  ],
+  "threat_actors": [
+   "Cozy Bear"
+  ]
+ },
+ "original_filename": "opencti_report.txt",
+ "report_name": "Cozy Bear weekly note",
+ "report_text": "ACME Threat Intelligence: weekly note, 1 March 2026\n\nCozy Bear was active again this week against the ministries of foreign affairs of two European states. The operators sent spearphishing emails with a malicious attachment (T1566.001, Spearphishing Attachment). Opening the attachment installed SUNBURST, a loader that our records did not yet tie to this group.\n\nThe dropped file svchost_update.dll has the SHA-256 9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972. Defenders should search their endpoints for it and review the mail gateway logs for the same week.\n"
+}

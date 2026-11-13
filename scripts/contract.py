@@ -14,6 +14,8 @@ One reference file per surface, under contract/:
     config.json   the variables of .env.example and the Compose layout
     stix.json     the custom properties of the Stage 4 reference bundles, and
                   the ids of their deterministic objects
+    formats.json  the strings a client reads: the SSE event names and the layout
+                  of the detection export ZIP
 
 Each difference has a severity.  `breaking` needs a major version
 (docs/support-policy.md, "Breaking changes and deprecation"); `default` is a
@@ -46,7 +48,7 @@ if str(ROOT) not in sys.path:      # main.py and pipeline/ import from the repos
 
 CONTRACT_DIR = ROOT / "contract"
 GENERATOR = "scripts/contract.py"
-SURFACES = ("openapi", "cli", "config", "stix")
+SURFACES = ("openapi", "cli", "config", "stix", "formats")
 
 BREAKING, DEFAULT, COMPATIBLE = "breaking", "default", "compatible"
 _RANK = {BREAKING: 0, DEFAULT: 1, COMPATIBLE: 2}
@@ -345,11 +347,19 @@ def _stix_changed(key: str, old: dict[str, Any], new: dict[str, Any]) -> list[Ch
     return _types_change("response", old.get("types", []), new.get("types", []))
 
 
+def _formats_changed(key: str, old: dict[str, Any], new: dict[str, Any]) -> list[Change]:
+    """A name a client reads (an event on the stream, a file in the export) is
+    the contract itself: whatever it is changed to, the client that read the
+    old one breaks."""
+    return [(BREAKING, f"changed: {_show(old)} -> {_show(new)}")]
+
+
 RULES: dict[str, Rules] = {
     "openapi": Rules(added=_openapi_added, removed=_always_breaking, changed=_openapi_changed),
     "cli": Rules(added=_cli_added, removed=_always_breaking, changed=_cli_changed),
     "config": Rules(added=_always_compatible, removed=_always_breaking, changed=_config_changed),
     "stix": Rules(added=_always_compatible, removed=_stix_removed, changed=_stix_changed),
+    "formats": Rules(added=_always_compatible, removed=_always_breaking, changed=_formats_changed),
 }
 
 
@@ -779,12 +789,19 @@ def stix_entries(files: Iterable[Path]) -> tuple[Entries, int]:
     types a custom property takes.  `id <scenario> <type> <field>=<value>`:
     the id of each object, or RANDOM.  An object without a natural key is not
     recorded: counted when its id is deterministic, left out when it is random
-    (the relationships)."""
+    (the relationships).  An object the ledger marks `baseline` is left out: a
+    baseline's object is kept as received (ADR-0090, invariant I2), so its id is
+    the upstream's, not one CTIParsor computes."""
     out: Entries = {}
     types: dict[str, set[str]] = {}
     unkeyed = 0
     for path in files:
-        for obj in json.loads(path.read_text(encoding="utf-8"))["objects"]:
+        bundle = json.loads(path.read_text(encoding="utf-8"))
+        kept = {oid for oid, rec in (bundle.get("ledger") or {}).get("objects", {}).items()
+                if rec.get("origin") == "baseline"}
+        for obj in bundle["objects"]:
+            if obj["id"] in kept:
+                continue
             for name, value in obj.items():
                 if name.startswith("x_"):
                     types.setdefault(f"property {obj['type']} {name}", set()).add(_json_type(value))
@@ -812,10 +829,37 @@ def extract_stix() -> Entries:
     return entries
 
 
+# ── Extractor: formats ───────────────────────────────────────────────────────
+
+def formats_entries() -> Entries:
+    """`sse event <name>`: an event name the progress stream sends, and whether
+    a job stores it (`stored`).  `export ...`: the file names and the directory
+    of the detection export ZIP, and the extension of each format's rule files
+    (api/routes/coverage.py).  The names are read from the constants the code
+    uses, so a rename in the code is a change of this surface."""
+    from api.db import STORED_EVENTS
+    from api.routes import coverage
+    from api.routes.progress import SSE_EVENTS
+
+    out: Entries = {f"sse event {name}": {"stored": name in STORED_EVENTS} for name in SSE_EVENTS}
+    out["export manifest"] = {"name": coverage.EXPORT_MANIFEST}
+    out["export readme"] = {"name": coverage.EXPORT_README}
+    out["export rules directory"] = {"name": coverage.EXPORT_RULES_DIR}
+    for fmt, ext in sorted(coverage.EXPORT_EXTENSIONS.items()):
+        out[f"export extension {fmt}"] = {"extension": ext}
+    out["export extension other"] = {"extension": coverage.EXPORT_DEFAULT_EXTENSION}
+    return out
+
+
+def extract_formats() -> Entries:
+    return formats_entries()
+
+
 # ── Registry, files, commands ────────────────────────────────────────────────
 
 EXTRACTORS: dict[str, Callable[[], Entries]] = {
-    "openapi": extract_openapi, "cli": extract_cli, "config": extract_config, "stix": extract_stix}
+    "openapi": extract_openapi, "cli": extract_cli, "config": extract_config, "stix": extract_stix,
+    "formats": extract_formats}
 
 
 def extract(surface: str) -> Entries:

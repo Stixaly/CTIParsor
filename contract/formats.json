@@ -1,0 +1,42 @@
+{
+  "entries": {
+    "export extension other": {
+      "extension": "txt"
+    },
+    "export extension sigma": {
+      "extension": "yml"
+    },
+    "export extension suricata": {
+      "extension": "rules"
+    },
+    "export extension yara": {
+      "extension": "yar"
+    },
+    "export manifest": {
+      "name": "MANIFEST.json"
+    },
+    "export readme": {
+      "name": "README.txt"
+    },
+    "export rules directory": {
+      "name": "rules"
+    },
+    "sse event connected": {
+      "stored": false
+    },
+    "sse event done": {
+      "stored": true
+    },
+    "sse event partial_graph": {
+      "stored": true
+    },
+    "sse event queued": {
+      "stored": true
+    },
+    "sse event stage": {
+      "stored": true
+    }
+  },
+  "generator": "scripts/contract.py",
+  "surface": "formats"
+}

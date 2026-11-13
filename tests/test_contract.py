@@ -48,6 +48,11 @@ def test_a_recorded_file_is_as_write_leaves_it(surface):
     ("config", "compose volume pg-data-18"),
     ("config", "compose project"),                                       # the project's name
     ("stix", "property vulnerability x_cvss_v3_score"),                  # a STIX custom property
+    ("stix", "property report x_ctiparsor_enrichment"),                  # the enrichment's property
+    ("formats", "sse event partial_graph"),                              # an event name on the stream
+    ("formats", "export manifest"),                                      # a file of the export ZIP
+    ("openapi", "GET /api/jobs response:200[].status"),                  # a job status's enumeration
+    ("openapi", "GET /api/jobs/{}/bundle response:200 header:x-bundle-validation"),
 ])
 def test_a_deliberate_removal_is_breaking(surface, key):
     recorded = c.load_reference(surface)

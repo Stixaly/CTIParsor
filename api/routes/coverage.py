@@ -128,14 +128,20 @@ def get_coverage_rules(job_id: str, technique_id: str):
                 "rules": rules_for_technique(get_rule_conn(), technique_id)}
 
 
+#: The layout of the detection export ZIP (`_zip_export`): the directory holding the rule files, one
+#: sub-directory per format; the manifest and the readme at the archive's root.  Recorded in contract/formats.json.
+EXPORT_RULES_DIR = "rules"
+EXPORT_MANIFEST = "MANIFEST.json"
+EXPORT_README = "README.txt"
+
 #: File extension per format. A Suricata rule written as `.yml` loads in no tool;
 #: measured, 8,380 of 10,372 rules in a real export are Suricata (ADR-0020).
-_EXPORT_EXTENSIONS = {
+EXPORT_EXTENSIONS = {
     "sigma": "yml",
     "suricata": "rules",
     "yara": "yar",
 }
-_DEFAULT_EXTENSION = "txt"
+EXPORT_DEFAULT_EXTENSION = "txt"
 
 _FILTER_DEFAULTS = {"format": "sigma", "corpus": "unknown",
                     "license": "unknown", "severity": "unknown"}
@@ -294,7 +300,7 @@ def _zip_export(
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for r in rules:
             fmt = r.get("format") or "sigma"
-            ext = _EXPORT_EXTENSIONS.get(fmt, _DEFAULT_EXTENSION)
+            ext = EXPORT_EXTENSIONS.get(fmt, EXPORT_DEFAULT_EXTENSION)
             base = _safe_slug(r["title"] or r["native_key"] or r["id"], "rule")
             # Slugged for the same reason `base` is: an unsanitized value in a
             # zip entry name is a Zip Slip primitive (`../../etc/x`) against
@@ -303,7 +309,7 @@ def _zip_export(
             # writer does not get to assume that stays true forever.
             corpus_val = _safe_slug(r.get("corpus") or "", "unknown")
 
-            path_base = f"rules/{fmt}/{corpus_val}__{base}"
+            path_base = f"{EXPORT_RULES_DIR}/{fmt}/{corpus_val}__{base}"
             path = f"{path_base}.{ext}"
             n = 2
             while path in used_paths:
@@ -342,7 +348,7 @@ def _zip_export(
                 counts[val] = counts.get(val, 0) + 1
             return counts
 
-        zf.writestr("MANIFEST.json", json.dumps({
+        zf.writestr(EXPORT_MANIFEST, json.dumps({
             "job_id": job_id,
             "report": report_name,
             "rule_count": len(manifest),
@@ -366,7 +372,7 @@ def _zip_export(
             f"  - {lic}: {', '.join(sorted(corpora_set))}"
             for lic, corpora_set in sorted(licenses.items())
         )
-        zf.writestr("README.txt", (
+        zf.writestr(EXPORT_README, (
             "Detection rules for this CTI report\n"
             "===================================\n\n"
             f"Report : {report_name}\n"
