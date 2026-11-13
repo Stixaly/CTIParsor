@@ -3,6 +3,7 @@ import type { Entity } from '../../types'
 import { typeColor, buildRanges } from './tokens'
 import RelationshipOverlay from './RelationshipOverlay'
 import type { Relationship } from '../../types'
+import { useReadOnly } from './readOnly'
 
 interface HoverTarget { id: string; x: number; y: number; bottom?: number }
 
@@ -39,6 +40,8 @@ export default function DocumentReader({
   relEvidence, relsForOverlay, showRelArrows, focusedRelId,
   onEntityNotInText,
 }: Props) {
+  // A reader cannot create an entity or a relationship from the text (#707).
+  const readOnly = useReadOnly()
   const ranges = useMemo(() => buildRanges(text, entities), [text, entities])
   const markRefs = useRef<Record<string, HTMLElement>>({})
   const lastSelRef = useRef(false)
@@ -89,6 +92,7 @@ export default function DocumentReader({
 
   // ── text selection ────────────────────────────────────────────────────────
   const handleMouseUp = () => {
+    if (readOnly) return
     const sel = window.getSelection()
     const t = sel?.toString().trim() ?? ''
     if (t.length < 2) return
@@ -189,7 +193,7 @@ export default function DocumentReader({
         }}
         onMouseLeave={() => setHoverEntity(null)}
         onPointerDown={ev => {
-          if (ev.button !== 0 || ev.shiftKey) return
+          if (readOnly || ev.button !== 0 || ev.shiftKey) return
           const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
           onMarkDragStart(entity.id, {
             x: rect.left + rect.width / 2,
@@ -199,7 +203,7 @@ export default function DocumentReader({
         onClick={ev => {
           if (lastSelRef.current) return
           ev.stopPropagation()
-          if (ev.shiftKey) {
+          if (ev.shiftKey && !readOnly) {
             const rect = (ev.currentTarget as HTMLElement).getBoundingClientRect()
             onMarkShiftClick(entity.id, rect.left + rect.width / 2, rect.bottom)
             return

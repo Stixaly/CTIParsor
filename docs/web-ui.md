@@ -17,7 +17,8 @@ link when an identity provider is configured. After a sign-in you land on `next`
 this site, else on the dashboard. A wrong password reads "Invalid username or password."; five failures
 for a username lock it for 15 minutes, and the page says how long to wait. The sidebar shows your name
 and role and a "Sign out" button. The interface hides what your role cannot use (no "New report" for a
-reader; Policy and Settings only for an admin); the server refuses it in any case. When the session
+reader; Policy and Settings only for an admin; a reader's report opens read-only, see "Reader" under the
+Review page); the server refuses it in any case. When the session
 ends while you work (it lasts 12 hours from the last request), the next request takes you back to the
 sign-in page and then to where you were.
 
@@ -105,6 +106,8 @@ A key pressed with Ctrl, Cmd or Alt held is ignored, so the browser's own shortc
 **Auto-accept:** when a job finishes, the worker accepts its entities with confidence ≥ 90% and records them as `auto_policy` (ADR-0058); opening the page writes nothing. A banner shows the count with an Undo option, and each card carries an `auto` chip. About one in ten of those entities (`REVIEW_CONTROL_SAMPLE_RATE`, default 0.10) is left pending with a `confirm` chip: your verdict on it measures how often auto-accept is right (`GET /api/thresholds` → `auto_accept_audit`).
 
 **Saving your decisions:** each decision is sent to the server as it is made, and the page shows it at once. The page keeps your copy of a row only while its request is unanswered; once the server answers, the page shows the server's copy again, so a decision another session made appears after a refresh. If the server refuses a decision (403, 500, or no connection), the row goes back to the server's copy and a line appears above the document: the message, a **Retry** button (for the newest decision on that row), and **Dismiss**. A single-card refusal also raises the browser alert, as before. **Undo all** on the auto-accept banner sends one request per card: if some fail, the cards the server still holds as accepted stay accepted on screen, and the line says how many were not undone. A group or type action is applied by the server in one request; if it fails, its cards go back to the server's copy and the line offers a retry. A refusal of an earlier decision on a card, overtaken by a newer one, shows a line without a retry: the newer decision stands.
+
+**Reader (read-only, ADR-0097):** a reader opens every report, and the Review page shows it with no control that changes it. There is no Accept, Reject, Change type, bulk accept or reject (by type, by group, by selection), no Undo of the auto-accept, no relationship creation or edit, no date edit, and no Complete Review. The Detection rules download is not shown either, since an analyst's export. Keys `A`, `R`, `U` and `F` do nothing, and the help overlay does not list them. The text stays readable, with the Text, Preview, Source and Detections views, the Graph and Coverage pages and the bundle download once the report is completed. On the Dashboard a reader's "Analyse" opens a "For review" report without moving it to Reviewing, and no card has a delete button. A reader who asks the server for a write anyway gets a 403 (docs/api-permissions.md). Analysts and admins see the same page as before.
 
 **Drag-to-relate:** Drag from one entity mark to another → opens relationship creator pre-filled with source and target.
 

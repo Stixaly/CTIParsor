@@ -6,6 +6,8 @@ Status: enforced since ADR-0097 work items 14 and 15, part A, when `AUTH_MODE` i
 
 Roles, from ADR-0097 (Roles): `reader` < `analyst` < `admin`, each containing the one before. The minimal role in each row is the proposal, not the current state. Where a route mixes reads and writes, the stricter one applies.
 
+The web interface applies one rule to the same table (#707): a change to a report needs `analyst`, the `WRITE_ROLE` of `frontend/src/api/auth.ts`, read through `canWrite` and `useCanWrite`. A reader therefore opens reports read-only: the Dashboard sends no status change before it opens a report, the Review page shows none of the analyst's controls (decisions, bulk actions, relationship edits, Complete Review, rule export) and its shortcuts for them do nothing, and no card has a delete button. The server enforces the rule in any case: a reader's PATCH, POST or DELETE on the analyst rows above is refused with 403.
+
 Count by proposed minimal role:
 
 - `reader`: 26 operations

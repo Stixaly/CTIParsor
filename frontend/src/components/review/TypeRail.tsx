@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import type { Entity } from '../../types'
 import { heldPending, typeDot, typeLabel } from './tokens'
+import { useReadOnly } from './readOnly'
 
 interface Props {
   entities: Entity[]
@@ -17,6 +18,7 @@ export default function TypeRail({
   entities, activeTypes, toggleType,
   onAcceptAllOfType, onRejectAllOfType, onClose,
 }: Props) {
+  const readOnly = useReadOnly()
   const counts = useMemo(() => {
     // `held`: pending rows the pipeline held back (ADR-0082) — a type's
     // accept skips them, so its button counts only the others.
@@ -57,7 +59,7 @@ export default function TypeRail({
             </button>
 
             {/* Bulk action buttons — only visible when there are pending entities */}
-            {c.pending > 0 && (
+            {c.pending > 0 && !readOnly && (
               <div className="rail-bulk">
                 {c.pending > c.held && (
                   <button

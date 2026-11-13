@@ -11,7 +11,7 @@ import type { Job, JobStatus } from '../types'
 import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
 import NewReportModal from '../components/NewReportModal'
-import { useAuth } from '../context/AuthContext'
+import { useCanWrite } from '../context/AuthContext'
 import { splitDrop } from '../components/dropFiles'
 import type { IgnoredFile } from '../components/dropFiles'
 import KanbanCard from '../components/dashboard/KanbanCard'
@@ -119,7 +119,8 @@ const noticeBtn: React.CSSProperties = { padding: '4px 10px', fontSize: 11.5 }
 export default function Dashboard() {
   const navigate = useNavigate()
   // A reader cannot import (the server refuses it): no button, and a dropped file is ignored.
-  const canImport = useAuth().can('analyst')
+  // A reader opens every report read-only and deletes none (#707; docs/api-permissions.md).
+  const canImport = useCanWrite()
   const qc = useQueryClient()
 
   // Local state.  Everything an ingestion needs — the source, the markings, the
@@ -225,9 +226,10 @@ export default function Dashboard() {
   // used to be awaited with nothing to catch it: when it failed the page just
   // stayed put, and the button looked dead.  Now the failure is said, with a
   // retry and a way to read the report anyway (its status is only a label).
+  // A reader cannot make that update (403): it opens the report read-only (#707).
   const handleAnalyse = async (job: Job) => {
     setOpenError(null)
-    if (job.status !== 'for_review') {
+    if (job.status !== 'for_review' || !canImport) {
       navigate(`/review/${job.id}`)
       return
     }
@@ -603,7 +605,7 @@ export default function Dashboard() {
                           }
                           onAnalyse={() => handleAnalyse(job)}
                           opening={openingId === job.id}
-                          onDelete={() => deleteMutation.mutate(job.id)}
+                          onDelete={canImport ? () => deleteMutation.mutate(job.id) : undefined}
                           onDownload={() => handleDownload(job)}
                           onGraph={() => navigate(`/graph/${job.id}`)}
                           onCoverage={() => navigate(`/coverage/${job.id}`)}

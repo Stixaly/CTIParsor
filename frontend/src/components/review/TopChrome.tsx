@@ -1,6 +1,7 @@
 import { ArrowLeft, GitGraph, ShieldCheck, Download, FileCode, Loader2 } from 'lucide-react'
 import { useAppTheme, themeLabel, THEME_LABELS } from '../../context/ThemeContext'
 import { JOB_STATUS_LABEL } from '../jobStatus'
+import { useReadOnly } from './readOnly'
 import type { JobStatus } from '../../types'
 
 interface Props {
@@ -40,6 +41,8 @@ export default function TopChrome({
   // The label says what is applied — it used to know only "dark" and
   // "everything else", so Cool + indigo read "Warm · oxblood".
   const { theme, accentKey, isDark, lightTheme, toggleDark } = useAppTheme()
+  // A reader gets no Finalize (a write) and no rule export (an analyst's read, docs/api-permissions.md).
+  const readOnly = useReadOnly()
 
   return (
     <header className="top-chrome">
@@ -116,7 +119,7 @@ export default function TopChrome({
           </span>
         )}
 
-        <button
+        {!readOnly && <button
           className="btn-ghost"
           onClick={onDownloadSigma}
           disabled={sigmaRuleCount === 0 || sigmaDownloading}
@@ -139,7 +142,7 @@ export default function TopChrome({
               Detection rules{sigmaRuleCount > 0 ? ` · ${sigmaRuleCount}` : ''}
             </>
           )}
-        </button>
+        </button>}
 
         {reviewCompleted ? (
           <button
@@ -150,7 +153,7 @@ export default function TopChrome({
             <Download size={14} />
             Download STIX
           </button>
-        ) : (
+        ) : readOnly ? null : (
           <button
             className="btn-primary"
             onClick={onFinalize}

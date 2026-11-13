@@ -87,7 +87,8 @@ interface Props {
   onAnalyse: () => void
   /** True while the report is being moved to Reviewing before it opens. */
   opening?: boolean
-  onDelete: () => void
+  /** Absent when the user may not delete the report (a reader, #707): no delete button. */
+  onDelete?: () => void
   onDownload: () => void
   onGraph: () => void
   onCoverage: () => void
@@ -235,7 +236,7 @@ export default function KanbanCard({ job, selected, relTime, onSelect, onAnalyse
           </span>
         )}
 
-        <DeleteBtn onClick={onDelete} />
+        {onDelete && <DeleteBtn onClick={onDelete} />}
       </div>
     </article>
   )

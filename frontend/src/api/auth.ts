@@ -28,6 +28,15 @@ export function roleAtLeast(role: Role | null | undefined, minimum: Role, mode: 
   return !!role && RANK[role] >= RANK[minimum]
 }
 
+/** The lowest role that changes a report: decide, edit, finalize, export its rules
+ *  (docs/api-permissions.md, the analyst rows). A reader opens reports read-only. */
+export const WRITE_ROLE: Role = 'analyst'
+
+/** May this user change reports?  The frontend's one rule; the server enforces the same. */
+export function canWrite(role: Role | null | undefined, mode: Me['auth_mode'] = 'local'): boolean {
+  return roleAtLeast(role, WRITE_ROLE, mode)
+}
+
 /** The signed-in user, `null` when the server says nobody is (401).  Keeps the CSRF token. */
 export async function fetchMe(): Promise<Me | null> {
   const res = await fetch('/api/auth/me', { credentials: 'same-origin' })
