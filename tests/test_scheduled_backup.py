@@ -267,3 +267,38 @@ def test_compose_app_reads_backup_status_read_only() -> None:
     assert "cti-backup-status:/app/backup-status:ro" in services["app"]["volumes"]
     assert "cti-state:/app/state" in services["app"]["volumes"]
     assert "cti-backup-status" in _compose()["volumes"]
+
+
+def test_compose_backup_status_volume_is_chowned_by_a_root_init_service() -> None:
+    # A new named volume takes the owner of its mount point in the image. The
+    # postgres image has no /backup-status, so the volume starts root:root 0755
+    # and uid 70 cannot write status.json. backup-init changes that owner once,
+    # with CHOWN alone, and backup starts only after it has finished.
+    services = _compose()["services"]
+    init = services["backup-init"]
+    backup = services["backup"]
+
+    assert init["profiles"] == ["backup"]
+    assert init["image"] == services["postgres"]["image"]
+    assert init["entrypoint"] == ["/bin/sh", "-c", "chown 70:70 /backup-status"]
+    assert init["volumes"] == ["cti-backup-status:/backup-status"]
+    assert init["user"] == "0:0"
+    assert init["cap_drop"] == ["ALL"]
+    assert init["cap_add"] == ["CHOWN"]
+    assert init["read_only"] is True
+    # The image declares /var/lib/postgresql as a volume: the tmpfs keeps Compose
+    # from creating an anonymous volume on each start.
+    assert init["tmpfs"] == ["/var/lib/postgresql"]
+    assert init["network_mode"] == "none"
+    assert "no-new-privileges:true" in init["security_opt"]
+    assert "env_file" not in init
+    assert "db_password" not in str(init)  # the init service needs no secret
+
+    assert backup["depends_on"]["backup-init"] == {"condition": "service_completed_successfully"}
+    assert backup["user"] == "70:70"
+    assert "cti-backup-status:/backup-status" in backup["volumes"]
+
+    # Only the init service runs as root.
+    for name, service in services.items():
+        if name != "backup-init":
+            assert str(service.get("user", "")).split(":")[0] not in ("0", "root"), name

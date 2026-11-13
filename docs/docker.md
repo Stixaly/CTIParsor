@@ -18,7 +18,7 @@ decisions behind the containerization itself.
   - `cti-cache`: HuggingFace models, Sigma/YARA/Suricata corpora — rebuildable with `bootstrap`.
   - `ollama-models`: (Only if using the `ollama` profile).
 - **Services**: `app`, `worker`, `postgres` and `capture-proxy` always run. `app` only accepts and queues reports (`CTIPARSOR_ROLE=api`) and never loads a model; `worker` claims queued reports from the job store and runs each in an isolated subprocess, heartbeating the rows it owns so several workers can share the queue (ADR-0046) — scale it with `docker compose up -d --scale worker=2`; `postgres` is both stores (ADR-0045, ADR-0053: PostgreSQL 18, on the internal network only, running as the image's `postgres` user with every capability dropped and a read-only root; `CTI_DB_PASSWORD` in `.env` is required). `capture-proxy` is a Squid egress filter the URL-capture tab's Chromium goes through, so it can reach public addresses only (see *Security model*). Four optional profiles:
-  - `backup`: scheduled backups of the database and `cti-state` (see *Data and backups*).
+  - `backup`: scheduled backups of the database and `cti-state` (see *Data and backups*). Its one-shot `backup-init` runs first and gives the status volume to uid 70.
   - `bootstrap`: one-shot initialisation (models, corpora, rule store), same image and hardening as `app`.
   - `ollama`: a local LLM with no published port, reachable by `app` at `http://ollama:11434`.
   - `proxy`: TLS + password (`nginx-unprivileged`) in front of `app`; the only thing worth publishing on a network.
@@ -305,6 +305,8 @@ Set the target in `.env`, then start the service:
 BACKUP_TARGET=/mnt/backups/ctiparsor
 docker compose --profile backup up -d backup
 ```
+
+Before `backup` starts, a one-shot service, `backup-init`, runs `chown 70:70 /backup-status` on the status volume. A new volume takes the owner of its mount point in the image, and this image has none there, so the volume would be `root:root`, and `backup` could not write `status.json` there. `backup-init` runs as root with the `CHOWN` capability only, no network, no secret and a read-only root filesystem, and it exits. It runs on every `up` and `run` of the profile; a volume that is already owned by uid 70 is left as it is. `backup` itself keeps uid 70 with every capability dropped. You do not run it yourself.
 
 In production the target must be off this host: another disk or an NFS share. The service refuses to back up without it: with `BACKUP_TARGET` unset, a run writes `ok: false` ("BACKUP_TARGET is not set") and copies nothing. The rest of the stack starts without it. The directory must be writable by uid 70, the `postgres` user the image runs the backup as. To run one backup now, outside the schedule, use `docker compose --profile backup run --rm -e BACKUP_RUN_NOW=1 backup`: it exits 0 on success and 1 on failure.
 

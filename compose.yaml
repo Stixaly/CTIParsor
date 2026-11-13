@@ -209,6 +209,34 @@ services:
   # BACKUP_TARGET is not required by Compose: every other service must start
   # without it. The service refuses to back up while it is unset (run.sh).
   # In production the target is off this host: another disk or an NFS share.
+  #
+  # backup-init runs first, once per `up`: a new named volume takes the owner of
+  # its mount point in the image, and this image has none at /backup-status, so
+  # the status volume would be root:root 0755 and run.sh could not write
+  # status.json as uid 70. It only changes the owner of that one directory. It
+  # runs as root with CHOWN as its only capability, no network, no secret, and
+  # a read-only root filesystem; `backup` itself stays uid 70 with no capability.
+  backup-init:
+    image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
+    profiles: [backup]
+    entrypoint: ["/bin/sh", "-c", "chown 70:70 /backup-status"]
+    user: "0:0"                          # the only root container of the stack: chown needs it
+    volumes:
+      - cti-backup-status:/backup-status
+    network_mode: "none"
+    tmpfs:
+      - /var/lib/postgresql          # declared as a VOLUME by the image: a tmpfs stops Compose making an anonymous volume per start
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+    security_opt:
+      - no-new-privileges:true
+    restart: "no"
+    healthcheck:
+      disable: true
+
   backup:
     image: postgres:18-alpine@sha256:77f585114c32fbca283dc835b0596f4e52b51b4c6662d7810b2f4084f60a1873
     profiles: [backup]
@@ -238,6 +266,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      backup-init:
+        condition: service_completed_successfully
     networks:
       - backend       # the database only: a backup needs no egress
     logging:
