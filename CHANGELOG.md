@@ -9,6 +9,63 @@ theme.
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-13
+
+A minor release under ADR-0085 §8: it adds two schema migrations, changes API answers and bundle
+output, and changes the project's licence. It gathers the V1 work since 0.7.0 and is the base the 1.0
+candidate will be qualified against (its upgrade and clean-install gates start from 0.8.0).
+
+- **Licence:** the project is now under the GNU AGPL version 3 only (`AGPL-3.0-only`); it was Apache-2.0.
+- **Schema migrations 21 and 22**, applied at start: `jobs.activity_at` (a human decision renews the
+  retention clock) and the `job_file_cleanups` table (file removals retried after a failed delete). Back up
+  before upgrading (docs/upgrading.md).
+- **API**: `POST /api/jobs/{id}/finalize` answers 409 for a report that is uploaded, queued or processing,
+  and 404 for a report deleted meanwhile; `POST /api/ingest/url` answers 503 when the capture proxy is not
+  set; `DELETE /api/jobs/{id}` may carry `files_pending`. The contract records the job statuses, the
+  `X-Bundle-Validation` values, the SSE event names and the detection export layout.
+- **Configuration added**: `CTIPARSOR_CAPTURE_ALLOW_DIRECT`, `GLINER_ENTITY_TYPES`. Default changed:
+  `OCR_LANG` is `auto` (it was `eng`).
+- **Bundles change** for the same report: Stage 2d (CyNER) is off by default (ADR-0099), Stage 2e (GLiNER)
+  asks for sectors and countries (ADR-0098), and scanned pages are read in the languages of their script.
+
+**Upgrade notes.**
+
+- **A URL capture outside Docker now needs `CTIPARSOR_CAPTURE_PROXY`** (a Squid egress filter); without it
+  the capture answers 503. The Docker stack already sets it. `CTIPARSOR_CAPTURE_ALLOW_DIRECT=1` is for
+  development and tests only: it leaves the DNS-rebinding gap open.
+- **The `backup` profile gains a one-shot `backup-init` service**, the only container that runs as root
+  (with `CHOWN` only). Start the profile as before; it runs first.
+- **CyNER is off**: set `CYNER_ENABLED=true` to keep 0.7.0's entity output. **OCR is slower** on scanned
+  pages with `auto`: set `OCR_LANG=eng` to keep 0.7.0's reading.
+- A batch run (`--input-dir`) names colliding bundles `_2`, `_3`, ... instead of overwriting one.
+- `python -m api.admin disable` refuses to disable the last enabled admin.
+- The image is about 50 MB larger (the OCR language packs).
+
+- **More V1 fixes (#739, #757, #801, #807, #835).**
+  - *Security:* the URL capture checks every redirect hop (a public page could redirect it to an internal
+    address) and **requires `CTIPARSOR_CAPTURE_PROXY`**: without it the capture answers 503. Compose sets
+    it. `CTIPARSOR_CAPTURE_ALLOW_DIRECT=1` allows a direct capture for development and tests only (#801).
+  - *Accounts:* a concurrent change of an account's name no longer restores a role or re-enables an account
+    another admin changed; `python -m api.admin disable` refuses the last enabled admin (#739). An OIDC
+    sign-in no longer demotes the last enabled admin: the role is kept and a warning is logged.
+  - *Finalize:* refused with 409 for a report that is uploaded, queued or processing, writing nothing; a
+    report deleted during a finalize is a 404 instead of a 500 or a success (#757).
+  - *Web UI:* the Graph page is read-only for a reader (#807).
+  - *Backup:* a one-shot `backup-init` service gives the status volume to the backup user, so the status
+    reaches `/metrics` and the backup alerts can fire (#835).
+- **OCR in 23 languages.** The image installs the Tesseract packs of the most spoken languages and of
+  frequent CTI sources. `OCR_LANG` defaults to `auto`: each scanned page is read in the languages of its
+  script, found by Tesseract's script detection. English reads as before (CER 0.0061 either way on the
+  measured pages); a page takes about 2.7 times longer. `OCR_LANG=eng` restores the previous reading.
+  **Bundles change** for scanned documents.
+- **ADR-0100: a local vLLM is the qualified LLM configuration of 1.0** (Qwen3.8 27B, text and figures).
+  Anthropic stays supported and is not qualified. `scripts/measure_default_provider.py` measures that
+  configuration by default.
+- **Qualification runs and tools.** The failure recipe checks the disk alert on a dedicated test filesystem
+  (`--disk-test-fs`); `scripts/measure_queue_load.py` measures queue load profiles (#710). The browser journey
+  runs with sign-in (`check_browser_e2e.sh --auth local`, a CI step) and against an OIDC test provider (#707).
+  The dossier tests read the Grype rules of their recorded run (#830).
+- **Dependencies.** `opentelemetry-api` 1.45.2 in the OpenCTI check's lock (traceparent ReDoS).
 - **V1 fixes (issues #706, #707, #722–#724).**
   - *Review:* the page keeps the server's decisions apart from the writes still in flight. A decision the
     server refuses (403, 500, network) is undone on screen and shown with Retry; Undo all reports the cards it
