@@ -475,7 +475,7 @@ def test_worker_and_cli_run_the_same_pipeline(temp_db, mock_llm, sample_cti_text
     cli = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(cli)
     cli_out = tmp_path / "cli.json"
-    assert cli.run_pipeline(str(report), str(cli_out)) is True     # --policy db (the default)
+    assert bool(cli.run_pipeline(str(report), str(cli_out))) is True     # --policy db (the default)
     cli_bundle = json.loads(cli_out.read_text(encoding="utf-8"))
 
     w, c = _normalise(worker_bundle), _normalise(cli_bundle)

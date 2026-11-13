@@ -188,6 +188,7 @@ class Recorder:
 
 
 def make_client(url: str, token: str) -> OpenCTIApiClient:
+    """Return a pycti client for the OpenCTI URL and token. Raises ImportError when pycti is not installed."""
     if OpenCTIApiClient is None:
         raise ImportError("pycti is not installed: this import needs the pycti venv of TESTING.md")
     return OpenCTIApiClient(url, token, log_level="error", perform_health_check=False)
@@ -208,10 +209,13 @@ def load_bundle(path: str) -> dict[str, Any]:
 
 
 def file_sha256(path: str) -> str:
+    """Return the SHA-256 hex digest of a file."""
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def single_report(bundle: dict[str, Any]) -> dict[str, Any]:
+    """Return the one report object of a bundle. Exits with a message when the bundle holds no report, or more than
+    one."""
     reports = [o for o in bundle["objects"] if o["type"] == "report"]
     if len(reports) != 1:
         raise SystemExit(f"expected one report in the bundle, found {len(reports)}")
@@ -219,14 +223,17 @@ def single_report(bundle: dict[str, Any]) -> dict[str, Any]:
 
 
 def edges(connection: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Return the nodes of a GraphQL connection, or an empty list when there is none."""
     return [edge["node"] for edge in (connection or {}).get("edges", [])]
 
 
 def gql(client: OpenCTIApiClient, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run a GraphQL query with its variables and return the data part of the answer."""
     return client.query(query, variables or {})["data"]
 
 
 def batches(items: list[str]) -> Iterator[list[str]]:
+    """Yield the items in slices of BATCH."""
     for start in range(0, len(items), BATCH):
         yield items[start : start + BATCH]
 
@@ -346,6 +353,7 @@ def settled_report(client: OpenCTIApiClient, report_id: str) -> dict[str, Any]:
 
 
 def read_all(client: OpenCTIApiClient, query: str, key: str) -> list[dict[str, Any]]:
+    """Read every node of a paginated GraphQL connection, following the end cursor until there is no next page."""
     nodes: list[dict[str, Any]] = []
     after = None
     while True:
@@ -473,6 +481,8 @@ def import_per_object(client: OpenCTIApiClient, bundle: dict[str, Any]) -> dict[
 
 
 def run(args: argparse.Namespace, rec: Recorder, run_state: dict[str, Any]) -> None:
+    """Run the A4 checks: read the platform version, import the bundles, and read back what OpenCTI kept. Each check is
+    recorded in rec and the readings in run_state."""
     admin = make_client(args.url, read_admin_token(Path(args.env_file)))
     about = gql(admin, ABOUT_QUERY)["about"]
     rec.details["versions"] = {"opencti": about["version"], "pycti": metadata.version("pycti")}
@@ -675,6 +685,7 @@ def run(args: argparse.Namespace, rec: Recorder, run_state: dict[str, Any]) -> N
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
+    """Parse the command-line arguments of the check."""
     parser = argparse.ArgumentParser(description="ADR-0090 check A4: import bundles into a throwaway OpenCTI.")
     parser.add_argument("--url", default="http://127.0.0.1:4000", help="OpenCTI platform URL, without /graphql")
     parser.add_argument("--env-file", default=str(DEFAULT_ENV), help="env file holding OPENCTI_ADMIN_TOKEN")
@@ -694,6 +705,8 @@ def jsonable(value: Any) -> Any:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the check, print its table and return the exit code: 0 when every check passed, 1 when one did not, 2 when
+    OpenCTI could not be reached or refused the token."""
     args = parse_args(argv)
     rec = Recorder()
     state: dict[str, Any] = {"imports": [], "imported": [], "bundles": {}, "after_import": {},

@@ -342,6 +342,9 @@ SOURCES = {
 
 
 def _jobs(stage4: Path) -> list[dict[str, Any]]:
+    # The seeded jobs: three with bundles built by the stage 4 fixtures (completed, for review,
+    # and an enrich-mode job), and one failed job with no report or bundle. Each job's
+    # validation, review revision and build record are set to match its bundle.
     bundle_a, ledger_a = stage4_build("long_distance", stage4)
     bundle_b, ledger_b = stage4_build("minimal", stage4)
     bundle_c, ledger_c = stage4_build("policy_pin", stage4)
@@ -685,6 +688,10 @@ def seed(conn: Any, state_dir: Path | None = None, stage4: Path | None = None) -
     `files()` under it; the Stage 4 builds from `stage4` (`release_stage4`),
     this code's when None.  Raises SeedError, before writing anything, when a
     row leaves out a NOT NULL column that has no default."""
+    # Two passes. The first builds the plan: a table the schema does not have is skipped,
+    # a column the schema does not have is dropped, and a NOT NULL column without a default
+    # that a row leaves out is collected. Nothing is written until the plan has no missing
+    # columns. The second pass inserts each row, then writes back the generated keys.
     stage4 = stage4 or STAGE4
     columns = schema_columns(conn)
     keys = primary_keys(conn)

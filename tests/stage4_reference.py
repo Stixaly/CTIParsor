@@ -99,8 +99,10 @@ def build(scenario: dict) -> tuple[str, dict, datetime, datetime]:
     artifact SCO), `document_anchor` (an Anchor as a dict), `cve_metadata` (as
     `lookup_cves` returns it), and `long_distance_answer`: the LLM's JSON answer
     to every Stage 4c question, served by a stub in place of the provider (the
-    real inferer runs, only the network call is replaced)."""
+    real inferer runs, only the network call is replaced), and `baseline`: a
+    bundle under tests/fixtures/ that the build enriches (ADR-0090)."""
     from models.schemas import RawEntity
+    from pipeline import baseline_stix
     from pipeline.bundle_ledger import MappingLedger
     from pipeline.orchestrator import build_bundle
     from pipeline.stage3_llm import LLMEnrichmentResult
@@ -118,6 +120,7 @@ def build(scenario: dict) -> tuple[str, dict, datetime, datetime]:
         _call_llm=lambda system, user, *a, **kw: json.dumps(answer),
         _provider_ready=lambda *a, **kw: True,
     ) if answer else contextlib.nullcontext()
+    baseline = _baseline(scenario["baseline"]) if scenario.get("baseline") else None
     t_before = datetime.now(timezone.utc)
     with stub:
         bundle = build_bundle(
@@ -135,9 +138,24 @@ def build(scenario: dict) -> tuple[str, dict, datetime, datetime]:
             long_distance=bool(answer),
             ledger=ledger,
             document_anchor=Anchor.model_validate(anchor) if anchor else None,
+            baseline=baseline,
         )
     t_after = datetime.now(timezone.utc)
-    return bundle.serialize(pretty=True), ledger.to_dict(), t_before, t_after
+    verbatim = baseline.verbatim if baseline is not None else None
+    return baseline_stix.serialize_bundle(bundle, verbatim), ledger.to_dict(), t_before, t_after
+
+
+def _baseline(name: str):
+    """The baseline a scenario enriches: `name` is a bundle under tests/fixtures/, read through the
+    intake of pipeline/baseline_stix.py (validate=False: the schemas are Stage 5's, not this harness's)."""
+    from pipeline import baseline_stix
+    from pipeline.baseline_stix import BaselineBuild
+
+    raw = (FIXTURES.parent / name).read_bytes()
+    index, _, _ = baseline_stix.intake(raw, validate=False)
+    if index is None:
+        raise AssertionError(f"{name}: the intake returned no index")
+    return BaselineBuild(index=index, objects={o["id"]: o for o in json.loads(raw)["objects"]})
 
 
 # ── Canonical form ───────────────────────────────────────────────────────────

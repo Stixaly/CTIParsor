@@ -227,6 +227,8 @@ def build_corpus_entries(objects: list[dict], domain: str, *, neutralise: bool =
     entry.  Every procedure keeps the URLs it cites, so an evaluation can drop
     the examples MITRE wrote from a report it scores (`exclude_cited`).
     """
+    # Pass 1: one `description` entry per active technique with a T-id. `seen` holds the
+    # dedup keys of the entries so far, so a procedure that repeats a description is dropped.
     by_id = {o["id"]: o for o in objects if "id" in o}
 
     def active(o: dict) -> bool:
@@ -246,6 +248,9 @@ def build_corpus_entries(objects: list[dict], domain: str, *, neutralise: bool =
                         "domain": domain, "text": text, "source": "", "ref": o["id"], "urls": []})
         seen.add(_dedup_key(tid, text))
 
+    # Pass 2: one `procedure` entry per `uses` relationship whose source and target are
+    # active, whose target is a technique, and whose text is at least 20 characters after
+    # cleaning. The source's name and aliases are the names that `neutralise` removes.
     for rel in objects:
         if rel.get("type") != "relationship" or rel.get("relationship_type") != "uses":
             continue
@@ -299,6 +304,7 @@ def _stem(tok: str) -> str:
 
 
 def tokenize(text: str) -> list[str]:
+    """The lower-cased, stemmed tokens of the text, without stopwords and one-letter tokens."""
     return [_stem(t) for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS and len(t) > 1]
 
 
@@ -365,6 +371,7 @@ class Corpus:
     version: str                      # ties a cache or a result to its corpus
 
     def select(self, keep: list[int]) -> Corpus:
+        """A new corpus holding the entries at the indices in keep, in that order."""
         emb = self.embeddings[keep] if self.embeddings is not None else None
         return Corpus([self.ids[i] for i in keep], [self.names[i] for i in keep],
                       [self.kinds[i] for i in keep], [self.domains[i] for i in keep],
@@ -633,6 +640,8 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
 
 
 def retrieval_available() -> bool:
+    """True when the retrieval settings name a known corpus and method, and that retriever can be
+    built. With SKIP_HEAVY_MODELS only the BM25 method is available."""
     s = retrieval_settings()
     if s["corpus"] not in CORPORA or s["method"] not in METHODS:
         return False

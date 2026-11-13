@@ -14,7 +14,9 @@ DEFAULT_TOKEN_DAYS = 90
 
 
 class AuthConfigError(RuntimeError):
-    """The authentication settings are refused; the process does not start."""
+    """An authentication setting is refused (AUTH_MODE, the OIDC_* variables, the client secret file,
+    SESSION_TTL_HOURS, OIDC_ROLE_MAP).  At start-up api/main.py logs it and re-raises, so the process
+    does not start.  In the OIDC routes (api/routes/auth.py) it answers 302 to /login?error=config."""
 
 
 def auth_mode() -> str:
@@ -27,14 +29,17 @@ def auth_mode() -> str:
 
 
 def enabled() -> bool:
+    """True when authentication is on, that is when AUTH_MODE is not off."""
     return auth_mode() != "off"
 
 
 def local_enabled() -> bool:
+    """True when local accounts can sign in: AUTH_MODE is local or both."""
     return auth_mode() in ("local", "both")
 
 
 def oidc_enabled() -> bool:
+    """True when OIDC sign-in is on: AUTH_MODE is oidc or both."""
     return auth_mode() in ("oidc", "both")
 
 
@@ -64,6 +69,7 @@ def _secure_url(name: str, value: str) -> str:
 
 
 def is_secure_url(value: str) -> bool:
+    """True when the value is an https URL, or an http URL for localhost; False otherwise."""
     try:
         _secure_url("url", value)
     except AuthConfigError:
@@ -95,6 +101,7 @@ def oidc_settings() -> OidcSettings:
     """The OIDC settings, read at each call.  Raises AuthConfigError, naming every missing
     one in one message, for a missing or malformed value."""
     def env(name: str) -> str:
+        """The value of an environment variable, stripped; an empty string when it is unset."""
         return (os.getenv(name) or "").strip()
 
     required = ("OIDC_ISSUER_URL", "OIDC_CLIENT_ID", "OIDC_CLIENT_SECRET_FILE", "OIDC_REDIRECT_URI",
@@ -128,6 +135,8 @@ def read_client_secret(settings: OidcSettings) -> str:
 
 
 def session_ttl_hours() -> float:
+    """The session lifetime in hours, from SESSION_TTL_HOURS (DEFAULT_SESSION_TTL_HOURS when unset). Raise
+    AuthConfigError when the value is not a number above 0."""
     raw = (os.getenv("SESSION_TTL_HOURS") or "").strip()
     if not raw:
         return float(DEFAULT_SESSION_TTL_HOURS)
@@ -155,6 +164,7 @@ def is_loopback_host(host: str) -> bool:
 
 
 def api_host() -> str:
+    """The address the API listens on: API_HOST, or 127.0.0.1 when it is unset."""
     return (os.getenv("API_HOST") or "").strip() or "127.0.0.1"
 
 

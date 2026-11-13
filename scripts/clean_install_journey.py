@@ -199,6 +199,10 @@ def summary(out: Path) -> dict[str, Any]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Subcommands: `blocks` and `block` print the check's shell blocks from the docs; `report`,
+    # `upload`, `follow`, `bundle` and `summary` drive one step of the check against the API.
+    # A step returns 0 on success and 1 when its answer is not the expected one. A transport
+    # or input error returns 2.
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
     p = sub.add_parser("blocks", help="every block the check runs, as --print-blocks shows them")

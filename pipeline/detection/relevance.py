@@ -157,6 +157,8 @@ class Proposal:
     support_count: int = 0    # distinct ubiquitous observables matched
 
     def as_dict(self) -> dict:
+        """The proposal as a dict for the API: the score rounded to four places, and each match with
+        its class, value and weight."""
         return {
             "id": self.rule_id, "corpus": self.corpus, "title": self.title,
             "severity": self.severity, "license": self.license,

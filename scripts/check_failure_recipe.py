@@ -357,6 +357,7 @@ class _Parser:
 
 
 def parse_expr(text: str) -> Any:
+    """Parse an alert expression with the recipe's small parser and return the parse tree."""
     return _Parser(text).parse()
 
 
@@ -565,6 +566,7 @@ class CaseReport:
 
 
 def tail(text: str, lines: int = 12) -> str:
+    """Return the last lines of a text, blank lines skipped (12 by default), for an error message."""
     kept = [line for line in text.strip().splitlines() if line.strip()]
     return "\n".join(kept[-lines:])
 
@@ -845,6 +847,8 @@ def _wait_terminal(run: Run, job_id: str) -> str | None:
 
 
 def case_worker_killed(run: Run) -> None:
+    """Kill the worker container while a job runs, then check that a worker runs the job again after its lease expires
+    and the job ends."""
     st = run.stack
     run.step("count the jobs, then upload the fixture report")
     before = st.job_count()
@@ -886,6 +890,8 @@ def case_worker_killed(run: Run) -> None:
 
 
 def case_llm_down(run: Run) -> None:
+    """Restart the worker with an LLM endpoint that refuses connections, run a job, and check how Stage 3 reports the
+    refusal."""
     st = run.stack
     override = write_override(run.out_dir / "override-llm-down.yaml", "worker",
                               {"LLM_PROVIDER": "vllm", "VLLM_BASE_URL": LLM_REFUSING_URL})
@@ -913,6 +919,8 @@ def case_llm_down(run: Run) -> None:
 
 
 def case_database_down(run: Run) -> None:
+    """Stop the postgres service and check the 503 of /api/health, the database-up gauge and its alert; then start it
+    and check that the jobs table holds the same ids."""
     st = run.stack
     run.step("fingerprint the job ids before the stop")
     before = st.psql("SELECT count(*) || '|' || COALESCE(md5(string_agg(id, ',' ORDER BY id)), '') FROM jobs;")
@@ -949,6 +957,8 @@ DISK_ALERT_RATIO = 0.10
 
 
 def case_disk_nearly_full(run: Run) -> None:
+    """Restart the app with the minimum free space for uploads set above the free disk space, then check that an upload
+    is refused with 507 and writes nothing, and check the disk alert's condition."""
     st = run.stack
     free = gauge(st.scrape(), "ctiparsor_state_dir_free_bytes")
     if free is None:
@@ -984,6 +994,11 @@ def _checksum_of_live_file(stack: Stack, member: str) -> str:
 
 
 def case_restore_drill(run: Run) -> None:
+    """Run the backup commands of the documented procedure in a scratch folder and check the dump and archive they
+    write. The restore checks follow them."""
+    # The drill runs the documented backup, check and restore commands exactly as written,
+    # in a private work directory. It restores the dump into a new database, compares the
+    # jobs table with the live one, and drops the database and the files at the end.
     st = run.stack
     work = run.out_dir / "restore-drill"
     work.mkdir(parents=True, exist_ok=True)
@@ -1001,11 +1016,14 @@ def case_restore_drill(run: Run) -> None:
     archives = sorted(work.glob("cti-state-*.tgz"))
     if not (dumps and archives):
         raise StepError("the backup commands wrote no dump or no archive")
+    # The stamp is the timestamp in the file names. It fills the placeholder in each
+    # documented command, so the check and the restore read exactly these files.
     stamp = dumps[-1].name[len("ctiparsor-"):-len(".dump")]
     sizes = (dumps[-1].stat().st_size, archives[-1].stat().st_size)
     run.expect("the dump and the archive were written", min(sizes) > 0,
                f"{sizes[0]} and {sizes[1]} bytes")
     run.step("check the backup with the documented commands")
+    # Each check command must print a count of at least 1; its count is kept in the report.
     for line in CHECK_COMMANDS:
         shown = line.replace("YYYY-MM-DD-HHMMSS", stamp)
         print(f"    $ {shown}", flush=True)
@@ -1014,6 +1032,8 @@ def case_restore_drill(run: Run) -> None:
         if rc or int(out.strip() or 0) < 1:
             raise StepError(f"{shown} exited {rc} with {out.strip()!r}: {tail(err)}")
         run.report.extra.setdefault("check_counts", []).append(int(out.strip()))
+    # The restore goes into a new database named after the stamp, so the live database is
+    # never the target. The restore time is recorded.
     drill = f"ctiparsor_drill_{re.sub(r'[^0-9]', '_', stamp)}"
     run.step(f"create the empty database {drill}")
     st.psql(f'CREATE DATABASE "{_safe_name(drill)}";')
@@ -1027,6 +1047,8 @@ def case_restore_drill(run: Run) -> None:
     run.report.extra["restore_seconds"] = restore_seconds
     run.expect("pg_restore exited 0 and printed nothing", rc == 0 and not err.strip(),
                f"exit {rc}; {tail(err, 3)}")
+    # The jobs table is compared by a digest of id, status and file name, in id order: the
+    # source and the restored copy must give the same count and the same digest.
     try:
         probe = (
             "SELECT count(*) || '|' || COALESCE(md5(string_agg("
@@ -1079,6 +1101,8 @@ CASES: dict[str, Callable[[Run], None]] = {
 
 
 def run_cases(names: list[str], stack: Stack, opts: Options, out_dir: Path, rules: list[Rule]) -> list[CaseReport]:
+    """Run the named cases in order against the stack. A case that raises or stops with a StepError is recorded as an
+    error and the next case still runs; the services are restored after each case."""
     reports = []
     for name in names:
         report = CaseReport(name)
@@ -1113,6 +1137,8 @@ def _cell(text: str) -> str:
 
 
 def render_markdown(meta: dict[str, Any], reports: list[CaseReport], rules: list[Rule]) -> str:
+    """Render the case reports as Markdown: the run header, a summary table of the cases, then the steps and checks of
+    each case."""
     lines = [
         f"# Failure recipe, run {meta['started_at']}",
         "",
@@ -1154,6 +1180,8 @@ def render_markdown(meta: dict[str, Any], reports: list[CaseReport], rules: list
 
 def write_reports(out_dir: Path, meta: dict[str, Any], reports: list[CaseReport],
                   rules: list[Rule]) -> tuple[Path, Path]:
+    """Write report.json and report.md to out_dir, including the alerts each case exercised. Returns the paths of the
+    Markdown and the JSON file."""
     out_dir.mkdir(parents=True, exist_ok=True)
     exercised: dict[str, list[str]] = {}
     for report in reports:
@@ -1186,6 +1214,7 @@ def write_reports(out_dir: Path, meta: dict[str, Any], reports: list[CaseReport]
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Return the argument parser of the command."""
     parser = argparse.ArgumentParser(prog="python scripts/check_failure_recipe.py",
                                      description="The load and failure recipe (ADR-0097 item 23).")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000",
@@ -1203,6 +1232,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run the selected cases against a stack on loopback and return the exit code: 0 when every case passed, 1
+    otherwise, 2 when the compose file or the rules cannot be read. Refuses to run without --i-know-this-stops-
+    services."""
+    # Argument errors exit through the parser (code 2). Missing inputs, or a stack that does
+    # not answer /api/health with 200, exit 2 before any case runs. Exit 1 means at least one
+    # case did not pass; the reports are written in either case.
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.i_know_this_stops_services:

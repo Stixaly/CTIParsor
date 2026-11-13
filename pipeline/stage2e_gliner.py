@@ -222,6 +222,7 @@ class GLiNERRun:
 
     @property
     def unanswered(self) -> int:
+        """The windows of the text that the model did not answer: chunks minus answered."""
         return self.chunks - self.answered
 
     def failure(self) -> str:
@@ -450,9 +451,11 @@ class GLiNERStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """True when the GLiNER model can run."""
         return gliner_available()
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the entities that GLiNER finds in the text."""
         return extract_gliner_entities(text)
 
 

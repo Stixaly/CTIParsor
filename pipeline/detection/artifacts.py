@@ -542,6 +542,8 @@ def _summarize(
     Extracted so that `coverage_with_phases` can reuse the same totals and
     tier breakdown without re-scoring the evidence graph.
     """
+    # An artifact is covered at score 2 or more, weak at 1, and uncovered at 0. Excluded
+    # artifacts are kept in the list but counted only as `excluded`, not in the totals.
     non_excluded = [a for a in artifacts if a.excluded is None]
     excluded_count = len(artifacts) - len(non_excluded)
 

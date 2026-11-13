@@ -67,6 +67,7 @@ class AuthGateMiddleware:
         set_cookie = [(k, v) for k, v in cookie.raw_headers if k == b"set-cookie"]
 
         async def send_with_cookie(message: Message) -> None:
+            """Send a message, adding the Set-Cookie headers to the response start."""
             if message["type"] == "http.response.start":
                 message = {**message, "headers": [*message.get("headers", []), *set_cookie]}
             await send(message)

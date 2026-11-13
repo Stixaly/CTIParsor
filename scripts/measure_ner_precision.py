@@ -196,6 +196,9 @@ def _write_meta(args, models: dict) -> None:
 
 
 def cmd_run(args) -> None:
+    """Run a split through the pipeline with evaluation's run command, recording the spaCy and CyNER calls of each
+    document. Refuses unless the data folder is this checkout's and a .env file exists; Stage 3 also needs
+    LLM_TEMPERATURE and LLM_SEED unless it is disabled."""
     if DATA.resolve() != (_ROOT / "data").resolve():
         sys.exit("--data is for status, replay and compare: `run` writes into this checkout's data/")
     # As main.py does, before any pipeline module reads its settings at import.
@@ -362,6 +365,8 @@ def _expected_docs(split: str) -> list[str]:
 
 
 def cmd_status(args) -> None:
+    """Print how many documents of a run are written, missing, or to run again, and why. With --move-aside, the
+    documents to run again are set aside in a rerun folder."""
     run_dir = DATA / "eval" / "runs" / args.name
     meta = json.loads((run_dir / "run.json").read_text(encoding="utf-8"))
     expected = _expected_docs(meta["split"])
@@ -543,6 +548,8 @@ def _scored(d, srcs) -> dict:
 
 
 def replay_variant(rows, name: str, check: bool = False) -> dict:
+    """Replay Stage 2 on the recorded inputs of a run with the settings of one variant, and score each document. With
+    check, exit when the replay does not give back the recorded entities."""
     from pipeline import ner_precision
     if name == "malware" and not hasattr(ner_precision, "malware_enabled"):
         sys.exit("this checkout has no malware lead (ADR-0089, removed after the measurement): replay it at ccb9edf")
@@ -605,6 +612,8 @@ def _dump(path: str | None, data: dict) -> None:
 
 
 def cmd_replay(args) -> None:
+    """Replay a run's recorded Stage 2 inputs with the --expect variant and check that it gives back the recorded
+    entities. Each --variants entry is then compared with the base and the report is written to --json."""
     _replay_env()
     meta, rows = load(args.name)
     base_name = args.base or args.expect
@@ -697,6 +706,8 @@ def left_out_docs(expected: list[str], scored: dict[str, set[str]], out: dict[st
 
 
 def cmd_compare(args) -> None:
+    """Compare two runs on the documents both have scored, per entity type, and print the difference with the documents
+    left out and any configuration or run problems. Exits when the splits differ or no document is common to both."""
     meta_a, a, out_a = per_doc(args.base)
     meta_b, b, out_b = per_doc(args.candidate)
     if meta_a["split"] != meta_b["split"]:
@@ -741,6 +752,10 @@ def _diff(r: dict, m: str) -> float:
 def gates(cmp: dict, train: dict | None) -> list[tuple[str, str, bool | None, str]]:
     """(gate, type, passed, detail); passed is None when an input is missing
     or is not the one the criteria name."""
+    # The gates, in order. M0: the configuration and the document count. M1: the primary
+    # type's precision gain and its lower interval bound. M2: lost true positives. M3: F1.
+    # M4a: the also-acted-on type. M4b: the other scored types. M5: the train replay, when
+    # given in the named form; without it, M5 is reported with passed=None, which is not a pass.
     out: list[tuple[str, str, bool | None, str]] = []
     problems = list(cmp["config_problems"]) + ([] if cmp["split"] == "test" else [f"split {cmp['split']}"])
     out.append(("M0", "configuration", not problems, "; ".join(problems) or
@@ -805,6 +820,8 @@ def decision(rows: list[tuple[str, str, bool | None, str]]) -> str:
 
 
 def cmd_gates(args) -> None:
+    """Print the gates of a comparison file, with the train replay when given, and the decision. Exits 0 for adopt, 1
+    for do not adopt, 2 for void and 3 for incomplete."""
     cmp = json.loads(Path(args.compare).read_text(encoding="utf-8"))
     train = json.loads(Path(args.train).read_text(encoding="utf-8")) if args.train else None
     rows = gates(cmp, train)
@@ -817,6 +834,7 @@ def cmd_gates(args) -> None:
 
 
 def main() -> None:
+    """Parse the command line and call the chosen subcommand: run, status, replay, compare or gates."""
     global DATA
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--data", type=Path, default=DATA, help="the data/ folder holding the runs and AnnoCTR")

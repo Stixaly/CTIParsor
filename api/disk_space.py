@@ -18,6 +18,7 @@ _MIB = 1024 * 1024
 
 
 def upload_min_free_mb() -> int:
+    """The free disk space, in MB, that an upload needs: UPLOAD_MIN_FREE_MB, 1024 by default."""
     return env_int("UPLOAD_MIN_FREE_MB", default=1024)
 
 

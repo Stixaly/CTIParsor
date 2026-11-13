@@ -1,3 +1,5 @@
+"""Job routes under /api/jobs: list, read, baseline, status change, finalize, delete, and the source, bundle and
+bundle-ledger routes of a job."""
 import base64
 import json
 import mimetypes
@@ -323,6 +325,8 @@ def _stage_report(run_config_json: str | None) -> list[dict] | None:
 
 @router.get("/{job_id}", response_model=JobDetail, response_model_exclude_unset=True)
 def get_job(job_id: str):
+    """One job: its status, its counts and, in enrich mode, its enrichment summary. Answer 404 when the job does not
+    exist."""
     with get_conn() as conn:
         row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         if not row:
@@ -595,6 +599,8 @@ def may_delete(user: User, imported_by: str | None) -> bool:
 @router.delete("/{job_id}", response_model=DeleteResult, response_model_exclude_unset=True,
                responses={403: {"description": "An analyst deletes only the reports they imported."}})
 def delete_job(job_id: str, user: User | None = Depends(current_user)):
+    """Delete a job and its files. An analyst may delete only a job they imported, unless they are an admin. Answer 403
+    otherwise and 404 when the job does not exist."""
     if user is not None and user.role != "admin":
         row = get_conn().execute("SELECT imported_by FROM jobs WHERE id=?", (job_id,)).fetchone()
         if row is not None and not may_delete(user, row["imported_by"]):
@@ -631,6 +637,10 @@ def sweep_expired_jobs(retention_days: int | None = None) -> int:
     if days <= 0:
         return 0
 
+    # Two steps: list the expired ids in one query, then delete each one. The cutoff is set
+    # in the `_sweep_cutoff` context variable during the deletes. `_delete_job` reads it and
+    # re-checks the job's age, so a job updated after the listing is not deleted. A failure
+    # to delete one job is logged and the sweep goes on with the next.
     cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
     try:
         with get_conn() as conn:
@@ -719,12 +729,17 @@ def get_source_file(job_id: str):
     )
 
 
+# The values of the `X-Bundle-Validation` header: Stage 5's verdict as stored (`validated`, `unverified`),
+# or `unknown` when none is stored (a NULL `bundle_validation`).  An `invalid` bundle is a 409, never a header.
+BUNDLE_VALIDATION_VALUES = ("validated", "unverified", "unknown")
+
+
 @router.get("/{job_id}/bundle", responses={**_BUNDLE_REFUSED, 200: {
     "description": "The stored STIX 2.1 bundle, as JSON.",
     "content": {"application/json": {}},
     "headers": {"X-Bundle-Validation": {
         "description": "validated, unverified (JSON schemas missing) or unknown (built before the verdict was stored).",
-        "schema": {"type": "string"},
+        "schema": {"type": "string", "enum": list(BUNDLE_VALIDATION_VALUES)},
     }},
 }})
 def get_bundle(job_id: str):

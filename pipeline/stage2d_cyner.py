@@ -517,7 +517,9 @@ class CyNERStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """True when the CyNER model can run."""
         return cyner_available()
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the entities that CyNER finds in the text."""
         return extract_cyner_entities(text)

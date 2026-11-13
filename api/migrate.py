@@ -58,7 +58,9 @@ _LOCK_KEY = "hashtext('ctiparsor.migrations'), hashtext(current_schema())"
 
 
 class MigrationError(RuntimeError):
-    """The database cannot be brought to this code's version; the process stops."""
+    """The database cannot be brought to this code's version.  `upgrade()` raises it, and
+    `api.db.init_db` (run at each start of the API, of a worker and of bootstrap) lets it stop
+    the process.  `python -m api.migrate up` prints `migration refused: <message>` and exits 1."""
 
 
 class DatabaseNewerThanCode(MigrationError):
@@ -234,6 +236,9 @@ def _span(versions: list[int]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Entry point of `python -m api.migrate`. `status` prints the schema history, `up` applies the pending migrations,
+    `check` verifies that the schema is at this code's version. Return 1 when `up` is refused or `check` fails, 0
+    otherwise."""
     from api.logging_config import setup_logging
 
     parser = argparse.ArgumentParser(prog="python -m api.migrate", description=__doc__.split("\n\n")[0])

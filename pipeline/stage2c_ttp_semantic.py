@@ -786,7 +786,9 @@ class SemanticTTPStage(BaseExtractionStage):
         pass
 
     def available(self) -> bool:
+        """True when the semantic TTP model can run."""
         return semantic_available()
 
     def extract(self, text: str) -> list[RawEntity]:
+        """Return the TTPs that the semantic detector finds in the text."""
         return detect_ttps_semantic(text)

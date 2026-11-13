@@ -109,11 +109,15 @@ def test_the_real_reference_bundles():
         "property relationship x_temporal_assertions", "property report x_source_published",
         "property report x_synthesis_stats", "property report x_opencti_files",
         "property vulnerability x_cvss_v3_score", "property vulnerability x_cvss_v3_vector",
+        "property report x_ctiparsor_enrichment",
     }
-    # A relationship has no natural key: no id entry.  The Report of each scenario has a random id.
+    # A relationship has no natural key: no id entry.  Every Report is recorded as random: the enriched
+    # scenario's re-issued baseline Report has a uuid4 id, which the reference canonical form labels R<n>.
     assert not [k for k in entries if k.startswith("id ") and k.split(" ")[2] == "relationship"]
     reports = [v for k, v in entries.items() if k.startswith("id ") and k.split(" ")[2] == "report"]
-    assert reports == [{"id": "random"}] * 6
+    assert len(reports) == 7 and reports.count({"id": "random"}) == 7
+    # The objects the enriched scenario keeps from its baseline are not recorded (see the test below).
+    assert not [k for k in entries if k.startswith("id opencti_enriched") and "intrusion-set" in k]
     # A technique no Stage 3 entry lists carries its standard id too (pycti's, tests/test_stix_ids.py).
     techniques = {k: v for k, v in entries.items() if k.startswith("id ") and k.split(" ")[2] == "attack-pattern"}
     assert techniques and {"id": "random"} not in techniques.values()
@@ -122,3 +126,17 @@ def test_the_real_reference_bundles():
     # The TLP markings carry the standard ids.
     assert entries['id minimal marking-definition name="TLP:RED"'] == {"id": stix2.TLP_RED.id}
     assert entries['id apt_report marking-definition name="TLP:AMBER"'] == {"id": stix2.TLP_AMBER.id}
+
+
+def test_an_object_the_ledger_marks_as_baseline_is_not_recorded(tmp_path):
+    """A baseline's object is kept as received: its id is the upstream's, so it is not a promise of the contract."""
+    kept = {"type": "malware", "id": "malware--00000000-0000-5000-8000-000000000009", "name": "Kept"}
+    built = {"type": "malware", "id": "malware--00000000-0000-5000-8000-00000000000a", "name": "Built",
+             "x_evidence_text": "quoted"}
+    path = tmp_path / "enriched.json"
+    path.write_text(json.dumps({"objects": [kept, built],
+                                "ledger": {"objects": {kept["id"]: {"origin": "baseline"},
+                                                       built["id"]: {"origin": "entity"}}}}), encoding="utf-8")
+    entries, unkeyed = c.stix_entries([path])
+    assert unkeyed == 0
+    assert list(entries) == ['id enriched malware name="Built"', "property malware x_evidence_text"]

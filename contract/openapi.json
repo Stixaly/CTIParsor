@@ -1026,6 +1026,15 @@
       ]
     },
     "GET /api/jobs response:200[].status": {
+      "enum": [
+        "completed",
+        "failed",
+        "for_review",
+        "processing",
+        "queued",
+        "reviewing",
+        "uploaded"
+      ],
       "required": true,
       "types": [
         "string"
@@ -1336,6 +1345,15 @@
       ]
     },
     "GET /api/jobs/{} response:200.status": {
+      "enum": [
+        "completed",
+        "failed",
+        "for_review",
+        "processing",
+        "queued",
+        "reviewing",
+        "uploaded"
+      ],
       "required": true,
       "types": [
         "string"
@@ -1412,6 +1430,11 @@
       ]
     },
     "GET /api/jobs/{}/bundle response:200 header:x-bundle-validation": {
+      "enum": [
+        "unknown",
+        "unverified",
+        "validated"
+      ],
       "required": false,
       "types": [
         "string"
@@ -6466,6 +6489,15 @@
       ]
     },
     "POST /api/jobs/{}/finalize response:200.status": {
+      "enum": [
+        "completed",
+        "failed",
+        "for_review",
+        "processing",
+        "queued",
+        "reviewing",
+        "uploaded"
+      ],
       "required": true,
       "types": [
         "string"

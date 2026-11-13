@@ -389,6 +389,7 @@ _CURRENT = {
     "config": {"env STIX_TLP": {"set": True, "values": ["amber"]},
                "compose service app": {"profiles": []}},
     "stix": {"property report x_source_published": {"types": ["object"]}},
+    "formats": {"sse event done": {"stored": True}, "export manifest": {"name": "MANIFEST.json"}},
 }
 
 

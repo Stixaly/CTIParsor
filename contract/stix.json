@@ -219,6 +219,18 @@
     "id offline report name=\"Offline Techniques\"": {
       "id": "random"
     },
+    "id opencti_enriched identity name=\"CTIParsor\"": {
+      "id": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd"
+    },
+    "id opencti_enriched indicator name=\"Indicator: 9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972\"": {
+      "id": "indicator--3d494eea-8702-5c27-ba04-adee4ba42ec9"
+    },
+    "id opencti_enriched malware name=\"SUNBURST\"": {
+      "id": "malware--7ae51109-609e-5d7d-a67e-8c6132bb22aa"
+    },
+    "id opencti_enriched report name=\"APT29 targets ministries with WellMess\"": {
+      "id": "random"
+    },
     "id policy_pin domain-name value=\"bell-relay.test\"": {
       "id": "domain-name--715aefaa-5519-58d6-a830-29d86995e7b9"
     },
@@ -291,6 +303,11 @@
     "property relationship x_temporal_assertions": {
       "types": [
         "array"
+      ]
+    },
+    "property report x_ctiparsor_enrichment": {
+      "types": [
+        "object"
       ]
     },
     "property report x_opencti_files": {

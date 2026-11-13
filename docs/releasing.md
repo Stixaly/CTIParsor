@@ -13,6 +13,7 @@ decision and the options rejected are in
 - [Verifying a release](#verifying-a-release)
 - [When the workflow fails](#when-the-workflow-fails)
 - [The dry run](#the-dry-run)
+- [The candidate dossier](#the-candidate-dossier)
 - [What the workflow's checks are worth](#what-the-workflows-checks-are-worth)
 - [One-time repository settings](#one-time-repository-settings)
 
@@ -286,6 +287,14 @@ newer, nothing to install). Its exit code is `0` when done, `1` when it refuses
    [support-policy.md](support-policy.md) names the date and the digests of
    the last run: update them in the next pull request.
 
+   Then the dossier of the candidate, read-only, [below](#the-candidate-dossier):
+   it must report `qualified`. A `failed` or `incomplete` dossier does not
+   tag the commit.
+
+   ```bash
+   python3 scripts/check_release_dossier.py <merge commit> --digest sha256:<digest of sha-<merge commit>>
+   ```
+
 5. **Tag the merge commit.** Check that `origin/main` is the release merge
    before tagging.
 
@@ -473,6 +482,65 @@ It:
 It publishes, tags and attests nothing. It cannot rehearse the version names on
 the image, the provenance of the files or the Release itself; only a tag run
 does. The tag runs for 0.1.0 and 0.2.0 each ran once and passed.
+
+## The candidate dossier
+
+`scripts/check_release_dossier.py` reads, for one commit of main, the proofs a
+tag depends on, and gives each one a status. It needs `gh` logged in with read
+access to the repository, and it changes nothing (every call is a read).
+
+```bash
+python3 scripts/check_release_dossier.py <full commit of main> --digest sha256:<digest>
+```
+
+It writes `report.json` and `report.md` to `output/release-dossier/<UTC time>/`
+(or to `--out`), and exits `0` only when every required item is `pass`. The
+verdict is `qualified`, `incomplete` (a proof is not there yet) or `failed`
+(a proof is there and wrong).
+
+| Status | Meaning |
+|---|---|
+| `pass` | The job or check succeeded, or the proof is verified. |
+| `tolerated_failure` | A job with `continue-on-error` failed (the model tests). Never a pass. |
+| `skipped` | The job or check was skipped. A required job must run; a required check may be skipped, as GitHub counts it. |
+| `not_run` | Still running, or not given (no `--digest`). |
+| `incomplete` | The job timed out or was cancelled. Run it again. |
+| `failed` | Wrong: a failed job, another commit or digest, an unaccepted alert, an invalid exception. |
+| `missing` | Not there: no run, no summary line in the log, no attestation, no scan of the commit. |
+| `info` | Read for the record (the tag ruleset). It does not decide the verdict. |
+
+**What it checks**, all for the commit:
+
+- the push run of `ci.yml` on main, and each job the release waits for
+  (`fast-tests`, `frontend-tests`, `dependency-audit`, `browser-e2e`,
+  `container-image`, `publish-image`). The unit-test job must log its pytest
+  summary line; a job whose log lacks it is `missing`;
+- the image digest: the one `container-image` logged, the one `publish-image`
+  pushed for `sha-<commit>`, and the one given with `--digest` must be the same;
+- the SLSA provenance and the SBOM attestation of that digest, verified with
+  `gh attestation verify` for `ci.yml` on `refs/heads/main` at that commit;
+- the Grype scan of that commit (a `container-image` analysis of it). Every
+  open Grype alert on main at `high` or `critical` must be accepted: a rule in
+  `.grype.yaml` for the exact CVE, package and version, and a row for that CVE
+  in SECURITY.md that names the version. A rule that does not match any row,
+  or whose version no longer matches, is an invalid exception and fails the
+  dossier. An alert at `medium` or `low` is listed, not blocking;
+- the required checks of the ruleset `basic rules`, each succeeded or skipped on
+  the commit.
+
+It also reads the tag rulesets and whether immutable releases are on, for the
+record. It does not change them: they are the maintainer's settings
+([One-time repository settings](#one-time-repository-settings)).
+
+**What it does not check:** the effective versions installed in the jobs (the
+locks are installed by hash in CI); the models and the LLM journey (see the
+[readiness record](releases/1.0-readiness.md#delivery)); the OpenCTI import and
+the clean install (step 4 above); CodeQL alerts; and the registry itself: the
+digest of `sha-<commit>` is taken from the push log, not read back from GHCR.
+
+A missing item is never a pass. When `gh` cannot read the log of a long job,
+the summary line may be absent from what it returns; the dossier then reports
+`missing`, and the job must be read in the Actions UI or run again.
 
 ## What the workflow's checks are worth
 

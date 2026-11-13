@@ -1,3 +1,17 @@
+"""Audit the job and rule stores, read only.
+
+Runs the invariants over the PostgreSQL stores: the dedup clusters and the
+normalised, non-trivial atoms of the rule store, the rule bytes and dedup
+keys, and the bundle revision recorded for each job (ADR-0086). Each
+invariant prints OK, FAIL or SKIP (its table or column is missing) with its
+count. The checks only read; none of them writes to the database. It reads
+DATABASE_URL the way the API does.
+
+Usage: python scripts/audit_store_invariants.py
+
+Exit status: 1 when an invariant of severity "error" fails, 0 otherwise.
+Invariants of severity "warn" are printed but do not change the exit status.
+"""
 from __future__ import annotations
 
 import argparse
@@ -67,6 +81,8 @@ def _cluster_roots(conn: DBConnection) -> tuple[dict[str, str], dict[str, int]]:
     outcome, not a fault.  Measured on the live store, that naive form reported
     5,036 false failures against 0 real ones.
     """
+    # Union-find: `parent` maps each rule id to its parent, and the smaller id always becomes
+    # the root of a union, so the root of each cluster is deterministic.
     parent: dict[str, str] = {}
 
     def find(x: str) -> str:
@@ -86,6 +102,8 @@ def _cluster_roots(conn: DBConnection) -> tuple[dict[str, str], dict[str, int]]:
         else:
             parent[ra] = rb
 
+    # Pass 1: every rule starts alone. Rules that share a dedup key (or, without one, their
+    # content hash) are joined. `canon` records which rules are marked canonical.
     canon: dict[str, int] = {}
     by_key: dict[str, list[str]] = {}
     for rid, corpus_key, content_hash, is_canon in conn.execute(
@@ -99,6 +117,8 @@ def _cluster_roots(conn: DBConnection) -> tuple[dict[str, str], dict[str, int]]:
         for m in members[1:]:
             union(members[0], m)
 
+    # Pass 2: provenance edges join rules whose related key names another rule's native key,
+    # when the relation is "derived" or "renamed". Edges of other types join nothing.
     if _table_exists(conn, "rule_related"):
         native: dict[str, list[str]] = {}
         for nk, rid in conn.execute("SELECT native_key, id FROM detection_rules"):
@@ -410,6 +430,8 @@ def check_entity_evidence_offset(conn: DBConnection) -> Finding:
             return Finding("entity.evidence_offset", "error", 0, 0, "table missing", "SKIP")
         has_end = "evidence_end" in _columns(conn, "entities")
         end_col = "evidence_end" if has_end else "NULL AS evidence_end"
+        # The check uses the end column when the schema has it. Without it, every row is read
+        # as a legacy row with no end.
         rows = conn.execute(f"""
             SELECT job_id, evidence_start, {end_col}
             FROM entities
@@ -432,6 +454,8 @@ def check_entity_evidence_offset(conn: DBConnection) -> Finding:
             n = lengths.get(r["job_id"])
             if n is None:
                 continue
+            # A span is valid when it lies inside the report text: 0 <= start < end <= length.
+            # Rows without an end are counted as legacy and are not judged.
             start, end = r["evidence_start"], r["evidence_end"]
             if end is None:
                 legacy += 1

@@ -80,6 +80,7 @@ class Block:
 
     @property
     def rate(self) -> float:
+        """Share of accepted decisions in the block: accepted divided by n."""
         return self.accepted / self.n
 
 
@@ -150,6 +151,7 @@ class Proposal:
     curve: list[dict] = field(default_factory=list)
 
     def as_dict(self) -> dict:
+        """The proposal as a plain dict, from dataclasses.asdict()."""
         return asdict(self)
 
 
@@ -311,6 +313,7 @@ def excluded_decisions(
 
 
 def list_overrides(conn) -> list[dict]:
+    """Every row of model_thresholds, ordered by source and entity type."""
     rows = conn.execute(
         "SELECT source, entity_type, threshold, sample_size, target_precision, precision_at, "
         "recall_retained, origin, updated_at FROM model_thresholds ORDER BY source, entity_type"
@@ -397,6 +400,7 @@ def set_override(conn, source: str, entity_type: str, threshold: float, now: str
 
 
 def clear_override(conn, source: str, entity_type: str) -> bool:
+    """Delete the threshold row for one source and entity type. Return True when a row was removed."""
     cur = conn.execute(
         "DELETE FROM model_thresholds WHERE source=? AND entity_type=?", (source, entity_type)
     )

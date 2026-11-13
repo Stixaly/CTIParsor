@@ -1,3 +1,22 @@
+"""Measure the PDF capture of the URL tab on real CTI publishing pages.
+
+Each URL is captured to a PDF with Playwright and Chromium, as the URL tab does,
+and the capture is measured: the time taken, the size of the PDF, and the IOC-like
+strings (IPv4, SHA-256, MD5, domains, CVE and ATT&CK ids) that the page text
+contains and that the PDF text still contains (retention). The default URLs are
+a spread of publishing stacks: a WordPress blog with a table of contents, a
+vendor blog behind a CDN, a static site generator and a government advisory.
+The script fetches the URLs, so it needs network access.
+
+Usage: python scripts/measure_web_capture.py [URL ...] [--enable-js]
+       [--timeout-ms N] [--json FILE] [--keep]
+
+--enable-js captures with JavaScript on, the setting the URL tab uses; --keep
+writes the PDFs to output/web_capture_samples instead of a temporary folder;
+--json writes the measurements to FILE.
+Exit status: 2 when Playwright is not installed, 0 when at least one capture
+succeeded, 1 otherwise.
+"""
 from __future__ import annotations
 
 import argparse
@@ -114,6 +133,9 @@ def _read_dom_text(url: str, timeout_ms: int = 30_000, *, enable_js: bool = Fals
 
 def measure_one(url: str, workdir: Path, *, enable_js: bool, timeout_ms: int) -> Measurement:
     """Measure the PDF capture and ingestion quality for a single URL."""
+    # Three steps: capture the page to a PDF, ingest the PDF, and read the rendered DOM text.
+    # A failure in the first two ends the measurement with ok=False. Retention is the PDF
+    # text length over the DOM text length. IoC loss counts the DOM indicators the PDF lacks.
     dest = workdir / f"{abs(hash(url))}.pdf"
 
     try:
@@ -269,6 +291,9 @@ def main() -> int:
         )
         return 2
 
+    # Without --keep, the PDFs go to a temporary directory that is removed at the end. With
+    # --keep they stay in output/web_capture_samples. Each URL is measured in turn, and the
+    # table and summary go to stdout; --json also writes the rows.
     parser = argparse.ArgumentParser(description="Measure PDF capture and ingestion quality")
     parser.add_argument("urls", nargs="*", default=_DEFAULT_URLS)
     parser.add_argument("--enable-js", action="store_true")

@@ -60,6 +60,12 @@ def _docs(split: str, limit: int | None = None) -> list[annoctr.AnnoctrDoc]:
 # ── prepare ──────────────────────────────────────────────────────────────────
 
 def cmd_prepare(args) -> None:
+    """Build the AnnoCTR registry, the ATT&CK mapping of the gold technique ids and the near-duplicate report.
+
+    Writes annoctr-registry.json, attack-mapping.json (or attack-mapping-<release>.json
+    for another ATT&CK release) and near-duplicates.json under data/eval/. --corpus adds
+    folders of .txt reports to the near-duplicate check, --threshold sets its similarity.
+    Prints the status of each gold technique id and the near-duplicate pairs."""
     docs = annoctr.load(include_general_only=True)
     reg = annoctr.registry(docs)
     _write(OUT / "annoctr-registry.json", reg)
@@ -270,6 +276,14 @@ def _loaded_embedding(name: str, options) -> dict:
 
 
 def cmd_run(args) -> None:
+    """Run the pipeline on every document of a split and record each result under runs/<name>/.
+
+    Stages 1f, 4 and 5 are off; --disable turns more stages off. Each document is written
+    to runs/<name>/docs/<doc_id>.json, and run.json records the run's settings. A document
+    already recorded is skipped, so a run resumes. A document whose LLM answers are all
+    unusable is recorded and left out of the score; two in a row stop the run with exit
+    status 2, which points at the model setup. --allow-degraded lets Stage 3 be missing.
+    A run that began on one ATT&CK release resumes only on that release."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
 
@@ -413,9 +427,18 @@ def per_doc_scores(name: str, release: str | None = None) -> dict:
 
 
 def cmd_score(args) -> None:
+    """Score a run against the gold of its split.
+
+    Writes runs/<name>/score.json (or score-attack-<release>.json when scored on another
+    ATT&CK release) with the per-document rows, the TTP technique and entity metrics, the
+    evidence figures and the LLM health. Prints the headline metrics and the stages that
+    did not run."""
+    # Score one run: per-document rows come from per_doc_scores; this function adds the
+    # micro and per-document metrics, the evidence checks, and the LLM health counts.
     s = per_doc_scores(args.name, args.attack_release)
     modified = _modified_files(args.name, s["meta"])
     rows, preds, docs, canonical = s["rows"], s["preds"], s["docs"], s["canonical"]
+    # One value per document for each TTP measure, in the order of the rows.
     tech = [r["ttp"].technique for r in rows.values()]
     sub = [r["ttp"].subtechnique for r in rows.values()]
     exp = [r["ttp"].explicit_recall for r in rows.values()]
@@ -428,6 +451,9 @@ def cmd_score(args) -> None:
                                          for r in rows.values()).as_dict()}
             for t in ent_types}
 
+    # Evidence check per document. The gold spans are grouped by technique family (the
+    # part of the id before the dot), so a predicted id is checked against the spans of
+    # its own family.
     ev_rows = []
     for doc_id in rows:
         d = docs[doc_id]
@@ -441,6 +467,9 @@ def cmd_score(args) -> None:
                 spans.setdefault(c.split(".", 1)[0], []).append((m.start, m.end))
         ev_rows += evidence.check(doc_id, d.text, preds[doc_id]["ttps"], spans, canonical, gold_techs)
 
+    # Stage status counts across the documents. The LLM health counts come from the
+    # stages 3, 3d and 3f only, and the stage 3d and 3f keys are prefixed with their stage
+    # so that they do not merge with the stage 3 keys.
     stages: dict[str, dict[str, int]] = {}
     llm_health: dict[str, int] = {}
     for p in preds.values():
@@ -458,6 +487,8 @@ def cmd_score(args) -> None:
         found, gold = sum(a for a, _ in pairs), sum(b for _, b in pairs)
         return {"found": found, "gold": gold, "recall": round(found / gold, 4) if gold else None}
 
+    # The report is written to runs/<name>/score.json. A score taken against an ATT&CK
+    # release other than the one the run used goes to a separate file.
     report = {
         "run": args.name, "split": s["meta"]["split"], "documents_scored": len(rows),
         "documents_failed": sorted(k for k, p in preds.items() if "error" in p),
@@ -480,6 +511,8 @@ def cmd_score(args) -> None:
         "llm_health": llm_health,
         "seconds_per_document": round(sum(p.get("seconds", 0) for p in preds.values()) / max(1, len(preds)), 1),
     }
+    # `release` is the ATT&CK release the gold was mapped with, `own` the one the run used.
+    # They differ when the score was taken against another release (see the note below).
     release, own = report["attack_mapping"]["release"], run_release(s["meta"])
     _write(OUT / "runs" / args.name / ("score.json" if release == own else f"score-attack-{release}.json"),
            report)
@@ -511,6 +544,9 @@ def cmd_score(args) -> None:
 def cmd_ttp_errors(args) -> None:
     """Split a run's technique errors by where they arise (ADR-0072): never
     retrieved, retrieved but not selected, and false positives by origin."""
+    # Each document is split by metrics.ttp_error_split. Documents that errored in the run
+    # are left out. The per-category tallies, the reasons of missed gold, and the candidate
+    # ceiling (found plus retrieved-but-not-selected, over all gold) are then summed.
     meta, preds = _load_run(args.name)
     modified = _modified_files(args.name, meta)
     canonical, catalogue = _canonical_fn(args.attack_release or run_release(meta))
@@ -558,6 +594,13 @@ def cmd_ttp_errors(args) -> None:
 # ── compare ──────────────────────────────────────────────────────────────────
 
 def cmd_compare(args) -> None:
+    """Compare two runs on the documents both have scored.
+
+    Each metric gets a paired bootstrap (--resamples draws): the observed difference of
+    run b minus run a and its 95 % interval. --task selects ttp or one entity type. The
+    result is written to compare/<a>__vs__<b>__<task>.json under data/eval/. The two runs
+    must share an ATT&CK release, or --attack-release names it. Exits with a message when
+    no document is scored in both runs."""
     release = _shared_release(args.a, args.b, args.attack_release)
     a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
     modified = {"a": _modified_files(args.a, a["meta"]), "b": _modified_files(args.b, b["meta"])}
@@ -587,6 +630,11 @@ def cmd_compare(args) -> None:
 # ── attack-diff, release-effect ──────────────────────────────────────────────
 
 def cmd_attack_diff(args) -> None:
+    """Compare two ATT&CK releases: the active techniques of each domain and what changed.
+
+    Reads data/attack-stix/v<old>/ and data/attack-stix/v<new>/ and writes
+    attack-diff-<old>-<new>.json under data/eval/. Prints, per domain, the active count of
+    each release and the techniques that are new or no longer active."""
     old, new = attack.release_version(args.old), attack.release_version(args.new)
     diff = attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA))
     path = OUT / f"attack-diff-{old}-{new}.json"
@@ -649,6 +697,8 @@ def cmd_release_effect(args) -> None:
     the change in TP / FP / FN, and the F1 A would have if only that class came
     from B.  Documents whose gazetteer entities or candidates differ are listed:
     the rest of the difference is not the taxonomy's."""
+    # Both runs are scored with one ATT&CK release (`_shared_release`). The two releases
+    # `old` and `new` are the ones the taxonomy comparison is made between.
     old, new = _compared_releases(args.a, args.b, args.old, args.new)
     release = _shared_release(args.a, args.b, args.attack_release)
     a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
@@ -656,10 +706,14 @@ def cmd_release_effect(args) -> None:
     common = sorted(set(a["rows"]) & set(b["rows"]))
     if not common:
         sys.exit("no document scored in both runs")
+    # `classify` maps each technique id to the class of change it had between the two
+    # releases. `by_source` is True when every entity of both runs records its source.
     classify = attack.release_change(
         attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA)))
     by_source = all("source" in e for s in (a, b) for d in common for e in s["preds"][d]["entities"])
 
+    # Per document: the parent-level gold set and the predicted parent sets of both runs.
+    # The check against score_ttps stops the report if the two computations disagree.
     counts_a, counts_b = [], []
     classes: dict[str, dict] = {c: {"ids": set(), "differences": 0, "hybrid": []} for c in attack.CHANGE_CLASSES}
     detail = []
@@ -671,6 +725,9 @@ def cmd_release_effect(args) -> None:
                 raise RuntimeError(f"{doc_id}: parent-level sets differ from metrics.score_ttps")
         counts_a.append(metrics.set_counts(pa, gold))
         counts_b.append(metrics.set_counts(pb, gold))
+        # Ids in only one run are the differences, counted by their class of change. For
+        # each class, the hybrid run takes that class's ids from b and every other id from a,
+        # so its counts show the F1 a would have if only that class had changed.
         why = {t: classify(t) for t in pa | pb}
         for t in pa ^ pb:
             classes[why[t]]["ids"].add(t)
@@ -678,6 +735,9 @@ def cmd_release_effect(args) -> None:
         for c, row in classes.items():
             row["hybrid"].append(metrics.set_counts(
                 {t for t in pa if why[t] != c} | {t for t in pb if why[t] == c}, gold))
+        # Upstream differences that are not the taxonomy's: gazetteer entities and TTP
+        # candidates. `_only` returns None when the two runs agree, and the values each run
+        # has alone otherwise. A document is listed when any of the three differs.
         gazetteer = _only(*(_gazetteer_entities(s["preds"][doc_id], by_source) for s in (a, b)))
         candidates = _only(*(set(s["preds"][doc_id].get("ttp_candidates") or []) for s in (a, b)))
         if pa != pb or gazetteer or candidates:
@@ -714,6 +774,8 @@ def cmd_release_effect(args) -> None:
             1 for d in differ if d["gazetteer_entities"] or d["candidates"]),
         "documents_detail": detail,
     }
+    # The report is written to compare/<a>__vs__<b>__release-effect.json, and the summary
+    # is printed after it.
     path = OUT / "compare" / f"{args.a}__vs__{args.b}__release-effect.json"
     _write(path, report)
     print(f"{args.b} − {args.a} on {len(common)} documents, parent techniques, gold mapped with ATT&CK "
@@ -784,6 +846,13 @@ def _chunk_recall(docs, retriever, gate: bool, spec: str, canonical, cand_id) ->
 
 
 def cmd_retrieval(args) -> None:
+    """Measure the candidate recall of the TTP retrieval step, with no LLM call.
+
+    For each corpus (--corpus: short, description, procedure, both), retrieval method
+    (--method: dense, bm25, minrank, rrf) and keyword gate (--gate), it reports the share
+    of the gold techniques that appear among the top k candidates (--k), per passage, per
+    document and per chunk (--chunk). Dense retrieval needs the embedding model. The result
+    is written to retrieval-<split>[-<name>].json under data/eval/ (ADR-0072)."""
     from evaluation import retrieval as rv
     from pipeline import stage2c_ttp_semantic as s2c
     from pipeline import ttp_retrieval as tr
@@ -874,6 +943,11 @@ def cmd_retrieval(args) -> None:
 # ── support-sample ───────────────────────────────────────────────────────────
 
 def cmd_support_sample(args) -> None:
+    """Draw quotes of a run's TTP answers for a person to judge.
+
+    Writes runs/<name>/support-sample.csv with --n quotes (default 50): for each one, whether
+    the passage shows the technique the run gave. The file is for the annotator; nothing
+    reads it back."""
     s = per_doc_scores(args.name)
     rows = []
     for doc_id in s["rows"]:
@@ -909,6 +983,12 @@ def _run_file(path: Path, disabled: set[str], output_path: str | None = None):
 
 
 def cmd_preannotate(args) -> None:
+    """Run the pipeline on one in-house report and store its output as a draft gold file.
+
+    The report is copied to the folder of --doc-id under the in-house set, and the draft is
+    written next to it as gold.json with the status pre-annotation: a starting point to be
+    corrected, not a score. An existing gold.json is never overwritten; the command exits
+    with a message instead."""
     import shutil
 
     src = Path(args.file)
@@ -926,6 +1006,12 @@ def cmd_preannotate(args) -> None:
 
 
 def cmd_inhouse_run(args) -> None:
+    """Run the pipeline on every document of the in-house set.
+
+    Writes inhouse-runs/<name>/run.json, one record per document under docs/ and the bundle
+    of each document under bundles/. A bundle the schemas refuse is recorded with its
+    _invalid name. --disable turns stage ids off. A document already recorded is skipped.
+    Prints ok or ERROR for each document."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import RunOptions
 
@@ -1223,6 +1309,11 @@ def cmd_hard_docs(args) -> None:
 
 
 def cmd_agreement(args) -> None:
+    """Compare two annotations of the same report, layer by layer.
+
+    Prints the F1 of each layer annotated in both files, with the counts of the matches and
+    of the items only in a or only in b. Exits with a message when no layer is annotated in
+    both files."""
     a = json.loads(Path(args.a).read_text(encoding="utf-8"))
     b = json.loads(Path(args.b).read_text(encoding="utf-8"))
     result = inhouse.agreement(a, b)

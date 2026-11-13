@@ -29,6 +29,7 @@ class TechniqueCoverage(Response):
 
 
 class Coverage(Response):
+    """Detection coverage of a job's report: one cell per technique, and how many techniques sit at each score."""
     job_id: str
     techniques_total: int
     by_score: dict[int, int] = Field(description="Number of techniques at each score, 0 to 3")
@@ -66,11 +67,13 @@ class RuleEntry(Response):
 
 
 class TechniqueRules(Response):
+    """The rules of one technique in the report's rule panel."""
     technique_id: str = Field(description="A report technique, or `(untagged)`")
     rules: list[RuleEntry]
 
 
 class RulesForJob(Response):
+    """GET /jobs/{job_id}/coverage/rules: the report's rule panel, grouped by technique."""
     job_id: str
     techniques: list[TechniqueRules]
     technique_total: int
@@ -83,6 +86,7 @@ class RulesForJob(Response):
 # ── GET /jobs/{job_id}/detections/proposals ─────────────────────────────────
 
 class ProposalMatch(Response):
+    """One observable match behind a proposed rule."""
     obs_class: str
     field: str = Field(description="The rule-side atom class")
     value: str
@@ -93,6 +97,7 @@ class ProposalMatch(Response):
 
 
 class Proposal(Response):
+    """One rule proposed for a job's report, with its tier, its techniques and the observables it matches."""
     id: str
     corpus: str
     title: str
@@ -110,6 +115,7 @@ class Proposal(Response):
 
 
 class Observable(Response):
+    """One observable of the report, as the proposals route lists it."""
     obs_class: str = Field(alias="class", description="Observable class, serialised as `class`")
     value: str
     display: str
@@ -117,6 +123,7 @@ class Observable(Response):
 
 
 class ProposalsForJob(Response):
+    """GET /jobs/{job_id}/detections/proposals: the proposed rules for a job's report, by tier."""
     job_id: str
     platform: str = Field(description="The report's inferred operating system")
     atom_index_built: bool
@@ -132,6 +139,7 @@ class ProposalsForJob(Response):
 # ── GET /jobs/{job_id}/coverage/artifacts ───────────────────────────────────
 
 class ArtifactEvidence(Response):
+    """One rule that holds evidence for an artifact: its id, its corpus and the field it matched."""
     rule_id: str
     corpus: str
     field: str
@@ -139,6 +147,7 @@ class ArtifactEvidence(Response):
 
 
 class ArtifactItem(Response):
+    """One artifact of the report, with its coverage score and its Pyramid of Pain tier."""
     artifact_class: str = Field(alias="class", description="Artifact class, serialised as `class`")
     classes: list[str]
     value: str
@@ -157,6 +166,7 @@ class ArtifactItem(Response):
 
 
 class ArtifactTotals(Response):
+    """Counts of a report's artifacts by coverage state: covered, weak, uncovered and excluded."""
     artifacts: int
     covered: int
     weak: int
@@ -165,6 +175,7 @@ class ArtifactTotals(Response):
 
 
 class TierSummary(Response):
+    """Artifact counts for one Pyramid of Pain tier, by coverage state."""
     tier: int
     label: str
     artifacts: int
@@ -174,12 +185,14 @@ class TierSummary(Response):
 
 
 class ReportColumn(Response):
+    """One tactic column of the report's ATT&CK phase band, with the techniques placed in it."""
     tactic: str
     label: str
     techniques: list[str]
 
 
 class OffMatrixTechnique(Response):
+    """A technique of the report that is not on the ATT&CK matrix of its domain."""
     technique_id: str
     domain: str
 
@@ -193,6 +206,7 @@ class PhaseReport(Response):
 
 
 class CoveredColumn(Response):
+    """One tactic column of the phase band's covered row, with the matched rules placed in it."""
     tactic: str
     label: str
     rules: int = Field(description="Matched rules placed in this tactic")
@@ -208,6 +222,7 @@ class PhaseCovered(Response):
 
 
 class PhaseGap(Response):
+    """One tactic of the phase band, with the report's technique count and the matched rules placed in it."""
     tactic: str
     label: str
     report_techniques: int
@@ -215,12 +230,14 @@ class PhaseGap(Response):
 
 
 class PhaseBand(Response):
+    """The phase band of a job's artifact coverage: the report, the covered rules and the gaps."""
     report: PhaseReport
     covered: PhaseCovered
     gap: list[PhaseGap]
 
 
 class ArtifactCoverage(Response):
+    """GET /jobs/{job_id}/coverage/artifacts: the coverage of a job's artifacts, with totals and the phase band."""
     job_id: str
     artifacts: list[ArtifactItem]
     totals: ArtifactTotals
@@ -247,6 +264,7 @@ class TechniqueRule(Response):
 
 
 class RulesForTechnique(Response):
+    """GET /jobs/{job_id}/coverage/{technique_id}/rules: the canonical rules that cover one technique."""
     technique_id: str = Field(description="Upper-cased")
     rules: list[TechniqueRule]
 
@@ -254,12 +272,14 @@ class RulesForTechnique(Response):
 # ── GET /jobs/{job_id}/detections/export/facets ─────────────────────────────
 
 class FacetValue(Response):
+    """One value of a facet of the detection export, with its rule count and the bytes of its bodies."""
     value: str
     rules: int
     bytes: int = Field(description="Sum of the UTF-8 byte lengths of the rule bodies")
 
 
 class RuleFacets(Response):
+    """GET /jobs/{job_id}/detections/export/facets: the rule count and the values of each facet."""
     total: int
     bytes: int
     format: list[FacetValue]
@@ -271,6 +291,7 @@ class RuleFacets(Response):
 # ── POST /rules/lookup ──────────────────────────────────────────────────────
 
 class LookedUpRule(Response):
+    """One rule returned by a rule lookup. The raw body is empty unless the lookup asked for it."""
     id: str
     corpus: str
     title: str
@@ -286,6 +307,7 @@ class LookedUpRule(Response):
 
 
 class RuleLookupResult(Response):
+    """Result of POST /rules/lookup: the rules found and the number of distinct ids asked for."""
     rules: list[LookedUpRule]
     requested: int = Field(description="Distinct ids asked for")
 
@@ -293,6 +315,7 @@ class RuleLookupResult(Response):
 # ── GET /detection-corpora ──────────────────────────────────────────────────
 
 class CorpusCount(Response):
+    """Rules of one corpus and licence, with the canonical count after deduplication."""
     corpus: str
     license: str | None
     rules: int = Field(description="Rules ingested for this corpus and licence")
@@ -300,4 +323,5 @@ class CorpusCount(Response):
 
 
 class DetectionCorpora(Response):
+    """GET /detection-corpora: the corpora with their rule counts."""
     corpora: list[CorpusCount]

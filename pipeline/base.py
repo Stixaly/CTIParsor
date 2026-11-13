@@ -1,3 +1,11 @@
+"""Contracts shared by the Stage 2 extractors.
+
+ExtractionStage is the protocol each extractor satisfies: a name, an available()
+check and extract(text).  BaseExtractionStage is an optional mixin with a default
+available() and the merge_into() helper.  resolve_type_conflicts() settles two
+sources that type the same value differently, ranked by TYPE_PRECEDENCE.
+"""
+
 from __future__ import annotations
 
 from abc import abstractmethod
@@ -16,11 +24,14 @@ class ExtractionStage(Protocol):
     """
 
     @property
-    def name(self) -> str: ...
+    def name(self) -> str:
+        """Short name of the stage, as the registry and the logs show it."""
 
-    def available(self) -> bool: ...
+    def available(self) -> bool:
+        """True when the stage can run. False makes the registry skip it without an error."""
 
-    def extract(self, text: str) -> list[RawEntity]: ...
+    def extract(self, text: str) -> list[RawEntity]:
+        """Return the entities found in text. Return an empty list when the stage cannot run."""
 
 
 class BaseExtractionStage:
@@ -34,10 +45,12 @@ class BaseExtractionStage:
     name: str = "base"
 
     def available(self) -> bool:
+        """Return True. A subclass whose model may fail to load overrides this."""
         return True
 
     @abstractmethod
-    def extract(self, text: str) -> list[RawEntity]: ...
+    def extract(self, text: str) -> list[RawEntity]:
+        """Return the entities found in text. Each subclass implements this."""
 
     @staticmethod
     def merge_into(

@@ -27,15 +27,20 @@ _USERNAME_RE = compile_pattern(r"[a-z0-9][a-z0-9._@-]{0,63}")
 
 
 class AuthError(ValueError):
-    """A request to change accounts that is refused; the message is for the operator."""
+    """A request to change accounts or tokens that is refused: a bad username, role, password,
+    token name or lifetime, or an unknown user.  The message is for the operator.
+    The admin routes (api/routes/admin.py) answer 400 with it; the admin CLI (api/admin.py)
+    prints `refused: <message>` and exits 1.  The OIDC sign-in catches it to try another
+    username (api/auth/oidc.py)."""
 
 
 class UsernameTakenError(AuthError):
-    """An account with that username exists."""
+    """The username of a new account is taken.  POST /api/admin/users answers 409 with the message."""
 
 
 class LastAdminError(AuthError):
-    """The change would leave no enabled admin."""
+    """A role or disabled change that would leave no enabled admin.  PATCH /api/admin/users/{user_id}
+    answers 409 with the message; the admin CLI prints it as `refused` (exit 1)."""
 
 
 @dataclass(frozen=True)
@@ -48,6 +53,7 @@ class User:
     disabled: bool
 
     def has_role(self, minimum: str) -> bool:
+        """True when the account's role is at least `minimum`, in the order reader, analyst, admin."""
         return ROLE_RANK[self.role] >= ROLE_RANK[minimum]
 
 
@@ -65,6 +71,7 @@ def _parse(value: str) -> datetime:
 
 
 def hash_secret(secret: str) -> str:
+    """The SHA-256 of a secret, as hex. The database keeps this hash in place of a session id or a token."""
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
@@ -125,11 +132,13 @@ def create_user(username: str, role: str, *, password: str | None = None, displa
 
 
 def get_user(user_id: str) -> User | None:
+    """The account with this id, or None."""
     row = get_conn().execute(f"SELECT {_USER_COLUMNS} FROM users WHERE id=?", (user_id,)).fetchone()
     return _user(row) if row else None
 
 
 def find_user(username: str) -> User | None:
+    """The account with this username, or None. A name that is not a valid username matches no account."""
     try:
         name = normalise_username(username)
     except AuthError:
@@ -139,6 +148,7 @@ def find_user(username: str) -> User | None:
 
 
 def list_users() -> list[dict]:
+    """Every account, ordered by username, as dicts that have no password field."""
     rows = get_conn().execute(
         "SELECT id, username, display_name, auth_source, role, disabled, created_at, last_login_at "
         "FROM users ORDER BY username").fetchall()
@@ -184,6 +194,7 @@ def update_user(user_id: str, *, role: str | None = None, disabled: bool | None 
 
 
 def admin_exists() -> bool:
+    """True when an enabled admin account exists."""
     return get_conn().execute(
         "SELECT 1 FROM users WHERE role='admin' AND disabled=0").fetchone() is not None
 
@@ -233,6 +244,7 @@ def check_credentials(username: str, password: str) -> User | None:
 
 
 def mark_login(user_id: str) -> None:
+    """Record the time of a successful sign-in on the account."""
     get_conn().execute("UPDATE users SET last_login_at=? WHERE id=?", (_ts(_now()), user_id))
 
 
@@ -267,6 +279,7 @@ def begin_attempt(username: str) -> datetime | None:
 
 
 def clear_failures(username: str) -> None:
+    """Forget the failed sign-in attempts recorded for this username."""
     get_conn().execute("DELETE FROM login_failures WHERE username=?", (_failure_key(username),))
 
 
@@ -340,10 +353,13 @@ def find_session(session_id: str) -> Session | None:
 
 
 def delete_session(session_id: str) -> None:
+    """Delete the session with this id."""
     get_conn().execute("DELETE FROM sessions WHERE id_hash=?", (hash_secret(session_id),))
 
 
 def csrf_matches(session: Session, sent: str | None) -> bool:
+    """True when the sent CSRF token is the session's token, compared in constant time;
+    False when no token was sent."""
     return bool(sent) and hmac.compare_digest(session.csrf_token.encode(), (sent or "").encode())
 
 
@@ -461,16 +477,19 @@ def consume_oidc_login(state: str, binding: str | None = None) -> dict | None:
 
 
 def find_oidc_user(subject: str) -> User | None:
+    """The OIDC account whose subject (the identity provider's id for the user) is this one, or None."""
     row = get_conn().execute(f"SELECT {_USER_COLUMNS} FROM users WHERE auth_source='oidc' AND oidc_subject=?",
                              (subject,)).fetchone()
     return _user(row) if row else None
 
 
 def set_role(user_id: str, role: str) -> None:
+    """Set the role of an account. Raise AuthError when the role is not one of ROLES."""
     if role not in ROLES:
         raise AuthError(f"the role must be one of {', '.join(ROLES)}")
     get_conn().execute("UPDATE users SET role=? WHERE id=?", (role, user_id))
 
 
 def end_sessions(user_id: str) -> None:
+    """End every session of the account."""
     get_conn().execute("DELETE FROM sessions WHERE user_id=?", (user_id,))

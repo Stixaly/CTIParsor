@@ -1,3 +1,16 @@
+"""Measure the effect of the negated-selection fix on the stored Sigma rules (ADR-0034).
+
+Reads each Sigma rule of the rule store and extracts its atoms twice: as
+stored, and with the condition key removed, which makes no selection count as
+negated, as the walk did before the fix. Prints how many rules parse and how
+many change, the atom totals before and after, the most removed values and the
+removed atoms by class. Read only; it never writes to the database.
+
+Usage: python scripts/measure_negated_atoms.py [--limit N] [--examples N]
+
+--limit reads the first N rules (0 = all); --examples sets how many removed
+values are listed. Exit status: always 0.
+"""
 from __future__ import annotations
 
 import argparse

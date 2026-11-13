@@ -513,6 +513,13 @@ def test_a_token_whose_claims_do_not_hold_is_refused(client, idp, override):
     assert users() == []
 
 
+@pytest.mark.parametrize("nonce", ["\ud800", "a\x00b", "\udfff\ud800"])
+def test_a_nonce_with_a_lone_surrogate_or_a_nul_byte_is_refused_not_a_500(client, idp, nonce):
+    # json.dumps escapes the surrogate, so the signed payload carries "\ud800" as JSON text, as an IdP would send it.
+    refused(sign_in(client, idp, token_claims={"nonce": nonce}), "token")
+    assert users() == []
+
+
 def test_a_nonce_from_another_request_is_refused(client, idp):
     first, second = start(client), start(client)
     idp.id_token = idp.sign(idp.claims(first["nonce"]))                  # for the first request ...

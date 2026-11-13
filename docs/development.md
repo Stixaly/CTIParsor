@@ -256,6 +256,7 @@ CTIParsor/
 │   ├── migrate_jobs_to_postgres.py # One-shot copy of a cti_stix.db job store into PostgreSQL (ADR-0045)
 │   ├── migrate_rules_to_postgres.py # The same for the rule store (ADR-0053)
 │   ├── build_gazetteer_policy.py  # The ordinary-word policy, pipeline/data/gazetteer_policy.json, from docs/gazetteer-ordinary-words.md
+│   ├── make_pdf_table_fixtures.py # Regenerates tests/fixtures/pdf_tables/ with Playwright's Chromium; the PDFs are committed and CI does not run it
 │   ├── db_upgrade.sh              # Moves the stores to the PostgreSQL major compose.yaml names (ADR-0077 part B, make db-upgrade)
 │   ├── lock_pypi_hashes.py        # Gives each PyPI lock pin the sha256 of PyPI's own files (ADR-0080)
 │   │  ── checks and diagnostics ──
@@ -263,7 +264,7 @@ CTIParsor/
 │   ├── check_doc_claims.py        # Doc drift guard: documented numbers vs source (make check-docs)
 │   ├── check_doc_links.py         # Relative links and heading anchors in the tracked Markdown resolve (make check-docs, CI)
 │   ├── check_coverage.py          # Per-area coverage floors on top of the total one (make coverage)
-│   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1)
+│   ├── contract.py                # Record (make contract) or check the stable contract in contract/ (ADR-0094 item 1; five surfaces, formats.json included)
 │   ├── check_backup_restore.py    # A backup restores into an empty install with every row and file (ADR-0094 item 3)
 │   ├── check_clean_install.sh     # The clean install from the published image, as the docs write it (ADR-0094 item 9); a release step, not CI
 │   ├── check_db_upgrade.sh        # make db-upgrade on both PostgreSQL 17 layouts, then the stack starts on it (ADR-0077 part B)
@@ -304,7 +305,7 @@ CTIParsor/
 │   ├── measure_pin_allocation.py  # Pin edges under sequential vs fair-share budgets (ADR-0026)
 │   ├── measure_relevance.py       # Proposed-rule relevance on real reports
 │   ├── measure_review_revision_trigger.py # Row vs statement trigger for review_revision, in a throwaway schema (ADR-0086)
-│   ├── measure_stage1f_tradeoffs.py # Crop vs whole page: tokens, latency, kind accuracy
+│   ├── measure_stage1f_tradeoffs.py # Stage 1f: markitdown vs pdfplumber text, and figure crop vs whole page (PNG bytes and pixels)
 │   ├── measure_ttp_vs_observable_coverage.py # Technique coverage vs evidence-backed coverage
 │   ├── measure_web_capture.py     # PDF capture and ingestion quality of the URL tab
 │   ├── probe_ttp_recall_caps.py   # Stage 2c's two recall caps on real reports (ADR-0023)

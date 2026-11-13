@@ -40,6 +40,7 @@ import KeyboardHelp from '../components/review/KeyboardHelp'
 import { heldPending, typeLabel } from '../components/review/tokens'
 import EntityPopover from '../components/EntityPopover'
 import { usePromotedRules } from '../hooks/usePromotedRules'
+import { RowWrites, trackWrite, type WriteResult } from '../components/review/rowWrites'
 
 // ── Review-specific types ─────────────────────────────────────────────────────
 type SortMode = 'position' | 'type'
@@ -76,6 +77,20 @@ interface PopoverState {
   x: number
   y: number
 }
+
+/** A write the page could not save: shown until dismissed or retried. */
+interface WriteFailure {
+  key: number
+  message: string
+  /** Sends the decision again; absent when a newer decision on the row stands. */
+  retry?: () => void
+}
+
+/** The server's copy of an entity, as the page shows it when nothing is pending. */
+const toClientEntity = (e: Entity): ClientEntity => ({
+  ...e,
+  autoAccepted: e.decision_origin === 'auto_policy' && e.accepted === true,
+})
 
 // ═══════════════════════════════════════════════════════════════════════════
 export default function Review() {
@@ -166,6 +181,12 @@ export default function Review() {
     : remoteRels,
   [remoteRels, enrich])
 
+  // The latest server copies, read by a failed write to put its row back (#706).
+  const serverEntitiesRef = useRef<Entity[]>([])
+  useEffect(() => { serverEntitiesRef.current = serverEntities }, [serverEntities])
+  const serverRelsRef = useRef<Relationship[]>([])
+  useEffect(() => { serverRelsRef.current = serverRels }, [serverRels])
+
   // The auto-accept level is the server's (pipeline/decisions.py) — shown in
   // the banner only; nothing on this page accepts anything by itself.
   const { data: thresholdsInfo } = useQuery({
@@ -185,24 +206,28 @@ export default function Review() {
   const localEntitiesRef = useRef<ClientEntity[]>([])
   useEffect(() => { localEntitiesRef.current = localEntities }, [localEntities])
   const bootstrappedRef = useRef(false)
+  // Entity writes not yet answered by the server (#706).
+  const entityWrites = useRef(new RowWrites())
 
   // Waits for the job too: the enrich mapping above depends on its pipeline_mode.
   useEffect(() => {
     if (!job || !serverEntities.length || bootstrappedRef.current) return
     bootstrappedRef.current = true
-    setLocalEntities(serverEntities.map(e => ({
-      ...e,
-      autoAccepted: e.decision_origin === 'auto_policy' && e.accepted === true,
-    })))
+    setLocalEntities(serverEntities.map(toClientEntity))
   }, [job, serverEntities])
 
-  // Merge server updates while preserving local accepted/autoAccepted
+  // A refresh brings the server's copy of every row, except a row with a write
+  // still unanswered: that row keeps the analyst's copy (#706).  So a decision
+  // another session made shows up, and an answer that arrives late does not
+  // overwrite a newer decision.
   useEffect(() => {
     if (!bootstrappedRef.current) return
     setLocalEntities(prev => {
-      const prevMap: Record<string, ClientEntity> = {}
-      prev.forEach(e => { prevMap[e.id] = e })
-      return serverEntities.map(e => prevMap[e.id] ? { ...e, accepted: prevMap[e.id].accepted, autoAccepted: prevMap[e.id].autoAccepted } : e)
+      const prevMap = new Map(prev.map(e => [e.id, e] as const))
+      return serverEntities.map(e => {
+        const local = prevMap.get(e.id)
+        return local && entityWrites.current.isPending(e.id) ? local : toClientEntity(e)
+      })
     })
   }, [serverEntities])
 
@@ -212,6 +237,8 @@ export default function Review() {
   // stale-closure reads of localRels inside non-memoised handlers.
   const localRelsRef = useRef<ClientRelationship[]>([])
   useEffect(() => { localRelsRef.current = localRels }, [localRels])
+  // Relationship writes not yet answered by the server (#706).
+  const relWrites = useRef(new RowWrites())
 
   // Guards the one-time bootstrap for relationships — mirrors the entities
   // above.  No auto-accept pass: the pipeline stores its relationships
@@ -225,21 +252,16 @@ export default function Review() {
     setLocalRels(serverRels)
   }, [job, serverRels])
 
-  // Subsequent updates: merge server state while preserving the locally-set
-  // decision so rapid mutations (accept A then B before the first refetch
-  // lands) don't silently revert B.  The origin travels with `accepted`: a
-  // row confirmed here must not fall back to `default` and reappear under
-  // "to review" until its PATCH lands.
+  // Subsequent updates: as for the entities, a row with a write still unanswered
+  // keeps the analyst's copy, and every other row takes the server's (#706).
   useEffect(() => {
     if (!bootstrappedRelsRef.current) return
     setLocalRels(prev => {
-      const prevMap: Record<string, ClientRelationship> = {}
-      prev.forEach(r => { prevMap[r.id] = r })
-      return serverRels.map(r =>
-        prevMap[r.id]
-          ? { ...r, accepted: prevMap[r.id].accepted, decision_origin: prevMap[r.id].decision_origin }
-          : r
-      )
+      const prevMap = new Map(prev.map(r => [r.id, r] as const))
+      return serverRels.map((r): ClientRelationship => {
+        const local = prevMap.get(r.id)
+        return local && relWrites.current.isPending(r.id) ? local : r
+      })
     })
   }, [serverRels])
 
@@ -272,6 +294,9 @@ export default function Review() {
   /** True while the background quick-finalize API call is in-flight. */
   const [autoFinalizing, setAutoFinalizing] = useState(false)
   const autoFinalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Writes the server did not save, until the analyst retries or dismisses them (#706). */
+  const [writeFailures, setWriteFailures] = useState<WriteFailure[]>([])
+  const failureKey = useRef(0)
 
   // A drawer belongs to the width it was opened at: crossing a fold puts the
   // panel back in its column (or away), and the drawer state must not
@@ -322,10 +347,48 @@ export default function Review() {
   const autoAcceptedCount = localEntities.filter(e => e.autoAccepted && e.accepted === true).length
 
   // ── entity mutations ─────────────────────────────────────────────────────
-  const updateMutation = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: object }) => updateEntity(jobId!, id, patch),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['entities', jobId] }); markDirty() },
-  })
+  // ── writes to rows (#706) ─────────────────────────────────────────────────
+  // Every write is tracked from the moment it is sent until the server answers
+  // (RowWrites, rowWrites.ts).  A failure puts the row back on the server's copy
+  // and adds a line to the failure banner with a retry for the newest decision.
+  const reportWriteFailure = (message: string, retry?: () => void) => {
+    failureKey.current += 1
+    const key = failureKey.current
+    setWriteFailures(fs => [...fs, { key, message, retry }])
+  }
+  const dismissFailure = (key: number) => setWriteFailures(fs => fs.filter(f => f.key !== key))
+  const retryFailure = (f: WriteFailure) => { dismissFailure(f.key); f.retry?.() }
+
+  const revertEntity = (id: string) => {
+    const server = serverEntitiesRef.current.find(e => e.id === id)
+    if (server) setLocalEntities(es => es.map(e => e.id === id ? toClientEntity(server) : e))
+  }
+  const entityWrite = (ids: string[], send: () => Promise<unknown>) =>
+    trackWrite(entityWrites.current, ids, send, revertEntity, ok => {
+      qc.invalidateQueries({ queryKey: ['entities', jobId] })
+      if (ok) markDirty()
+    })
+
+  const revertRel = (id: string) => {
+    const server = serverRelsRef.current.find(r => r.id === id)
+    if (server) setLocalRels(rs => rs.map(r => r.id === id ? server : r))
+  }
+  const relWrite = (ids: string[], send: () => Promise<unknown>) =>
+    trackWrite(relWrites.current, ids, send, revertRel, ok => {
+      qc.invalidateQueries({ queryKey: ['relationships', jobId] })
+      if (ok) markDirty()
+    })
+
+  /** A relationship write the server refused: the page's alert, then the banner. */
+  const reportRelWrite = (res: WriteResult, alertPrefix: string, retry: () => void) => {
+    if (res.ok) return
+    if (!res.latest) {
+      reportWriteFailure('An earlier change to a relationship was not saved; the newer one stands.')
+      return
+    }
+    alert(`${alertPrefix}: ${errorDetail(res.error)}`)
+    reportWriteFailure(`${alertPrefix}; the page shows the server's copy again.`, retry)
+  }
 
   const createEntityMutation = useMutation({
     mutationFn: (body: Parameters<typeof createEntity>[1]) => createEntity(jobId!, body),
@@ -341,52 +404,36 @@ export default function Review() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
   })
 
-  const updateRelMutation = useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: object }) => updateRelationship(jobId!, id, patch),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
-    onError: (err: Error) => {
-      console.error('[updateRelationship] failed:', err.message)
-      alert(`Could not update relationship: ${errorDetail(err)}`)
-      qc.invalidateQueries({ queryKey: ['relationships', jobId] })
-    },
-  })
-
   // ── local-first entity mutations ─────────────────────────────────────────
   // `bulk` marks a decision taken over many cards in one click (a group, a
   // selection) — stored as `human_bulk`, which calibration does not read.
-  // TanStack Query keeps `mutate` stable across renders, so these callbacks are
-  // created once, as before, without closing over a stale mutation object.
-  const { mutate: mutateEntity } = updateMutation
-  // The latest decision sent per entity: only the failure of that one restores
-  // the stored decision (an older one failing must not undo a newer click).
-  const decisionSeq = useRef(new Map<string, number>())
-  const setAccepted = useCallback((id: string, val: boolean | null, bulk = false) => {
+  // A failed decision puts the card back on the server's copy and says so (#286,
+  // #706); the alert is kept for a single card, the banner also offers a retry.
+  const setAccepted = (id: string, val: boolean | null, bulk = false) => {
     const decision_origin: ClientDecisionOrigin = bulk ? 'human_bulk' : 'human'
-    const before = localEntitiesRef.current.find(e => e.id === id)
-    const seq = (decisionSeq.current.get(id) ?? 0) + 1
-    decisionSeq.current.set(id, seq)
+    const value = localEntitiesRef.current.find(e => e.id === id)?.value ?? id
     setLocalEntities(es => es.map(e => e.id === id
       ? { ...e, accepted: val, autoAccepted: false, decision_origin }
       : e))
-    mutateEntity({ id, patch: { accepted: val, decision_origin } }, {
-      // The card showed a decision the store refused: put the stored one back
-      // and say so, or the bundle and the page disagree silently (#286).
-      onError: (err: Error) => {
-        if (decisionSeq.current.get(id) !== seq) return
-        const stored = qc.getQueryData<Entity[]>(['entities', jobId])?.find(e => e.id === id) ?? before
-        if (stored) {
-          setLocalEntities(es => es.map(e => e.id === id
-            ? { ...e, accepted: stored.accepted, decision_origin: stored.decision_origin,
-                autoAccepted: stored.decision_origin === 'auto_policy' && stored.accepted === true }
-            : e))
+    void entityWrite([id], () => updateEntity(jobId!, id, { accepted: val, decision_origin }))
+      .then(res => {
+        if (res.ok) return
+        if (!res.latest) {
+          reportWriteFailure(`An earlier decision on "${value}" was not saved; the newer one stands.`)
+          return
         }
-        alert(`The decision on "${before?.value ?? id}" was not saved: ${errorDetail(err)}`)
-      },
-    })
-  }, [mutateEntity, qc, jobId])
-  const accept      = useCallback((id: string, bulk?: boolean) => setAccepted(id, true, bulk), [setAccepted])
-  const reject      = useCallback((id: string, bulk?: boolean) => setAccepted(id, false, bulk), [setAccepted])
-  const reset       = useCallback((id: string) => setAccepted(id, null), [setAccepted])
+        alert(`The decision on "${value}" was not saved: ${errorDetail(res.error)}`)
+        reportWriteFailure(`The decision on "${value}" was not saved; the page shows the server's copy again.`,
+          () => setAccepted(id, val, bulk))
+      })
+  }
+  // accept / reject / reset keep their identity (the keyboard effect and the
+  // card handlers depend on it) and call the setAccepted of the latest render.
+  const setAcceptedRef = useRef(setAccepted)
+  useEffect(() => { setAcceptedRef.current = setAccepted })
+  const accept = useCallback((id: string, bulk?: boolean) => setAcceptedRef.current(id, true, bulk), [])
+  const reject = useCallback((id: string, bulk?: boolean) => setAcceptedRef.current(id, false, bulk), [])
+  const reset  = useCallback((id: string) => setAcceptedRef.current(id, null), [])
 
   // A row from the analyst's STIX bundle keeps its fields (ADR-0090): the server
   // answers 409.  The hint takes the same slot and timer as the "not in text" one.
@@ -398,63 +445,80 @@ export default function Review() {
 
   const changeType = (id: string, entity_type: string) => {
     // Every entry point (chip, reader, type rail) lands here.
-    const entity = localEntities.find(e => e.id === id)
+    const entity = localEntitiesRef.current.find(e => e.id === id)
     if (entity && isImported(entity.enrichment_status)) {
       hintFromBundle(`"${entity.value}"`)
       return
     }
     setLocalEntities(es => es.map(e => e.id === id ? { ...e, entity_type } : e))
-    updateMutation.mutate({ id, patch: { entity_type } })
+    void entityWrite([id], () => updateEntity(jobId!, id, { entity_type })).then(res => {
+      if (!res.ok && res.latest) {
+        reportWriteFailure(`The type of "${entity?.value ?? id}" was not saved; the page shows the server's copy again.`,
+          () => changeType(id, entity_type))
+      }
+    })
   }
 
   const undoAutoAccept = () => {
-    // Collect which entities need to be reset BEFORE updating local state so
-    // the list is captured at call-time and not affected by the setState call.
-    const toReset = localEntities.filter(e => e.autoAccepted)
-    setLocalEntities(es => es.map(e => e.autoAccepted
+    // The rows auto-accept holds, read before the screen changes.
+    const ids = localEntitiesRef.current.filter(e => e.autoAccepted).map(e => e.id)
+    if (ids.length === 0) return
+    const chosen = new Set(ids)
+    setLocalEntities(es => es.map(e => chosen.has(e.id)
       ? { ...e, accepted: null, autoAccepted: false, decision_origin: 'human_bulk' }
       : e))
     // Persist to the server — without these PATCH calls the entities remain
     // accepted=true in the DB and will re-appear as accepted on next page load.
     // One click over many rows: `human_bulk`, and — being a decision — it also
-    // keeps auto-accept from ever re-accepting them.
-    if (toReset.length > 0) {
-      Promise.all(toReset.map(e =>
-        updateEntity(jobId!, e.id, { accepted: null, decision_origin: 'human_bulk' })))
-        .then(() => qc.invalidateQueries({ queryKey: ['entities', jobId] }))
-        .catch(() => { /* non-blocking — local state is already correct */ })
-        // #449: the reset is a decision, so the bundle is stale.  Some PATCHes may
-        // have landed before one failed, so this runs whatever the outcome.
-        .finally(markDirty)
-    }
+    // keeps auto-accept from ever re-accepting them.  One PATCH per row, so a
+    // failure is per row: a row the server still holds as accepted comes back
+    // on screen as auto-accepted, and the banner says how many did not undo (#706).
+    void Promise.all(ids.map(id => entityWrite([id], () =>
+      updateEntity(jobId!, id, { accepted: null, decision_origin: 'human_bulk' }))))
+      .then(results => {
+        const failed = results.filter(r => !r.ok).length
+        if (failed > 0) {
+          reportWriteFailure(
+            `${failed} of ${ids.length} automatic acceptances could not be undone; they are still accepted.`,
+            undoAutoAccept)
+        }
+      })
   }
 
   // ── bulk mutations (one API call per type, not N individual PATCHes) ──────
-  const bulkByTypeMutation = useMutation({
-    mutationFn: ({ entity_type, action }: { entity_type: string; action: 'accept' | 'reject' | 'reset' }) =>
-      bulkUpdateEntities(jobId!, entity_type, action, 'pending'),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['entities', jobId] }); markDirty() },
-  })
-
   /** Accept all pending entities of type `t` — local-first, single API call.
    *  Held rows (ADR-0082) stay pending: the server skips them too. */
   const acceptAllOfType = (t: string) => {
-    setLocalEntities(es => es.map(e =>
-      e.entity_type === t && e.accepted === null && !heldPending(e)
-        ? { ...e, accepted: true, autoAccepted: false }
-        : e
-    ))
-    bulkByTypeMutation.mutate({ entity_type: t, action: 'accept' })
+    const ids = localEntitiesRef.current
+      .filter(e => e.entity_type === t && e.accepted === null && !heldPending(e))
+      .map(e => e.id)
+    const chosen = new Set(ids)
+    setLocalEntities(es => es.map(e => chosen.has(e.id)
+      ? { ...e, accepted: true, autoAccepted: false }
+      : e))
+    void entityWrite(ids, () => bulkUpdateEntities(jobId!, t, 'accept', 'pending')).then(res => {
+      if (!res.ok) {
+        reportWriteFailure(`Accepting the pending ${typeLabel(t)} was not saved; the page shows the server's copy again.`,
+          () => acceptAllOfType(t))
+      }
+    })
   }
 
   /** Reject all pending entities of type `t` — local-first, single API call. */
   const rejectAllOfType = (t: string) => {
-    setLocalEntities(es => es.map(e =>
-      e.entity_type === t && e.accepted === null
-        ? { ...e, accepted: false, autoAccepted: false }
-        : e
-    ))
-    bulkByTypeMutation.mutate({ entity_type: t, action: 'reject' })
+    const ids = localEntitiesRef.current
+      .filter(e => e.entity_type === t && e.accepted === null)
+      .map(e => e.id)
+    const chosen = new Set(ids)
+    setLocalEntities(es => es.map(e => chosen.has(e.id)
+      ? { ...e, accepted: false, autoAccepted: false }
+      : e))
+    void entityWrite(ids, () => bulkUpdateEntities(jobId!, t, 'reject', 'pending')).then(res => {
+      if (!res.ok) {
+        reportWriteFailure(`Rejecting the pending ${typeLabel(t)} was not saved; the page shows the server's copy again.`,
+          () => rejectAllOfType(t))
+      }
+    })
   }
 
   const toggleType = (t: string) =>
@@ -465,24 +529,14 @@ export default function Review() {
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, accepted: val, decision_origin: 'human' } : r))
     // Use the always-current ref so we never read stale localRels from a closure
     if (!localRelsRef.current.find(r => r.id === id)?._localOnly) {
-      updateRelMutation.mutate({ id, patch: { accepted: val } })
+      void relWrite([id], () => updateRelationship(jobId!, id, { accepted: val }))
+        .then(res => reportRelWrite(res, 'Could not update relationship', () => setRelAccepted(id, val)))
     }
   }
 
   // A review group — every relationship sharing a target — in one call
   // (ADR-0065).  `human_bulk`, like the entity groups: calibration does not
   // read it.
-  const bulkRelMutation = useMutation({
-    mutationFn: ({ ids, action }: { ids: string[]; action: BulkAction }) =>
-      bulkUpdateRelationships(jobId!, ids, action),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
-    onError: (err: Error) => {
-      console.error('[bulkUpdateRelationships] failed:', err.message)
-      alert(`Could not update these relationships: ${errorDetail(err)}`)
-      qc.invalidateQueries({ queryKey: ['relationships', jobId] })
-    },
-  })
-
   const setRelsBulk = (ids: string[], action: BulkAction) => {
     const val = action === 'accept' ? true : action === 'reject' ? false : null
     // A held claim (ADR-0082) is accepted on its own card only; the server
@@ -494,7 +548,10 @@ export default function Review() {
     const chosen = new Set(ids)
     setLocalRels(rs => rs.map(r => chosen.has(r.id) ? { ...r, accepted: val, decision_origin: 'human_bulk' } : r))
     const stored = ids.filter(id => !localRelsRef.current.find(r => r.id === id)?._localOnly)
-    if (stored.length) bulkRelMutation.mutate({ ids: stored, action })
+    if (stored.length) {
+      void relWrite(stored, () => bulkUpdateRelationships(jobId!, stored, action))
+        .then(res => reportRelWrite(res, 'Could not update these relationships', () => setRelsBulk(stored, action)))
+    }
   }
 
   const setRelType = (id: string, relationship_type: string) => {
@@ -505,7 +562,8 @@ export default function Review() {
     }
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, relationship_type } : r))
     if (!rel?._localOnly) {
-      updateRelMutation.mutate({ id, patch: { relationship_type } })
+      void relWrite([id], () => updateRelationship(jobId!, id, { relationship_type }))
+        .then(res => reportRelWrite(res, 'Could not update relationship', () => setRelType(id, relationship_type)))
     }
   }
 
@@ -519,7 +577,8 @@ export default function Review() {
     }
     setLocalRels(rs => rs.map(r => r.id === id ? { ...r, ...patch } : r))
     if (!rel?._localOnly) {
-      updateRelMutation.mutate({ id, patch })
+      void relWrite([id], () => updateRelationship(jobId!, id, patch))
+        .then(res => reportRelWrite(res, 'Could not update relationship', () => setRelDates(id, patch)))
     }
   }
 
@@ -908,6 +967,28 @@ export default function Review() {
         threshold={autoAcceptPct}
         onUndo={undoAutoAccept}
       />
+
+      {/* ── writes the server did not save (#706): the screen shows the server's copy ── */}
+      {writeFailures.length > 0 && (
+        <div
+          role="alert"
+          style={{
+            padding: '8px 22px', fontSize: 12.5, color: 'var(--ink-2)',
+            background: 'var(--bg-soft)', borderBottom: '1px solid var(--rule)',
+            flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 6,
+          }}
+        >
+          {writeFailures.map(f => (
+            <div key={f.key} style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+              <span style={{ flex: 1 }}>{f.message}</span>
+              {f.retry && (
+                <button className="btn-ghost" onClick={() => retryFailure(f)}>Retry</button>
+              )}
+              <button className="btn-ghost" onClick={() => dismissFailure(f.key)}>Dismiss</button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── scrollable content area ── */}
       <div className="stage-wrapper">

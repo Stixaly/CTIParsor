@@ -14,6 +14,7 @@ import argparse
 import json
 import sys
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -36,9 +37,27 @@ from pipeline.orchestrator import (  # noqa: E402
     run_document,
 )
 from pipeline.stage4_stix_mapping import tlp_default  # noqa: E402
-from pipeline.stage5_validation import print_bundle_summary  # noqa: E402
+from pipeline.stage5_validation import (  # noqa: E402
+    ValidationResult,
+    export_path,
+    print_bundle_summary,
+)
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".html", ".htm", ".txt", ".md"}
+
+
+@dataclass(frozen=True)
+class RunOutcome:
+    """What run_pipeline did with one report.  `ok` is what its exit status
+    counts; `written` is the file Stage 5 wrote, under its `_invalid` name when
+    the schemas refused the bundle, or None when no file was written.  Truthy
+    when `ok`."""
+
+    ok: bool
+    written: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.ok
 
 
 class _ConsoleHooks(Hooks):
@@ -128,8 +147,10 @@ def prepare_store() -> bool:
 
 
 def run_pipeline(input_file: str, output_file: str, options: RunOptions | None = None,
-                 policy_source: str = "db") -> bool:
-    """One report through the same pipeline the API worker runs (ADR-0059)."""
+                 policy_source: str = "db") -> RunOutcome:
+    """One report through the same pipeline the API worker runs (ADR-0059).
+    The outcome names the file written: Stage 5 writes `output_file`, or its
+    `_invalid` sibling when it refuses the bundle (`export_path`)."""
     print(f"\n{'='*50}")
     print(f"  Rapport : {Path(input_file).name}")
     print(f"  Sortie  : {output_file}")
@@ -142,7 +163,7 @@ def run_pipeline(input_file: str, output_file: str, options: RunOptions | None =
         result = run_document(document, options, _ConsoleHooks(policy_source))
     except (FileNotFoundError, ValueError, StageRequired) as exc:
         print(f"      [ERREUR] {exc}")
-        return False
+        return RunOutcome(False)
 
     type_counts: dict[str, int] = {}
     for e in result.entities:
@@ -176,7 +197,12 @@ def run_pipeline(input_file: str, output_file: str, options: RunOptions | None =
         status = "VALIDATION ERRORS"
     print(f"  [{status}] {Path(input_file).name}")
 
-    return valid
+    written = None
+    if result.validation is not None:     # Stage 5 ran and exported the bundle
+        written = export_path(output_file, ValidationResult(result.validation))
+        if written != output_file:
+            print(f"      Écrit (refusé par la validation) : {written}")
+    return RunOutcome(valid, written)
 
 
 def run_directory(input_dir: str, output_dir: str, options: RunOptions | None = None,
@@ -205,35 +231,71 @@ def run_directory(input_dir: str, output_dir: str, options: RunOptions | None = 
 
     output_path.mkdir(parents=True, exist_ok=True)
 
-    results: list[tuple[str, bool]] = []
+    # Every bundle path is planned before the first file runs (#722).
+    plan = plan_bundle_paths(files, output_path)
+    print("\nSorties prévues :")
+    for file, output_file in zip(files, plan, strict=True):
+        print(f"  - {file.name}  →  {output_file.name}")
 
-    # `report.txt` and `report.md` both made `report_bundle.json`, and the second
-    # overwrote the first (#290): files that share a stem keep their extension.
-    stems = Counter(f.stem.lower() for f in files)
-    for file in files:
-        stem = file.stem if stems[file.stem.lower()] == 1 else f"{file.stem}_{file.suffix.lstrip('.')}"
-        output_file = output_path / f"{stem}_bundle.json"
+    results: list[tuple[str, bool, str | None]] = []
+    for file, output_file in zip(files, plan, strict=True):
         # One file that raises an unexpected exception is a failure, not the end of
         # the batch (#609): it is recorded as ✖ and the next files still run.
         try:
-            success = run_pipeline(str(file), str(output_file), options, policy_source)
+            outcome = run_pipeline(str(file), str(output_file), options, policy_source)
         except Exception as exc:
             print(f"      [ERREUR] {type(exc).__name__}: {exc}")
-            success = False
-        results.append((file.name, success))
+            outcome = RunOutcome(False)
+        # A replacement pipeline may return a plain bool: a success then has the planned path.
+        if isinstance(outcome, RunOutcome):
+            results.append((file.name, bool(outcome), outcome.written))
+        else:
+            results.append((file.name, bool(outcome), str(output_file) if outcome else None))
 
-    # Final summary
+    # Final summary, with the paths that were written
     print(f"\n{'='*50}")
     print(f"  RÉSUMÉ — {len(files)} rapport(s) traité(s)")
     print(f"{'='*50}")
-    for name, ok in results:
+    for name, ok, written in results:
         icon = "✔" if ok else "✖"
-        print(f"  {icon}  {name}")
+        where = written or "aucun fichier écrit"
+        print(f"  {icon}  {name}  →  {where}")
     print()
 
-    failed = [name for name, ok in results if not ok]
+    failed = [name for name, ok, _ in results if not ok]
     if failed:
         sys.exit(1)
+
+
+def plan_bundle_paths(files: list[Path], output_dir: Path) -> list[Path]:
+    """The bundle path of each file of a batch, in the order of `files`.
+
+    A file keeps its stem as the name when no other file of the batch has the
+    same stem, ignoring case.  Files that share a stem keep their extension
+    in the name (`report_md`, `report_txt`, #290).  Then each shared name is
+    made unique against every name of the batch, ignoring case: a name already
+    taken gets `_2`, `_3`, ... after the base.  Simple names are claimed first,
+    so a name that did not collide never changes.  Nothing is written here.
+
+    Every bundle name ends with `_bundle.json`, and a bundle Stage 5 refuses is
+    written with `_bundle_invalid.json` for the same stem: an invalid name
+    therefore never equals the planned name of another file."""
+    stems = Counter(f.stem.lower() for f in files)
+    names: list[str | None] = [
+        f.stem if stems[f.stem.lower()] == 1 else None for f in files
+    ]
+    taken = {name.lower() for name in names if name is not None}
+    for i, f in enumerate(files):
+        if names[i] is not None:
+            continue
+        base = f"{f.stem}_{f.suffix.lstrip('.')}"
+        name, n = base, 1
+        while name.lower() in taken:
+            n += 1
+            name = f"{base}_{n}"
+        taken.add(name.lower())
+        names[i] = name
+    return [output_dir / f"{name}_bundle.json" for name in names]
 
 
 def build_parser() -> argparse.ArgumentParser:

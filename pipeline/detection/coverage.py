@@ -21,7 +21,7 @@ if TYPE_CHECKING:  # the job-store connection type (ADR-0045); annotation only
     from api.db_backend import DBConnection
 
 #: The detection formats the store can hold. A closed set of three, kept in step
-#: with `_EXPORT_EXTENSIONS` in api/routes/coverage.py — a format missing from
+#: with `EXPORT_EXTENSIONS` in api/routes/coverage.py — a format missing from
 #: this tuple would silently vanish from every per-format breakdown. Verified
 #: against the live store: exactly these three values occur, and a `native_key`
 #: never spans two of them, so per-format attribution partitions cleanly.

@@ -314,8 +314,10 @@ The boxes below give each stage in detail, in execution order.
 └──────────────────────────────────────────────────────────────────────┘
 
 The file name depends on the entry point. The CLI (`main.py`) writes
-`output/{report}_bundle.json`; a batch run whose files share a stem keeps the
-extension in the name. The API worker writes `output/{report}_{job_id}_bundle.json`
+`output/{report}_bundle.json`. A batch run (`--input-dir`) plans every name
+before its first file runs: a file whose stem another file shares keeps its
+extension in the name, and a name the batch already takes gets `_2`, `_3`, and
+so on ([support-policy.md](support-policy.md), *Command line*). The API worker writes `output/{report}_{job_id}_bundle.json`
 (`bundle_output_path` in `api/worker.py`), so two uploads with the same file
 name do not overwrite each other's export.
 

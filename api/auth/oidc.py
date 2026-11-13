@@ -51,8 +51,10 @@ _cache: dict[str, tuple[float, Any]] = {}
 
 
 class OidcError(Exception):
-    """A sign-in that is refused.  `code` goes to the sign-in page (`/login?error=<code>`);
-    the message is for the log and holds no token."""
+    """A sign-in that is refused.  `code` is one of `state`, `idp`, `token`, `disabled`, `no_role`,
+    `account` or `busy`; the login and callback routes (api/routes/auth.py) answer 302 to
+    `/login?error=<code>`, and the callback also clears the binding cookie.  The message is for
+    the log and holds no token."""
 
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -340,7 +342,10 @@ def complete_login(code: str | None, state: str | None, binding: str | None) -> 
         raise OidcError("state", "no authorization code")
     claims = _verify(settings, _exchange(settings, code, pending["code_verifier"]))
     nonce = claims.get("nonce")
-    if not isinstance(nonce, str) or not hmac.compare_digest(nonce.encode(), pending["nonce"].encode()):
+    # A nonce with a NUL byte or a lone surrogate is refused as a bad token before the encoding:
+    # a lone surrogate cannot be encoded to UTF-8, and the callback must answer a redirect, not a 500 (#646).
+    if not isinstance(nonce, str) or not _storable(nonce) \
+            or not hmac.compare_digest(nonce.encode(), pending["nonce"].encode()):
         raise OidcError("token", "id_token: wrong nonce")
     user = _account(settings, claims)
     store.mark_login(user.id)
