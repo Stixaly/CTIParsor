@@ -1,3 +1,13 @@
+"""Entity, relationship and evidence schemas shared by the API and the pipeline.
+
+EntityType is the list of entity types the pipeline emits, in three groups:
+STIX cyber-observables, CVE and ATT&CK entities, and named STIX objects.
+STIX_RELATIONSHIP_TYPES is the set of relationship verbs accepted for an edge;
+the pipeline's STIX builder and the relationship routes of the API both read
+it. EvidenceLabel grades how well a source supports a claim. RawEntity is what
+the extraction stages return for one entity, with its evidence quote kept
+apart from its context (ADR-0028).
+"""
 from enum import Enum
 
 from pydantic import BaseModel

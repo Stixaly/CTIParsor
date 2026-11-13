@@ -60,6 +60,12 @@ def _docs(split: str, limit: int | None = None) -> list[annoctr.AnnoctrDoc]:
 # ── prepare ──────────────────────────────────────────────────────────────────
 
 def cmd_prepare(args) -> None:
+    """Build the AnnoCTR registry, the ATT&CK mapping of the gold technique ids and the near-duplicate report.
+
+    Writes annoctr-registry.json, attack-mapping.json (or attack-mapping-<release>.json
+    for another ATT&CK release) and near-duplicates.json under data/eval/. --corpus adds
+    folders of .txt reports to the near-duplicate check, --threshold sets its similarity.
+    Prints the status of each gold technique id and the near-duplicate pairs."""
     docs = annoctr.load(include_general_only=True)
     reg = annoctr.registry(docs)
     _write(OUT / "annoctr-registry.json", reg)
@@ -270,6 +276,14 @@ def _loaded_embedding(name: str, options) -> dict:
 
 
 def cmd_run(args) -> None:
+    """Run the pipeline on every document of a split and record each result under runs/<name>/.
+
+    Stages 1f, 4 and 5 are off; --disable turns more stages off. Each document is written
+    to runs/<name>/docs/<doc_id>.json, and run.json records the run's settings. A document
+    already recorded is skipped, so a run resumes. A document whose LLM answers are all
+    unusable is recorded and left out of the score; two in a row stop the run with exit
+    status 2, which points at the model setup. --allow-degraded lets Stage 3 be missing.
+    A run that began on one ATT&CK release resumes only on that release."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import Document, RunOptions, StageRequired, run_document
 
@@ -413,6 +427,12 @@ def per_doc_scores(name: str, release: str | None = None) -> dict:
 
 
 def cmd_score(args) -> None:
+    """Score a run against the gold of its split.
+
+    Writes runs/<name>/score.json (or score-attack-<release>.json when scored on another
+    ATT&CK release) with the per-document rows, the TTP technique and entity metrics, the
+    evidence figures and the LLM health. Prints the headline metrics and the stages that
+    did not run."""
     # Score one run: per-document rows come from per_doc_scores; this function adds the
     # micro and per-document metrics, the evidence checks, and the LLM health counts.
     s = per_doc_scores(args.name, args.attack_release)
@@ -574,6 +594,13 @@ def cmd_ttp_errors(args) -> None:
 # ── compare ──────────────────────────────────────────────────────────────────
 
 def cmd_compare(args) -> None:
+    """Compare two runs on the documents both have scored.
+
+    Each metric gets a paired bootstrap (--resamples draws): the observed difference of
+    run b minus run a and its 95 % interval. --task selects ttp or one entity type. The
+    result is written to compare/<a>__vs__<b>__<task>.json under data/eval/. The two runs
+    must share an ATT&CK release, or --attack-release names it. Exits with a message when
+    no document is scored in both runs."""
     release = _shared_release(args.a, args.b, args.attack_release)
     a, b = per_doc_scores(args.a, release), per_doc_scores(args.b, release)
     modified = {"a": _modified_files(args.a, a["meta"]), "b": _modified_files(args.b, b["meta"])}
@@ -603,6 +630,11 @@ def cmd_compare(args) -> None:
 # ── attack-diff, release-effect ──────────────────────────────────────────────
 
 def cmd_attack_diff(args) -> None:
+    """Compare two ATT&CK releases: the active techniques of each domain and what changed.
+
+    Reads data/attack-stix/v<old>/ and data/attack-stix/v<new>/ and writes
+    attack-diff-<old>-<new>.json under data/eval/. Prints, per domain, the active count of
+    each release and the techniques that are new or no longer active."""
     old, new = attack.release_version(args.old), attack.release_version(args.new)
     diff = attack.release_diff(attack.release_dir(old, DATA), attack.release_dir(new, DATA))
     path = OUT / f"attack-diff-{old}-{new}.json"
@@ -814,6 +846,13 @@ def _chunk_recall(docs, retriever, gate: bool, spec: str, canonical, cand_id) ->
 
 
 def cmd_retrieval(args) -> None:
+    """Measure the candidate recall of the TTP retrieval step, with no LLM call.
+
+    For each corpus (--corpus: short, description, procedure, both), retrieval method
+    (--method: dense, bm25, minrank, rrf) and keyword gate (--gate), it reports the share
+    of the gold techniques that appear among the top k candidates (--k), per passage, per
+    document and per chunk (--chunk). Dense retrieval needs the embedding model. The result
+    is written to retrieval-<split>[-<name>].json under data/eval/ (ADR-0072)."""
     from evaluation import retrieval as rv
     from pipeline import stage2c_ttp_semantic as s2c
     from pipeline import ttp_retrieval as tr
@@ -904,6 +943,11 @@ def cmd_retrieval(args) -> None:
 # ── support-sample ───────────────────────────────────────────────────────────
 
 def cmd_support_sample(args) -> None:
+    """Draw quotes of a run's TTP answers for a person to judge.
+
+    Writes runs/<name>/support-sample.csv with --n quotes (default 50): for each one, whether
+    the passage shows the technique the run gave. The file is for the annotator; nothing
+    reads it back."""
     s = per_doc_scores(args.name)
     rows = []
     for doc_id in s["rows"]:
@@ -939,6 +983,12 @@ def _run_file(path: Path, disabled: set[str], output_path: str | None = None):
 
 
 def cmd_preannotate(args) -> None:
+    """Run the pipeline on one in-house report and store its output as a draft gold file.
+
+    The report is copied to the folder of --doc-id under the in-house set, and the draft is
+    written next to it as gold.json with the status pre-annotation: a starting point to be
+    corrected, not a score. An existing gold.json is never overwritten; the command exits
+    with a message instead."""
     import shutil
 
     src = Path(args.file)
@@ -956,6 +1006,12 @@ def cmd_preannotate(args) -> None:
 
 
 def cmd_inhouse_run(args) -> None:
+    """Run the pipeline on every document of the in-house set.
+
+    Writes inhouse-runs/<name>/run.json, one record per document under docs/ and the bundle
+    of each document under bundles/. A bundle the schemas refuse is recorded with its
+    _invalid name. --disable turns stage ids off. A document already recorded is skipped.
+    Prints ok or ERROR for each document."""
     from api.run_config import build_manifest
     from pipeline.orchestrator import RunOptions
 
@@ -1253,6 +1309,11 @@ def cmd_hard_docs(args) -> None:
 
 
 def cmd_agreement(args) -> None:
+    """Compare two annotations of the same report, layer by layer.
+
+    Prints the F1 of each layer annotated in both files, with the counts of the matches and
+    of the items only in a or only in b. Exits with a message when no layer is annotated in
+    both files."""
     a = json.loads(Path(args.a).read_text(encoding="utf-8"))
     b = json.loads(Path(args.b).read_text(encoding="utf-8"))
     result = inhouse.agreement(a, b)

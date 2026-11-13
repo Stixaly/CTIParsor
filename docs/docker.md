@@ -219,6 +219,23 @@ Configuration is managed via the `.env` file (passed to the container via `env_f
 
 The app receives `DATABASE_URL=postgresql://<CTI_DB_USER>@postgres:5432/<CTI_DB_NAME>` and its password from `/run/secrets/db_password`, which the entrypoint reads into `PGPASSWORD` (`docker/entrypoint.sh`); a `DATABASE_URL` in `.env` is ignored inside the stack. Every connection authenticates with `scram-sha-256` (local socket included), the server publishes no port, and only the `app` service shares its network. Changing `CTI_DB_USER` or `CTI_DB_PASSWORD` after the `pg-data` volume exists does not alter the server's role: run `ALTER ROLE ... PASSWORD ...` through `docker compose exec postgres psql`, or start from a fresh volume.
 
+### Build arguments: `APP_UID` and `APP_GID`
+
+The Dockerfile creates the user that runs the app with uid and gid `1001` (`ARG APP_UID=1001`, `ARG APP_GID=1001`). Both are build arguments, not Compose variables: `compose.yaml` does not pass them, so another uid or gid needs a plain `docker build`:
+
+```bash
+docker build --build-arg APP_UID=$(id -u) --build-arg APP_GID=$(id -g) \
+  --build-arg GIT_REV=$(git rev-parse HEAD) -t ctiparsor:local .
+```
+
+The tag matches the default `CTI_IMAGE`, so `docker compose up` runs this image; it rebuilds only with `--build`. The other build arguments are `INSTALL_CAPTURE` and `GIT_REV` (the table above).
+
+What must match the build:
+
+- **Bind-mounted folders** (for example `./data/state`) must be owned by the same uid and gid as the image user, or the app cannot write to them. The named volumes take the owner from the image, so they need nothing.
+- **The `/home/ctiparsor` tmpfs** in `compose.yaml` (`x-app-hardening`) is fixed to `uid=1001,gid=1001`. With other values, change that line too, or the home directory belongs to a uid the app does not run as.
+- **`scripts/docker_smoke.sh`** checks that the app runs as uid 1001 (its step 6), so it fails on a non-default build.
+
 ### Forced Values
 
 `compose.yaml` forces these values; they cannot be overridden by `.env`:

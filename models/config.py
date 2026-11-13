@@ -1,3 +1,14 @@
+"""Pipeline configuration: chunking, the LLM provider and validation settings.
+
+PipelineConfig groups ChunkConfig, LLMConfig and ValidationConfig. Each model
+has the defaults and the bounds declared on its fields. PipelineConfig.from_env()
+reads only these variables: LLM_PROVIDER (default anthropic), the model variable
+of that provider (<PROVIDER>_MODEL, for example VLLM_MODEL), then LLM_MODEL
+(default claude-sonnet-5-5), LLM_TIMEOUT, LLM_MAX_RETRIES, CHUNK_MAX_CHARS and
+CHUNK_OVERLAP. Every other field keeps its declared default, including the
+validation settings, the circuit breaker threshold and the data and output
+folders. The environment variables are documented in docs/configuration.md.
+"""
 from __future__ import annotations
 
 import os
