@@ -77,10 +77,15 @@ def ocr(monkeypatch):
         calls.append((first_page, last_page))
         return [_Image(f"p{n}") for n in range(first_page, last_page + 1)]
 
+    # These tests check the OCR routing: the pages are read with English, set
+    # explicitly (the default is OCR_LANG=auto, which needs Tesseract's OSD).
+    monkeypatch.setenv("OCR_LANG", "eng")
     monkeypatch.setattr(s1, "_OCR_AVAILABLE", True)
+    monkeypatch.setattr(s1, "_ocr_langs_in_use", {})
     monkeypatch.setattr(s1, "convert_from_path", convert_from_path, raising=False)
     monkeypatch.setattr(s1, "pytesseract",
-                        SimpleNamespace(image_to_string=lambda img, lang: f"ocr {img.label} [{lang}]"),
+                        SimpleNamespace(image_to_string=lambda img, lang: f"ocr {img.label} [{lang}]",
+                                        get_languages=lambda config="": ["eng", "fra"]),
                         raising=False)
     return calls
 
@@ -147,7 +152,6 @@ def test_a_scanned_page_that_ocr_cannot_read_keeps_its_text_layer(monkeypatch, t
 
 
 def test_a_fully_scanned_pdf_is_ocrd_in_page_batches(monkeypatch, tmp_path, ocr):
-    monkeypatch.delenv("OCR_LANG", raising=False)
     _pdfplumber(monkeypatch, [_Page("", image_share=1.0) for _ in range(23)])
 
     text = s1._read_pdf(tmp_path / "r.pdf")

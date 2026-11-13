@@ -673,16 +673,24 @@ class _Run:
     # -- stages --------------------------------------------------------------
 
     def ingest(self) -> None:
-        from pipeline.stage1_ingestion import chunk_text, extract_anchor, extract_reference_date, ingest
+        from pipeline.stage1_ingestion import (
+            chunk_text,
+            extract_anchor,
+            extract_reference_date,
+            ingest,
+            ocr_summary,
+        )
         from pipeline.stage2_extraction import refang
 
         t0 = time.monotonic()
         self.hooks.check_timeout()
+        ocr: dict[str, Any] = {}
         if self.doc.text is not None:
             raw_text = self.doc.text
             reason = "text provided"
         elif self.doc.file_path is not None:
-            raw_text = ingest(self.doc.file_path)
+            with ocr_summary() as ocr:
+                raw_text = ingest(self.doc.file_path)
             # Best-effort document creation time (TimeML/TIMEX3-style anchor)
             # for Stage 3 to resolve simple relative relationship dates against.
             self.r.reference_date = extract_reference_date(self.doc.file_path)
@@ -712,7 +720,10 @@ class _Run:
         self.r.chunks = chunk_text(self.r.text, max_chars=max_chars)
         logger.info(f"[Stage 1] {len(self.r.text):,} chars — {len(self.r.chunks)} chunks "
                     f"(max_chars={max_chars})")
+        # The OCR record (pages, languages, scripts) is counts only; it is kept
+        # only for a document with OCR'd pages.
         self.record("1", RAN, reason, t_ingest + time.monotonic() - t0,
+                    details={"ocr": ocr} if ocr else None,
                     chars=len(self.r.text), chunks=len(self.r.chunks))
         self.hooks.progress("stage", {
             "stage": 1, "label": "Ingestion",

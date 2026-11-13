@@ -678,7 +678,7 @@
     "env OCR_LANG": {
       "set": false,
       "values": [
-        "eng"
+        "auto"
       ]
     },
     "env OIDC_CLIENT_ID": {

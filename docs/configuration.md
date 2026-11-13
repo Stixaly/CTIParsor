@@ -720,18 +720,45 @@ that name at the project root:
 ## OCR
 
 ```env
-# Tesseract language(s) for scanned PDF pages, e.g. eng+fra+ukr+pol+rus.  OCR is decided page by page.
-# OCR_LANG=eng
+# Tesseract language(s) for scanned PDF pages: auto, or a list such as eng+fra.  OCR is decided page by page.
+# OCR_LANG=auto
 ```
 
-`OCR_LANG` defaults to `eng`, English only. The image installs the Tesseract
-data for French, Ukrainian, Polish and Russian as well
-(`tesseract-ocr-fra`, `-ukr`, `-pol`, `-rus`): a team that reads sources in
-those languages sets `OCR_LANG=eng+fra+ukr+pol+rus`. The default stays English
-because reading with the larger set lowers the accuracy on English pages and
-takes longer per page. A language whose data is not installed is left out of
-the run, with one warning in the log, so a page is not lost to it. The run
-record keeps the languages that were used.
+`OCR_LANG` defaults to `auto`. Each scanned page is then read in the languages
+of its script: Tesseract's orientation and script detection (OSD) names the
+script of the page, and the page is OCR'd with the languages of that script:
+
+| Script found by OSD | Languages the page is read with |
+|---|---|
+| Latin, or a script not listed here | `eng+fra+spa+por+deu+ita+pol+tur+vie+ind` |
+| Cyrillic | `rus+ukr` |
+| Han | `chi_sim+chi_tra` |
+| Japanese | `jpn` |
+| Hangul | `kor` |
+| Arabic | `ara+fas+urd` |
+| Devanagari | `hin` |
+| Bengali | `ben` |
+| Hebrew | `heb` |
+| Thai | `tha` |
+
+The Latin set is also used when OSD finds no script (it fails on a page with
+little text) or when its script confidence is below 1.0. A set is cut to the
+languages Tesseract has data for; a script none of whose languages is installed
+is read in the Latin set. The image installs the data for every language in the
+table (`Dockerfile`, one list of `tesseract-ocr-<lang>` packages). A language
+whose data is not installed is left out of the run, with one warning in the log.
+
+An explicit value (`OCR_LANG=eng`, `OCR_LANG=eng+fra`, ...) is read as written, with
+no OSD run. Use it for a source whose languages are known, or for a faster run:
+`auto` takes longer per page because each page runs OSD and then up to ten
+languages. `auto` was chosen as the default because, on the English pages measured
+for it, the Latin set read English within a small margin of `eng`.
+
+The run record keeps `auto` (or the languages of an explicit value). The Stage 1
+entry of the stage report holds, under `details.ocr`, how many pages were OCR'd
+and the languages each was read with; with `auto`, also the scripts OSD found.
+These are counts only, no page text. The entry has no `details.ocr` when no page
+was OCR'd.
 
 A page is OCR'd when it has almost no text layer (under 50 characters) and
 either an image covers half of it or its text is drawn as glyph outlines

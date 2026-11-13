@@ -222,7 +222,9 @@ def captured_env() -> dict[str, str]:
     if not env.get("CYNER_ENABLED", "").strip():
         env["CYNER_ENABLED"] = "false"
     # The OCR languages Stage 1 reads with: the setting after the fallback to
-    # the installed Tesseract data, or the default when it is unset.
+    # the installed Tesseract data, or the default when it is unset.  With
+    # OCR_LANG=auto the record says "auto"; the languages each page was read
+    # with are in the stage 1 details of the run.
     from pipeline.stage1_ingestion import ocr_lang
     env["OCR_LANG"] = ocr_lang()
     return env
