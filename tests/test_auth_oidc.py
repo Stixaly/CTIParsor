@@ -264,14 +264,39 @@ def test_the_page_asked_for_is_where_the_sign_in_ends(client, idp):
     assert response.headers["location"] == "/jobs/abc?tab=graph"
 
 
-def test_a_second_sign_in_updates_the_role_without_a_second_account(client, idp):
+def test_a_second_sign_in_updates_the_role_without_a_second_account(client, idp, make_user):
     sign_in(client, idp)
     assert client.get("/api/auth/me").json()["role"] == "analyst"
     sign_in(client, idp, token_claims={"groups": ["cti-admins"]})
     assert client.get("/api/auth/me").json()["role"] == "admin"
+    make_user("admin", "bob")                    # alice is not the last enabled admin, so her role can change
     sign_in(client, idp, token_claims={"groups": ["cti-readers"]})
     assert client.get("/api/auth/me").json()["role"] == "reader"
-    assert [u["username"] for u in users()] == ["alice"]
+    assert [u["username"] for u in users()] == ["alice", "bob"]          # still one account per person
+
+
+def test_the_last_enabled_admin_keeps_the_admin_role_when_its_groups_map_to_less(client, idp, caplog):
+    caplog.set_level(logging.WARNING)
+    sign_in(client, idp, token_claims={"groups": ["cti-admins"]})
+    response = sign_in(client, idp, token_claims={"groups": ["cti-readers"]})
+    assert response.status_code == 302 and response.headers["location"] == "/"      # the sign-in succeeds
+    assert client.get("/api/auth/me").json()["role"] == "admin"
+    assert next(u for u in users() if u["username"] == "alice")["role"] == "admin"
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING and "[auth]" in r.getMessage()]
+    assert len(warnings) == 1 and "'alice'" in warnings[0] and "last enabled admin" in warnings[0]
+    assert "reader" in warnings[0] and ISSUER not in warnings[0]
+
+
+@pytest.mark.parametrize("other_is_enabled", [True, False])
+def test_an_admin_is_demoted_by_a_sign_in_only_when_another_enabled_admin_remains(client, idp, make_user,
+                                                                                  other_is_enabled):
+    sign_in(client, idp, token_claims={"groups": ["cti-admins"]})
+    make_user("admin", "bob")
+    if not other_is_enabled:
+        store.set_disabled("bob")                                  # a disabled admin is no safety net
+    sign_in(client, idp, token_claims={"groups": ["cti-readers"]})
+    expected = "reader" if other_is_enabled else "admin"
+    assert client.get("/api/auth/me").json()["role"] == expected
 
 
 def test_the_highest_mapped_role_wins_and_unmapped_groups_count_for_nothing(client, idp):
