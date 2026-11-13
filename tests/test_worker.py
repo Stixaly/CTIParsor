@@ -454,7 +454,8 @@ def test_finalize_applies_every_reviewer_rejection_to_the_llm_blob(db):
         campaign_name="Dark Halo", targeted_countries=["France", "Germany"],
         targeted_sectors=["energy", "finance"],
     )
-    _job(db, report_text="APT29 used Mimikatz. Mimikatz again.", llm_result_json=llm.model_dump_json())
+    _job(db, status="reviewing", report_text="APT29 used Mimikatz. Mimikatz again.",
+         llm_result_json=llm.model_dump_json())
     _entity(db, "j1", "APT29", "threat_actor")
     _entity(db, "j1", "apt29", "threat_actor")                     # the same actor twice: one SDO
     _entity(db, "j1", "Mimikatz", "tool")
@@ -492,7 +493,7 @@ def test_finalize_keeps_the_type_of_the_best_ranked_source_and_the_analysts_acce
     """ADR-0092: the gazetteer's malware outranks the LLM's campaign of the same
     name; only an accept the analyst made on its own gives the campaign the name."""
     llm = LLMEnrichmentResult(campaign_name="Industroyer2")
-    _job(db, report_text="Industroyer2 hit the grid.", llm_result_json=llm.model_dump_json())
+    _job(db, status="reviewing", report_text="Industroyer2 hit the grid.", llm_result_json=llm.model_dump_json())
     _entity(db, "j1", "Industroyer2", "malware", accepted=None, source="gazetteer")
     _entity(db, "j1", "Industroyer2", "campaign", accepted=None, source="llm")
 
@@ -527,7 +528,7 @@ def test_finalize_does_not_bring_back_a_deleted_or_renamed_llm_campaign(db):
     """#287: the LLM's campaign is stored as a row; deleting the row is the
     analyst's decision, and the blob must not put the name back."""
     llm = LLMEnrichmentResult(campaign_name="Dark Halo")
-    _job(db, report_text="APT29 ran Dark Halo.", llm_result_json=llm.model_dump_json())
+    _job(db, status="reviewing", report_text="APT29 ran Dark Halo.", llm_result_json=llm.model_dump_json())
     _entity(db, "j1", "APT29", "threat_actor")
     assert _objects(worker.re_run_final_stages("j1", quick=False), "campaign") == []      # no row: gone
 
@@ -543,7 +544,7 @@ def test_finalize_does_not_bring_back_a_deleted_llm_technique(db):
     blob must not put the technique back."""
     llm = LLMEnrichmentResult(ttps=[TTPExtracted(technique_name="Phishing", mitre_id="T1566"),
                                     TTPExtracted(technique_name="Masquerading", mitre_id="T1036")])
-    _job(db, report_text="APT29 phished and masqueraded.", llm_result_json=llm.model_dump_json())
+    _job(db, status="reviewing", report_text="APT29 phished and masqueraded.", llm_result_json=llm.model_dump_json())
     _entity(db, "j1", "Masquerading", "ttp", mitre_id="T1036")
     assert _objects(worker.re_run_final_stages("j1", quick=False), "attack-pattern") == ["Masquerading"]
 
@@ -570,7 +571,7 @@ def test_finalize_reads_relationship_dates_old_and_new(db):
     """ADR-0063 rows carry `times_json`; a row written before it has only
     start_time: kept as a legacy date, never re-interpreted."""
     text = "APT29 used SUNBURST in 2020. APT29 targeted SolarWinds."
-    _job(db, report_text=text)
+    _job(db, status="reviewing", report_text=text)
     dated = RelationshipExtracted(source_value="APT29", relationship_type="uses", target_value="SUNBURST",
                                   evidence_text="APT29 used SUNBURST in 2020.",
                                   times=[{"role": "within", "time_text": "in 2020", "value": "2020"}])
