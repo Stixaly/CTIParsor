@@ -1,0 +1,60 @@
+﻿2026-11-12T22:18:08.0464006Z ##[group]Run pytest -v -rs \
+2026-11-12T22:18:08.0464335Z ^[[36;1mpytest -v -rs \^[[0m
+2026-11-12T22:18:08.0464567Z ^[[36;1m  --cov \^[[0m
+2026-11-12T22:18:08.0464820Z ^[[36;1m  --cov-report=term-missing:skip-covered \^[[0m
+2026-11-12T22:18:08.0465125Z ^[[36;1m  --cov-report=xml^[[0m
+2026-11-12T22:18:08.0514195Z shell: /usr/bin/bash -e {0}
+2026-11-12T22:18:08.0514457Z env:
+2026-11-12T22:18:08.0514719Z   pythonLocation: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-12T22:18:08.0515154Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib/pkgconfig
+2026-11-12T22:18:08.0515596Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-12T22:18:08.0515976Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-12T22:18:08.0516349Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.14.10/x64
+2026-11-12T22:18:08.0516734Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.14.10/x64/lib
+2026-11-12T22:18:08.0517060Z   SKIP_HEAVY_MODELS: 1
+2026-11-12T22:18:08.0517295Z   ANTHROPIC_API_KEY: test-key-not-used
+2026-11-12T22:18:08.0517593Z   LLM_PROVIDER: anthropic
+2026-11-12T22:18:08.0518384Z   CTIPARSOR_TEST_DATABASE_URL: ***127.0.0.1:5432/ctiparsor
+2026-11-12T22:18:08.0518732Z   CTIPARSOR_REQUIRE_TEST_DEPS: 1
+2026-11-12T22:18:08.0518978Z ##[endgroup]
+2026-11-12T22:18:11.9558540Z ============================= test session starts ==============================
+2026-11-12T22:18:11.9559463Z platform linux -- Python 3.14.10, pytest-9.1.1, pluggy-1.6.0 -- /opt/hostedtoolcache/Python/3.14.10/x64/bin/python
+2026-11-12T22:18:11.9560266Z cachedir: .pytest_cache
+2026-11-12T22:18:11.9561416Z hypothesis profile 'ci' -> database=None, deadline=None, print_blob=True, derandomize=True, suppress_health_check=(HealthCheck.too_slow,)
+2026-11-12T22:18:11.9562372Z rootdir: /home/runner/work/CTIParsor/CTIParsor
+2026-11-12T22:18:11.9562817Z configfile: pytest.ini
+2026-11-12T22:18:11.9563148Z testpaths: tests
+2026-11-12T22:18:11.9563614Z plugins: cov-7.1.0, anyio-4.15.1, hypothesis-6.168.5, schemathesis-4.30.1
+2026-11-12T22:18:32.9074342Z collecting ... collected 7135 items
+2026-11-12T22:18:32.9074698Z 
+2026-11-12T22:18:32.9156985Z tests/eval_pipeline.py::test_stage2_ner_f1_on_fixtures PASSED            [  0%]
+2026-11-12T22:18:32.9181015Z tests/eval_pipeline.py::test_stage2_no_false_positives_on_clean_text PASSED [  0%]
+2026-11-12T22:18:32.9207014Z tests/eval_pipeline.py::test_ttp_regex_no_false_positives_on_adversarial PASSED [  0%]
+2026-11-12T22:18:32.9230434Z tests/eval_pipeline.py::test_ttp_semantic_precision_on_adversarial SKIPPED [  0%]
+2026-11-12T22:18:32.9252238Z tests/eval_pipeline.py::test_stage2_ttp_regex_ate_fixtures PASSED        [  0%]
+2026-11-12T22:18:32.9273145Z tests/eval_pipeline.py::test_stage2_ttp_no_false_positives_on_clean_text PASSED [  0%]
+2026-11-12T22:18:32.9312595Z tests/eval_pipeline.py::test_grounding_metric_discriminates PASSED       [  0%]
+2026-11-12T22:18:32.9423913Z tests/eval_pipeline.py::test_grounding_segments_named_vs_technical PASSED [  0%]
+2026-11-12T22:18:32.9445670Z tests/eval_pipeline.py::test_grounding_proximity_rescues_table_iocs PASSED [  0%]
+2026-11-12T22:18:32.9466883Z tests/eval_pipeline.py::test_grounding_cosentence_gap PASSED             [  0%]
+2026-11-12T22:18:32.9534617Z tests/test_alias_disambiguation.py::test_unambiguous_name_resolves_without_a_type PASSED [  0%]
+2026-11-12T22:18:32.9554254Z tests/test_alias_disambiguation.py::test_snake_resolves_to_the_group_when_asked_for_a_threat_actor PASSED [  0%]
+2026-11-12T22:18:32.9572860Z tests/test_alias_disambiguation.py::test_snake_resolves_to_the_malware_when_asked_for_malware PASSED [  0%]
+2026-11-12T22:18:32.9591443Z tests/test_alias_disambiguation.py::test_ambiguous_name_without_a_type_resolves_to_nothing PASSED [  0%]
+2026-11-12T22:18:32.9609947Z tests/test_alias_disambiguation.py::test_ambiguous_name_keeps_its_own_name PASSED [  0%]
+2026-11-12T22:18:32.9628553Z tests/test_alias_disambiguation.py::test_canonical_name_is_type_aware PASSED [  0%]
+2026-11-12T22:18:32.9647775Z tests/test_alias_disambiguation.py::test_surface_forms_never_leak_the_other_objects_aliases PASSED [  0%]
+2026-11-12T22:18:32.9666275Z tests/test_alias_disambiguation.py::test_two_groups_sharing_an_alias_are_never_merged PASSED [  0%]
+2026-11-12T22:18:32.9728524Z tests/test_alias_disambiguation.py::test_no_surface_form_silently_overwrites_another PASSED [  0%]
+2026-11-12T22:18:32.9747573Z tests/test_alias_disambiguation.py::test_empty_and_non_string_inputs_are_safe PASSED [  0%]
+2026-11-12T22:18:32.9766082Z tests/test_alias_disambiguation.py::test_unknown_names_pass_through PASSED [  0%]
+2026-11-12T22:18:32.9786177Z tests/test_alias_disambiguation.py::test_an_actor_is_not_renamed_after_a_malware PASSED [  0%]
+2026-11-12T22:18:32.9805010Z tests/test_alias_disambiguation.py::test_software_is_not_renamed_after_an_actor PASSED [  0%]
+2026-11-12T22:18:32.9823501Z tests/test_alias_disambiguation.py::test_malware_and_tool_stay_one_family PASSED [  0%]
+2026-11-12T22:18:32.9842993Z tests/test_alias_disambiguation.py::test_a_form_of_both_families_is_no_conflict PASSED [  0%]
+2026-11-12T22:18:32.9894528Z tests/test_alias_list_spaces_issue_393.py::test_a_no_break_space_joins_the_anchor_words PASSED [  0%]
+2026-11-12T22:18:32.9916286Z tests/test_alias_list_spaces_issue_393.py::test_a_line_break_ends_the_anchor_so_two_names_are_not_joined PASSED [  0%]
+2026-11-12T22:18:32.9937123Z tests/test_alias_list_spaces_issue_393.py::test_a_blank_line_still_ends_the_anchor PASSED [  0%]
+2026-11-12T22:18:32.9962121Z tests/test_alias_list_spaces_issue_393.py::test_a_no_break_space_inside_an_alias_is_normalised PASSED [  0%]
+2026-11-12T22:18:32.9987522Z tests/test_alias_list_spaces_issue_393.py::test_an_inline_alias_with_a_no_break_space_keeps_both_words PASSED [  0%]
+2026-11-12T22:18:33.0013633Z tests/test_alias_list_spaces_issue_393.py::test_every_emitted_name_has_single_spaces_only PASSED [  0%]
