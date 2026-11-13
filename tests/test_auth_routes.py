@@ -21,6 +21,12 @@ BASELINES = Path(__file__).parent / "fixtures" / "baselines"
 _TEXT = "APT29 deployed SUNBURST against SolarWinds targets and contacted 185.220.101.45 for command and control."
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 def _login(client, username: str, password: str = AUTH_TEST_PASSWORD):
     return client.post("/api/auth/login", json={"username": username, "password": password})
 

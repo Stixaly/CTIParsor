@@ -18,6 +18,12 @@ _REPORT = b"APT29 deployed SUNBURST and contacted 185.220.101.45 for C2.\n"
 _PAGE = "APT29 contacted 185.220.101.45 for command and control, then exfiltrated data."
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 @pytest.fixture()
 def client(temp_db_client):
     import api.main

@@ -28,6 +28,12 @@ FINAL_URL = "https://www.welivesecurity.com/2022/04/12/industroyer2-industroyer-
 TOKEN = "ctp_TESTTOKEN_0123456789abcdef"
 
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 class FakeStack:
     """Canned answers by (method, path); job details by id, one per poll (the last repeats)."""
 

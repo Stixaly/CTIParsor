@@ -77,6 +77,12 @@ _FULL_POLICY = {
 
 # ── The schema ────────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def _capture_direct_allowed(monkeypatch):
+    """The URL capture is refused without its egress proxy; these tests run it without one."""
+    monkeypatch.setenv("CTIPARSOR_CAPTURE_ALLOW_DIRECT", "1")
+
+
 def _operations() -> dict[tuple[str, str], dict]:
     found: dict[tuple[str, str], dict] = {}
     for path, item in api.main.app.openapi()["paths"].items():
