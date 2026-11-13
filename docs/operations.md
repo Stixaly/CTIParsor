@@ -447,6 +447,10 @@ of the filesystem, or below 2 GiB, for 10 minutes. Nothing here deletes data
 by itself, except `JOB_RETENTION_DAYS` if it is set. Find the largest items
 with the table in *Disk* above.
 
+The alert was checked on 2026-11-13 on a 4 GiB dedicated filesystem filled to
+1 GiB free: it held for its 10 minutes and cleared after the filler was removed
+([failure recipe run of 2026-11-13](releases/1.0-failure-recipe.md#run-of-2026-11-13-on-3c4fd6c-ops-qualification-710)).
+
 ### Backup too old
 
 `CtiparsorBackupTooOld`: the last successful backup is more than 26 hours old,

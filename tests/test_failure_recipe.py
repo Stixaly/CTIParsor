@@ -667,3 +667,150 @@ def test_the_archive_comparison_names_the_files_whose_live_bytes_differ(tmp_path
     world.live_bundle = b"abd"
     _, mismatches = cfr._compare_archive_files(FakeStack(world), archive)
     assert mismatches == ["output/bundle.json"]
+
+
+# ── the dedicated disk-test filesystem (issue #710) ───────────────────────────
+
+
+def _fake_statvfs(total: int, free: int):
+    class _St:
+        f_blocks = total // 4096
+        f_frsize = 4096
+        f_bavail = free // 4096
+
+    return lambda path: _St()
+
+
+def test_the_test_filesystem_must_be_a_mount_point_with_the_marker(tmp_path):
+    (tmp_path / cfr.DISK_TEST_MARKER).write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="not a mount point"):
+        cfr.validate_disk_test_fs(tmp_path, is_mount=lambda p: False, statvfs=_fake_statvfs(4 * GIB, GIB))
+    bare = tmp_path / "bare"
+    bare.mkdir()
+    with pytest.raises(ValueError, match="has no CTIPARSOR-DISK-TEST"):
+        cfr.validate_disk_test_fs(bare, is_mount=lambda p: True, statvfs=_fake_statvfs(4 * GIB, GIB))
+
+
+def test_the_test_filesystem_may_not_be_larger_than_eight_gib(tmp_path):
+    (tmp_path / cfr.DISK_TEST_MARKER).write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="at most 8 GiB"):
+        cfr.validate_disk_test_fs(tmp_path, is_mount=lambda p: True, statvfs=_fake_statvfs(64 * GIB, GIB))
+    total = cfr.validate_disk_test_fs(tmp_path, is_mount=lambda p: True, statvfs=_fake_statvfs(4 * GIB, GIB))
+    assert total == 4 * GIB
+
+
+def test_the_filler_leaves_less_free_than_the_alert_threshold():
+    assert cfr.DISK_TEST_LEAVE_FREE < cfr.DISK_ALERT_MIN_FREE
+
+
+def test_the_filler_writes_until_the_free_space_is_the_target_and_is_removed_on_exit(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfr, "FILLER_BLOCK", MIB)
+    disk = 10 * MIB
+
+    def free_of(path):
+        return disk - sum(f.stat().st_size for f in path.iterdir() if f.is_file())
+
+    with cfr.DiskFiller(tmp_path, 3 * MIB, free_of=free_of) as filler:
+        assert filler.written == 7 * MIB
+        assert (tmp_path / cfr.FILLER_NAME).stat().st_size == 7 * MIB
+    assert not (tmp_path / cfr.FILLER_NAME).exists()
+
+
+def test_the_filler_is_removed_when_the_block_raises(tmp_path, monkeypatch):
+    monkeypatch.setattr(cfr, "FILLER_BLOCK", MIB)
+
+    def free_of(path):
+        return 10 * MIB - sum(f.stat().st_size for f in path.iterdir() if f.is_file())
+
+    with pytest.raises(RuntimeError):
+        with cfr.DiskFiller(tmp_path, 3 * MIB, free_of=free_of):
+            raise RuntimeError("a check failed")
+    assert not (tmp_path / cfr.FILLER_NAME).exists()
+
+
+def test_a_timed_out_command_is_a_step_error_and_not_a_pass(monkeypatch):
+    def boom(argv, **kwargs):
+        raise cfr.subprocess.TimeoutExpired(argv, 1.0)
+
+    monkeypatch.setattr(cfr.subprocess, "run", boom)
+    stack = cfr.Stack("http://127.0.0.1:8000", ROOT / "compose.yaml", None)
+    with pytest.raises(cfr.StepError, match="timed out"):
+        stack._run(["docker", "compose", "ps"], timeout=1.0)
+
+
+class _FakeFiller:
+    """Stands in for DiskFiller: the filler is what makes the world's free space small."""
+
+    def __init__(self, world: World) -> None:
+        self.world = world
+        self.written = 1
+
+    def __enter__(self):
+        self.world.free = cfr.DISK_TEST_LEAVE_FREE
+        return self
+
+    def __exit__(self, *exc_info):
+        self.remove()
+
+    def remove(self) -> None:
+        self.world.free = 50 * GIB
+
+
+def _run_disk_case_on_fs(world: World, tmp_path: Path, monkeypatch, fs_total: int, fs: Path) -> cfr.CaseReport:
+    monkeypatch.setattr(cfr, "validate_disk_test_fs", lambda path: fs_total)
+    monkeypatch.setattr(cfr, "DiskFiller", lambda path, leave: _FakeFiller(world))
+    stack = FakeStack(world)
+    report = cfr.CaseReport("disk-nearly-full")
+    run = cfr.Run(stack, report, cfr.Options(wait_s=600.0, poll_s=5.0, disk_test_fs=fs), tmp_path,
+                  cfr.load_rules())
+    stack.current = report
+    try:
+        cfr.CASES["disk-nearly-full"](run)
+    except cfr.StepError as exc:  # as run_cases records it
+        report.error = str(exc)
+    finally:
+        stack.current = None
+        report.settle()
+    return report
+
+
+def test_disk_case_on_the_test_filesystem_passes_and_the_alert_clears(tmp_path, monkeypatch):
+    world = World()
+    world.total = 4 * GIB
+    world.free = 50 * GIB
+    report = _run_disk_case_on_fs(world, tmp_path, monkeypatch, 4 * GIB, tmp_path)
+    assert report.status == "passed", report.checks
+    checks = _checks(report)
+    assert checks["alert CtiparsorDiskNearlyFull back to normal after the cleanup"] == "pass"
+    alert_checks = [status for name, status in checks.items() if name.startswith("alert CtiparsorDiskNearlyFull (")]
+    assert alert_checks == ["pass"]
+    assert world.uploaded == 0
+    assert world.free == 50 * GIB  # the filler is gone
+
+
+def test_disk_case_fails_when_the_state_directory_is_another_filesystem(tmp_path, monkeypatch):
+    world = World()
+    world.total = 4 * GIB
+    report = _run_disk_case_on_fs(world, tmp_path, monkeypatch, 500 * GIB, tmp_path)
+    assert report.status == "failed"
+    assert _checks(report)["the state directory is the test filesystem"] == "fail"
+    assert world.uploaded == 0
+
+
+def test_the_filler_is_removed_and_the_case_is_an_error_when_a_step_breaks(tmp_path, monkeypatch):
+    world = World()
+    world.total = 4 * GIB
+
+    def broken(self, name, poll_s=5.0):
+        raise cfr.StepError("/metrics answered 500")
+
+    monkeypatch.setattr(cfr.Run, "hold_alert", broken)
+    report = _run_disk_case_on_fs(world, tmp_path, monkeypatch, 4 * GIB, tmp_path)
+    assert report.status == "error"
+    assert "/metrics answered 500" in report.error
+    assert world.free == 50 * GIB  # removed on the way out: a failed case leaves no filler
+
+
+def test_a_metric_absent_from_the_alert_is_not_a_pass():
+    series = cfr.parse_metrics("ctiparsor_database_up 1\n")
+    assert cfr.evaluate_rule(_rule("CtiparsorDiskNearlyFull"), series, 0.0).state != "true"
