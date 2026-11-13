@@ -160,6 +160,18 @@ does not.
   | 1 | Stage 5 refused the bundle; the file was not found; a stage named by `--require-stage` did not run; the database cannot be migrated | the folder does not exist; a file gave 1; the database cannot be migrated |
   | 2 | usage error: a wrong argument, an unknown or mandatory stage id, a `STIX_TLP` value that is refused | the same |
 
+- **The bundle names of a batch** (`--input-dir`, `--output-dir`). Every
+  file gets `{stem}_bundle.json` in the output folder. A file whose stem
+  another file of the batch shares, ignoring case, keeps its extension in
+  the name (`report_md`, `report_txt`). A name that another file of the batch
+  already takes gets `_2`, `_3`, and so on. A name that does not collide does
+  not change. The planned names are printed before the first file runs. A
+  bundle that Stage 5 refuses is written as `{stem}_bundle_invalid.json`, and
+  the summary prints the path each file wrote, or `aucun fichier écrit`.
+  A bundle already in the output folder under a name this batch plans is
+  replaced by the run; no other file of the folder is touched. A single file
+  with `--output` keeps the path it is given.
+
 - **`make db-upgrade`**, the PostgreSQL major upgrade of
   [upgrading.md](upgrading.md) §7.
 
