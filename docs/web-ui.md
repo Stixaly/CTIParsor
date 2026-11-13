@@ -223,6 +223,8 @@ Custom **d3-force SVG graph** (not the OASIS stix-visualization iframe):
 | **Review view** | The stored rows the analyst edits, each marked with its fate in the bundle; a link's panel jumps to it in the bundle view |
 | **Auto-rebuild** | Every link edit schedules a quick finalize (4 s debounce), as on the Review page |
 
+**Reader (read-only, #807):** a reader opens the graph in both views, with its filters, the **Differences** and **Against your bundle** panels and **Download STIX**. The **Edit links** button and the relationship editor are not shown, and no **Rebuild** or **Build it now** button is shown either: linking and rebuilding the bundle are analyst writes, and the server refuses them with 403. A notice that the bundle is out of date, or was never built, stays, without its button.
+
 ## Policy page
 
 Reached from the **Policy** entry in the sidebar (`/policy`) — a global setting,

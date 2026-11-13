@@ -44,6 +44,7 @@ import {
   ReviewEdgeDetail, makeLabelOf,
 } from '../components/graph/BundlePanels'
 import { BaselinePanel } from '../components/graph/BaselinePanel'
+import { useCanWrite } from '../context/AuthContext'
 
 // ── Deduped relationship-type list for <select> ───────────────────────────────
 
@@ -829,6 +830,9 @@ export default function Graph() {
   const navigate   = useNavigate()
   const qc         = useQueryClient()
   const canvasRef  = useRef<GraphCanvasHandle>(null)
+  // A reader sees the graph read-only: linking, deciding and rebuilding are
+  // analyst writes (api/auth.ts `canWrite`), and the server refuses them (403).
+  const readOnly   = !useCanWrite()
 
   // ── Data fetching ──────────────────────────────────────────────────────────
 
@@ -909,7 +913,8 @@ export default function Graph() {
   }, [])
 
   // Right panel: an explicit panel (editor, differences) wins over selection.
-  const rightPanel = editMode ? 'editor' : diffOpen && bundleData ? 'diff' : baselineOpen && bundleData ? 'baseline'
+  const editing = editMode && !readOnly
+  const rightPanel = editing ? 'editor' : diffOpen && bundleData ? 'diff' : baselineOpen && bundleData ? 'baseline'
                    : selectedEdge ? 'edge' : selectedId ? 'detail' : null
   const selectedNode = selectedId ? byId.get(selectedId) ?? null : null
   const selectedEdgeObj = selectedEdge ? edges.find(e => e.id === selectedEdge) ?? null : null
@@ -983,6 +988,8 @@ export default function Graph() {
   // the bundle view and Download must not serve a bundle that ignores them.
 
   const finalize = useDebouncedFinalize(jobId)
+  // A rebuild is an analyst's write: a reader's click on it sends nothing.
+  const rebuild = () => { if (!readOnly) void finalize.rebuild() }
 
   // ── Relationship mutations ─────────────────────────────────────────────────
 
@@ -1104,13 +1111,15 @@ export default function Graph() {
         <button onClick={() => navigate(`/review/${jobId}`)} className="btn-ghost" title="Review">
           <Eye size={13} /> <span className="gc-label">Review</span>
         </button>
-        <button
-          onClick={() => { setEditMode(v => !v); setDiffOpen(false); setBaselineOpen(false); if (selectedId) setSelectedId(null); setSelectedEdge(null) }}
-          className={editMode ? 'btn-primary' : 'btn-ghost'}
-          title="Edit links"
-        >
-          <Link2 size={13} /> <span className="gc-label">Edit links</span>
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => { setEditMode(v => !v); setDiffOpen(false); setBaselineOpen(false); if (selectedId) setSelectedId(null); setSelectedEdge(null) }}
+            className={editing ? 'btn-primary' : 'btn-ghost'}
+            title="Edit links"
+          >
+            <Link2 size={13} /> <span className="gc-label">Edit links</span>
+          </button>
+        )}
         <button onClick={handleDownload} className="btn-ghost" title="Download STIX">
           <Download size={13} /> <span className="gc-label">Download STIX</span>
         </button>
@@ -1152,17 +1161,21 @@ export default function Graph() {
             <RailNote tone="warn">
               This bundle was built before provenance tracking: links are classified from their own
               properties only, and nothing the build dropped can be shown.
-              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
-                <RefreshCw size={11} /> Rebuild the bundle
-              </button>
+              {!readOnly && (
+                <button onClick={rebuild} disabled={finalize.running} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
+                  <RefreshCw size={11} /> Rebuild the bundle
+                </button>
+              )}
             </RailNote>
           )}
           {mode === 'bundle' && staleCount > 0 && !finalize.running && (
             <RailNote tone="warn">
               The stored bundle predates {staleCount} review change{staleCount > 1 ? 's' : ''}.
-              <button onClick={() => void finalize.rebuild()} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
-                <RefreshCw size={11} /> Rebuild now
-              </button>
+              {!readOnly && (
+                <button onClick={rebuild} className="btn-ghost" style={{ marginTop: 6, fontSize: 11 }}>
+                  <RefreshCw size={11} /> Rebuild now
+                </button>
+              )}
             </RailNote>
           )}
           {mode === 'bundle' && ghostCount + droppedCount > 0 && (
@@ -1231,17 +1244,21 @@ export default function Graph() {
                 {bundleRefused.errors.length > 3 && <li>… and {bundleRefused.errors.length - 3} more</li>}
               </ul>
               <p style={{ margin: 0, fontSize: 11 }}>A rebuild that passes replaces it.</p>
-              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
-                <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Rebuild the bundle'}
-              </button>
+              {!readOnly && (
+                <button onClick={rebuild} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
+                  <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Rebuild the bundle'}
+                </button>
+              )}
             </div>
           ) : noBundle ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8 }}>
               <Network size={40} style={{ opacity: 0.3 }} />
               <p style={{ margin: 0, fontSize: 13 }}>No STIX bundle has been built for this report yet</p>
-              <button onClick={() => void finalize.rebuild()} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
-                <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Build it now'}
-              </button>
+              {!readOnly && (
+                <button onClick={rebuild} disabled={finalize.running} className="btn-primary" style={{ fontSize: 12 }}>
+                  <RefreshCw size={12} /> {finalize.running ? 'Building…' : 'Build it now'}
+                </button>
+              )}
             </div>
           ) : nodes.length === 0 ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8 }}>
@@ -1402,7 +1419,7 @@ export default function Graph() {
                 onPickEdge={pickEdge}
               />
             )}
-            {rightPanel === 'editor' && (
+            {rightPanel === 'editor' && !readOnly && (
               <RelEditor
                 jobId={jobId!}
                 nodes={review.nodes}
@@ -1414,11 +1431,12 @@ export default function Graph() {
                 labelOf={labelOf}
                 onClose={() => setEditMode(false)}
                 onPick={pickEntity}
-                onAccept={id => updateRelMut.mutate({ id, patch: { accepted: true } })}
-                onReject={id => updateRelMut.mutate({ id, patch: { accepted: false } })}
-                onReset={id  => updateRelMut.mutate({ id, patch: { accepted: null } })}
-                onDelete={id => { setDeleteError(null); deleteRelMut.mutate(id) }}
-                onCreate={(srcValue, tgtValue, rel, evidence) =>
+                onAccept={id => { if (readOnly) return; updateRelMut.mutate({ id, patch: { accepted: true } }) }}
+                onReject={id => { if (readOnly) return; updateRelMut.mutate({ id, patch: { accepted: false } }) }}
+                onReset={id  => { if (readOnly) return; updateRelMut.mutate({ id, patch: { accepted: null } }) }}
+                onDelete={id => { if (readOnly) return; setDeleteError(null); deleteRelMut.mutate(id) }}
+                onCreate={(srcValue, tgtValue, rel, evidence) => {
+                  if (readOnly) return
                   createRelMut.mutate({
                     source_value: srcValue,
                     relationship_type: rel,
@@ -1426,8 +1444,9 @@ export default function Graph() {
                     confidence: 1.0,
                     evidence_text: evidence || null,
                   })
-                }
+                }}
                 onAddEntity={async (value, entity_type) => {
+                  if (readOnly) return
                   // Pass source: 'manual' so MarginaliaCard and the Review page
                   // display the correct source badge instead of a blank/undefined.
                   await createEntity(jobId!, { value, entity_type, confidence: 1.0, source: 'manual', context: '' })
@@ -1443,7 +1462,7 @@ export default function Graph() {
         )}
 
         {/* Collapsed detail tab (shows when node selected but right panel is editor) */}
-        {editMode && selectedId && (
+        {editing && selectedId && (
           <button
             onClick={() => { setEditMode(false) }}
             title="Show node detail"
