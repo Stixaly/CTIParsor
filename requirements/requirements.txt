@@ -9,6 +9,7 @@
 pdfplumber>=0.11.0           # PDF text extraction + scan detection
 python-docx>=1.1.0           # Word (.docx) parsing
 beautifulsoup4>=4.12.0       # HTML parsing
+soupsieve>=4.0               # CSS selectors of beautifulsoup4; 4.0 fixes CVE-2026-126190
 defusedxml>=0.7.1            # Hardened XML parsing for docx/xml metadata (untrusted input)
 
 # ── IoC extraction ────────────────────────────────────────────────────────────
