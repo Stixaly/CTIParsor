@@ -29,7 +29,7 @@ from api.response_models.jobs import (
     StatusResult,
 )
 from api.routes._common import require_job, storable_text
-from api.worker import BundleInvalidError, FinalizeOvertaken, re_run_final_stages
+from api.worker import BundleInvalidError, FinalizeOvertaken, FinalizeRefused, re_run_final_stages
 from pipeline.env_flags import env_int
 from pipeline.orchestrator import STAGE_LABELS
 
@@ -460,8 +460,16 @@ def update_job_status(job_id: str, patch: StatusPatch):
     return {"status": patch.status}
 
 
+_FINALIZE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {"description": "No such job (also when it is deleted while it is rebuilt)."},
+    409: {"description": "Stage 5's STIX 2.1 schemas refused the bundle (`detail` is "
+                         "{\"validation\": \"invalid\", \"errors\": [...]}), or the job is uploaded, queued "
+                         "or processing (`detail` is a text: finalize waits for the worker)."},
+}
+
+
 @router.post("/{job_id}/finalize", response_model=FinalizeResult, response_model_exclude_unset=True,
-             responses=_BUNDLE_REFUSED)
+             responses=_FINALIZE_RESPONSES)
 def finalize_job(job_id: str, quick: bool = False):
     """
     Re-run Stages 4+5 and regenerate the STIX bundle.
@@ -479,6 +487,11 @@ def finalize_job(job_id: str, quick: bool = False):
     job is not completed (one that was goes back to for_review) and the
     response lists the first errors.  The response of a success carries the
     bundle's `validation`: validated, unverified (schemas missing) or unknown.
+
+    409 too for a job that is uploaded, queued or processing (#757): the worker
+    owns it, so nothing is rebuilt, published or written.  404 when the job is
+    deleted, before or during the rebuild; 500 is a rebuild that failed while the
+    job exists.
     """
     with get_conn() as conn:
         require_job(conn, job_id)
@@ -490,7 +503,12 @@ def finalize_job(job_id: str, quick: bool = False):
     except FinalizeOvertaken as exc:
         raise HTTPException(409, "Review decisions changed during every rebuild; finalize again "
                                  "once the review settles") from exc
+    except FinalizeRefused as exc:
+        raise HTTPException(409, f"Cannot finalize a job that is {exc.status!r}: wait until its run "
+                                 "has finished") from exc
     if bundle_json is None:
+        with get_conn() as conn:
+            require_job(conn, job_id)          # deleted meanwhile: 404, not a failed rebuild
         raise HTTPException(500, "Finalize failed — check server logs")
 
     with get_conn() as conn:

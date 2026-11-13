@@ -240,7 +240,7 @@ def test_a_build_from_newer_rows_replaces_the_stored_one(db, monkeypatch):
     assert worker.bundle_output_path("j1", "APT_report").read_text(encoding="utf-8") == row["bundle_json"]
 
 
-def test_a_job_deleted_while_it_is_built_is_not_an_error(db, monkeypatch):
+def test_a_job_deleted_while_it_is_built_gives_none_and_stores_nothing(db, monkeypatch):
     from api.routes.jobs import _delete_job
 
     _stage5(monkeypatch)
@@ -257,7 +257,9 @@ def test_a_job_deleted_while_it_is_built_is_not_an_error(db, monkeypatch):
     slow.join(60)
 
     assert not slow.is_alive() and not errors
-    assert isinstance(a[0], str)                                      # nothing stored, nothing raised
+    assert a[0] is None                  # (#757) no bundle is returned for a job that is gone: the API answers 404
+    with db.get_conn() as conn:          # nothing stored: the job row is gone, nothing was written back
+        assert conn.execute("SELECT 1 FROM jobs WHERE id='j1'").fetchone() is None
     assert list(output_dir().glob("*j1*")) == []                      # and no orphan export file
 
 
