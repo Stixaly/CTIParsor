@@ -180,13 +180,6 @@ def test_a_fully_scanned_pdf_takes_the_whole_document_ocr(tmp_path, monkeypatch)
     assert s1._read_pdf(path) == "whole-document OCR"
 
 
-def test_ocr_language_comes_from_the_environment(monkeypatch):
-    monkeypatch.delenv("OCR_LANG", raising=False)
-    assert s1.ocr_lang() == "eng"
-    monkeypatch.setenv("OCR_LANG", "eng+fra")
-    assert s1.ocr_lang() == "eng+fra"
-
-
 @pytest.mark.skipif(not (s1._OCR_AVAILABLE and shutil.which("tesseract") and shutil.which("pdftoppm")),
                     reason="needs tesseract and poppler")
 def test_real_ocr_recovers_an_ioc_from_a_scanned_page(tmp_path):

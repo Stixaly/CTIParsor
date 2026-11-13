@@ -672,3 +672,26 @@ def test_a_second_provider_that_gives_no_answer_leaves_the_primary_result_alone(
                                                                        else mock_llm_response)
     disagreed = run_document(Document(text=sample_cti_text), replace(_opts(), consensus=True))
     assert [c for _s, _t, c, _l in _rels(disagreed)] < [c for _s, _t, c, _l in _rels(base)]
+
+
+def test_the_stage_1_record_counts_the_pages_read_by_ocr(mock_llm, sample_cti_text, tmp_path, monkeypatch):
+    from pipeline import stage1_ingestion as s1
+
+    def scanned(file_path):
+        s1._note_page("eng+fra", None)                 # what _ocr_page records per page
+        s1._note_page("eng+fra", None)
+        return sample_cti_text
+
+    monkeypatch.setattr(s1, "ingest", scanned)
+    source = tmp_path / "scan.txt"
+    source.write_text(sample_cti_text, encoding="utf-8")
+    result = run_document(
+        Document(file_path=str(source), original_filename="scan.txt", output_path=str(tmp_path / "b.json")),
+        _opts(),
+    )
+    assert result.outcome("1").details == {"ocr": {"pages": 2, "languages": {"eng+fra": 2}}}
+
+
+def test_a_text_without_ocr_has_no_ocr_record(mock_llm, sample_cti_text):
+    result = run_document(Document(text=sample_cti_text), _opts())
+    assert result.outcome("1").details == {}

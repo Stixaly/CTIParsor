@@ -10,9 +10,12 @@ text into overlapping chunks for Stage 3 (chunk_text()).
 import logging
 import os
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import defusedxml.ElementTree as ET
 import docx
@@ -366,7 +369,7 @@ def _read_pdf_ocr(path: Path) -> str:
         try:
             for page, img in enumerate(images, start):
                 try:
-                    pages_text.append(pytesseract.image_to_string(img, lang=ocr_lang()))
+                    pages_text.append(pytesseract.image_to_string(img, lang=ocr_page_lang(img)))
                 except Exception as e:
                     logger.warning(f"OCR failed on page {page} of {path.name}: {e}")
         finally:
@@ -377,9 +380,194 @@ def _read_pdf_ocr(path: Path) -> str:
     return "\n".join(t for t in pages_text if t.strip())
 
 
+# OCR_LANG=auto: each scanned page is read in the languages of the script that
+# Tesseract's orientation and script detection (OSD) finds on that page.
+OCR_LANG_AUTO = "auto"
+
+# What a scanned page is read with when OCR_LANG is unset or blank: auto.  On the
+# English pages measured for this default, the Latin set read English within
+# 0.0006 character error rate of "eng"; the speed cost is in docs/configuration.md.
+OCR_LANG_DEFAULT = OCR_LANG_AUTO
+
+# The languages a Latin-script page is read in.  Also the set for a page whose
+# script is not in _OCR_SCRIPT_LANGS, whose OSD fails, or whose script
+# confidence is below _OSD_MIN_SCRIPT_CONFIDENCE.
+_OCR_LATIN_LANGS = "eng+fra+spa+por+deu+ita+pol+tur+vie+ind"
+
+# Languages per script name as Tesseract's OSD writes it.
+_OCR_SCRIPT_LANGS = {
+    "Latin": _OCR_LATIN_LANGS,
+    "Cyrillic": "rus+ukr",
+    "Han": "chi_sim+chi_tra",
+    "Japanese": "jpn",
+    "Hangul": "kor",
+    "Arabic": "ara+fas+urd",
+    "Devanagari": "hin",
+    "Bengali": "ben",
+    "Hebrew": "heb",
+    "Thai": "tha",
+}
+
+# OSD script confidence below which the script is not trusted.
+_OSD_MIN_SCRIPT_CONFIDENCE = 1.0
+
+# OCR_LANG as requested, mapped to the languages Tesseract has data for.
+_ocr_langs_in_use: dict[str, str] = {}
+
+# The languages Tesseract has data for, listed once ("installed") or the error
+# of the listing ("error").
+_installed_cache: dict[str, Any] = {}
+
+# Per-document OCR record, set while ingest() runs (see ocr_summary()).
+_ocr_summary: ContextVar[dict[str, Any] | None] = ContextVar("stage1_ocr_summary", default=None)
+
+
+def _ocr_setting() -> str:
+    """OCR_LANG as written, or OCR_LANG_DEFAULT when it is unset or blank."""
+    return (os.getenv("OCR_LANG") or "").strip() or OCR_LANG_DEFAULT
+
+
 def ocr_lang() -> str:
-    """Tesseract language(s), e.g. "eng" or "eng+fra" (OCR_LANG; default eng)."""
-    return (os.getenv("OCR_LANG") or "eng").strip() or "eng"
+    """Tesseract language(s) for a scanned page, e.g. "eng" or "eng+fra": OCR_LANG,
+    or OCR_LANG_DEFAULT when it is unset or blank.  With OCR_LANG=auto the value
+    is "auto", and each page's languages come from ocr_page_lang().  Languages
+    that Tesseract has no data for are left out (see _resolve_ocr_lang)."""
+    requested = _ocr_setting()
+    if requested == OCR_LANG_AUTO:
+        return OCR_LANG_AUTO
+    if requested not in _ocr_langs_in_use:
+        _ocr_langs_in_use[requested] = _resolve_ocr_lang(requested, f"OCR_LANG={requested}")
+    return _ocr_langs_in_use[requested]
+
+
+def _installed_languages() -> frozenset[str] | None:
+    """The Tesseract languages with data, listed once; None when they cannot be listed."""
+    if "installed" not in _installed_cache:
+        try:
+            _installed_cache["installed"] = frozenset(pytesseract.get_languages(config=""))
+        except Exception as exc:
+            _installed_cache["error"] = f"{type(exc).__name__}: {exc}"
+            return None
+    return _installed_cache["installed"]
+
+
+def _resolve_ocr_lang(requested: str, label: str) -> str:
+    """The requested languages that Tesseract has installed, joined with "+".
+
+    `label` names the setting in the warning (e.g. "OCR_LANG=eng+fra").  One
+    warning names the languages left out.  When none is installed, or the
+    installed list cannot be read, the setting is returned unchanged: each
+    page's OCR then fails and logs its own warning, as before."""
+    if not _OCR_AVAILABLE:
+        return requested
+    installed = _installed_languages()
+    if installed is None:
+        logger.warning(f"[Stage 1] could not list the Tesseract languages "
+                       f"({_installed_cache['error']}); {label} is used as set")
+        return requested
+    wanted = [lang for lang in requested.split("+") if lang]
+    usable = [lang for lang in wanted if lang in installed]
+    missing = [lang for lang in wanted if lang not in installed]
+    if not missing:
+        return requested
+    if not usable:
+        logger.warning(f"[Stage 1] {label}: Tesseract has no data for any of these "
+                       f"languages ({', '.join(missing)}); scanned pages will fail to OCR. "
+                       f"Install the tesseract-ocr-<lang> packages.")
+        return requested
+    logger.warning(f"[Stage 1] {label}: Tesseract has no data for "
+                   f"{', '.join(missing)}; scanned pages are read in {'+'.join(usable)}. "
+                   f"Install the tesseract-ocr-<lang> packages for the missing languages.")
+    return "+".join(usable)
+
+
+def _page_script(img: Any) -> tuple[str, float]:
+    """The script and its confidence that Tesseract's OSD finds on one page image.
+
+    ("", 0.0) when OSD fails (it does on a page with little text) or its output
+    has no script line."""
+    try:
+        osd = pytesseract.image_to_osd(img)
+    except Exception as exc:
+        logger.debug(f"[Stage 1] OSD found no script on a page: {type(exc).__name__}: {exc}")
+        return "", 0.0
+    fields: dict[str, str] = {}
+    for line in osd.splitlines():
+        key, sep, value = line.partition(":")
+        if sep:
+            fields[key.strip()] = value.strip()
+    try:
+        return fields.get("Script", ""), float(fields.get("Script confidence", "0"))
+    except ValueError:
+        return "", 0.0
+
+
+def _languages_for_script(script: str, confidence: float) -> tuple[str, str]:
+    """(script to report, languages to read the page with) for an OSD answer."""
+    if not script or confidence < _OSD_MIN_SCRIPT_CONFIDENCE:
+        return "unknown", _OCR_LATIN_LANGS
+    return script, _OCR_SCRIPT_LANGS.get(script, _OCR_LATIN_LANGS)
+
+
+def _auto_langs(script: str, langs: str) -> str:
+    """The languages of one script, filtered by the installed ones.  A script
+    with no installed language is read in the Latin set (one warning)."""
+    key = f"{OCR_LANG_AUTO}:{script}"
+    if key not in _ocr_langs_in_use:
+        label = f"OCR_LANG=auto, {script} pages"
+        installed = _installed_languages() if _OCR_AVAILABLE else None
+        if langs != _OCR_LATIN_LANGS and installed is not None \
+                and not set(langs.split("+")) & installed:
+            logger.warning(f"[Stage 1] {label}: Tesseract has no data for {langs}; "
+                           f"these pages are read in the Latin set")
+            langs = _OCR_LATIN_LANGS
+            label = "OCR_LANG=auto, Latin set"
+        _ocr_langs_in_use[key] = _resolve_ocr_lang(langs, label)
+    return _ocr_langs_in_use[key]
+
+
+def _count(counts: dict[str, int], key: str) -> None:
+    counts[key] = counts.get(key, 0) + 1
+
+
+def _note_page(langs: str, script: str | None) -> None:
+    """Adds one OCR'd page to the document's record, when one is collecting."""
+    summary = _ocr_summary.get()
+    if summary is None:
+        return
+    summary["pages"] = summary.get("pages", 0) + 1
+    _count(summary.setdefault("languages", {}), langs)
+    if script is not None:
+        _count(summary.setdefault("scripts", {}), script)
+
+
+def ocr_page_lang(img: Any) -> str:
+    """The languages one page image is read with.
+
+    ocr_lang() for an explicit OCR_LANG; with OCR_LANG=auto, the languages of
+    the script that OSD finds on the page (see _languages_for_script)."""
+    if _ocr_setting() != OCR_LANG_AUTO:
+        langs = ocr_lang()
+        _note_page(langs, None)
+        return langs
+    script, langs = _languages_for_script(*_page_script(img))
+    read_with = _auto_langs(script, langs)
+    _note_page(read_with, script)
+    return read_with
+
+
+@contextmanager
+def ocr_summary() -> Iterator[dict[str, Any]]:
+    """Collects, for the document read inside the block, the pages OCR'd, the
+    languages each page was read with and, with OCR_LANG=auto, the scripts found.
+    The dict stays empty when no page was OCR'd.  It holds counts only, never
+    page text."""
+    summary: dict[str, Any] = {}
+    token = _ocr_summary.set(summary)
+    try:
+        yield summary
+    finally:
+        _ocr_summary.reset(token)
 
 
 # A page is read as a scan when it carries almost no text and an image covers
@@ -434,7 +622,7 @@ def _ocr_page(path: Path, page_number: int) -> str:
         logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
         return ""
     try:
-        return "\n".join(pytesseract.image_to_string(img, lang=ocr_lang()) for img in images)
+        return "\n".join(pytesseract.image_to_string(img, lang=ocr_page_lang(img)) for img in images)
     except Exception as e:
         logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
         return ""

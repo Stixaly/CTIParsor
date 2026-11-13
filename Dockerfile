@@ -82,12 +82,25 @@ ENV PYTHONUNBUFFERED=1 \
 # library — verified via ldd, it links only libstdc++/libgcc_s, both already
 # present in this base image (ADR-0049);
 # tini reaps the Chromium and pipeline subprocesses.
+# The Tesseract language packs.  tesseract-ocr itself holds English and the OSD
+# (script detection) data.  The others are read when OCR_LANG names them, or
+# when OCR_LANG=auto picks them from a page's script (pipeline/stage1_ingestion.py).
+# Packs, bookworm names: French, Ukrainian, Polish, Russian (the first set);
+# Chinese simplified and traditional, Hindi, Spanish, Arabic, Bengali,
+# Portuguese, Urdu, Indonesian, German, Japanese, Korean, Turkish, Vietnamese,
+# Italian, Persian, Hebrew, Thai.
 # `apt-get upgrade` first (ADR-0078): the base image is pinned by digest, so
 # the Debian security updates published since it was built (libpcre2, Grype
 # 2026-10-04) reach this image only here, not when Dependabot next bumps it.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         ca-certificates git tini tesseract-ocr poppler-utils \
+        tesseract-ocr-fra tesseract-ocr-ukr tesseract-ocr-pol tesseract-ocr-rus \
+        tesseract-ocr-chi-sim tesseract-ocr-chi-tra tesseract-ocr-hin \
+        tesseract-ocr-spa tesseract-ocr-ara tesseract-ocr-ben tesseract-ocr-por \
+        tesseract-ocr-urd tesseract-ocr-ind tesseract-ocr-deu tesseract-ocr-jpn \
+        tesseract-ocr-kor tesseract-ocr-tur tesseract-ocr-vie tesseract-ocr-ita \
+        tesseract-ocr-fas tesseract-ocr-heb tesseract-ocr-tha \
         libxml2 libxslt1.1 libmagic1 \
     && rm -rf /var/lib/apt/lists/*
 

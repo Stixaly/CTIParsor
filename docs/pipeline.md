@@ -466,8 +466,11 @@ Named entities at chunk boundaries appear in both adjacent chunks. De-duplicated
 
 Two more Stage 1 limits. A `.docx` whose parts would inflate past 512 MiB is refused
 before it is parsed (`_check_docx_size`, `pipeline/stage1_ingestion.py`). OCR
-runs in batches of ten pages: a Tesseract failure on one page is logged and costs only
-that page, and a batch that cannot be rendered is logged and skipped whole
+reads each page in the languages of `OCR_LANG`: by default `auto`, where Tesseract's
+script detection on the page picks the languages of its script, and otherwise the
+values written there (see [configuration.md](configuration.md#ocr)). It runs in
+batches of ten pages: a
+Tesseract failure on one page is logged and costs only that page, and a batch that cannot be rendered is logged and skipped whole
 (`pipeline/stage1_ingestion.py`).
 
 ### 3. Hallucination filter (Stage 3b)
