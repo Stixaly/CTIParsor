@@ -85,7 +85,7 @@ Two ways to use it:
   not just its ATT&CK tags, ranked with the evidence behind each rank, and
   exported as a ZIP of exactly the rules you selected.
 - **Self-hosted and offline-capable** — one hardened Docker Compose stack
-  (API, workers, PostgreSQL), local LLMs (vLLM is the one measured; Ollama and
+  (API, workers, PostgreSQL), local LLMs (vLLM serving Qwen3.8-27B is the 1.0 qualified configuration, ADR-0100; Ollama and
   LM Studio are wired and not measured), and an air-gapped install bundle
   (experimental).
 
@@ -611,12 +611,17 @@ All configuration lives in `.env`, which `setup.sh` creates from
 
 | Provider | `LLM_PROVIDER` | Settings | Runs locally |
 |---|---|---|---|
-| Anthropic (default) | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | |
+| Anthropic (default; not qualified for 1.0) | `anthropic` | `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | |
 | Google Gemini | `gemini` | `GEMINI_API_KEY`, `GEMINI_MODEL` | |
 | Mistral AI | `mistral` | `MISTRAL_API_KEY`, `MISTRAL_MODEL` | |
 | Ollama | `ollama` | `OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_API_KEY` (if the server needs a key) | ✅ (`--profile ollama`) |
-| vLLM | `vllm` | `VLLM_BASE_URL`, `VLLM_MODEL`, `VLLM_API_KEY` (if the server needs a key) | ✅ |
+| vLLM (qualified for 1.0) | `vllm` | `VLLM_BASE_URL`, `VLLM_MODEL`, `VLLM_API_KEY` (if the server needs a key) | ✅ |
 | LM Studio | `lmstudio` | `LMSTUDIO_BASE_URL`, `LMSTUDIO_MODEL`, `LMSTUDIO_API_KEY` (if the server needs a key) | ✅ |
+
+The configuration qualified for 1.0 is a local vLLM serving
+`Inferact/Qwen3.8-27B-NVFP4`, with figures read through the same server
+([settings](docs/configuration.md#qualified-for-10)). Anthropic is supported as an
+option and is not qualified for 1.0 ([ADR-0100](docs/adr/0100-a-local-vllm-is-the-1-0-llm-configuration.md)).
 
 With no provider configured (`ANTHROPIC_API_KEY` left empty, as
 `.env.example` ships it), Stage 3 is skipped and the pipeline still produces a
