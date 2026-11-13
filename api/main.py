@@ -1,3 +1,5 @@
+"""The FastAPI application (`app`): its lifespan, its middlewares and exception handlers, the routers under /api,
+/api/health, and the built web UI mounted at the root when the frontend has been built."""
 import json
 import math
 import os
@@ -153,6 +155,8 @@ app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded):
+    """Answer a rate-limited request with 429 and a Retry-After header: the window of the limit that was hit, or 60
+    seconds when it is unknown."""
     try:
         wait = int(exc.limit.limit.get_expiry()) if exc.limit else 60     # the window of the limit that was hit
     except (AttributeError, TypeError, ValueError):
@@ -181,6 +185,8 @@ async def request_validation_handler(request: Request, exc: RequestValidationErr
     # JSON encoder refuses NaN and Infinity: a body with one of them would answer 500.
     # ensure_ascii: `input` can hold a lone surrogate (a `\ud800` escape in the
     # body), which Starlette's UTF-8 rendering cannot encode.
+    """Answer a request that fails validation with 422 and the list of its errors. Non-finite numbers are written as
+    text, so the answer can always be encoded."""
     return Response(
         status_code=422,
         content=json.dumps(
@@ -374,6 +380,8 @@ def health():
 
 class _SPAStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):  # type: ignore[override]
+        """Serve a static file. A path outside /api that is not found gets the single-page app's index.html instead of
+        a 404."""
         try:
             return await super().get_response(path, scope)
         except StarletteHTTPException as exc:
@@ -393,6 +401,7 @@ else:
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def frontend_not_built():
+        """Answer the root page with a short notice, for when the frontend has not been built."""
         return HTMLResponse("""
         <html><body style="font-family:monospace;padding:2rem;background:#0f172a;color:#94a3b8">
         <h2 style="color:#f8fafc">CTI → STIX API is running ✓</h2>

@@ -112,6 +112,9 @@ def _print_table(stats: list[DocStat]) -> None:
         f"{'NAME':<44}  {'KIND':<5}  {'PAGES':<5}  {'CHARS':<8}  {'IMGS':<5}  "
         f"{'FIG':<4}  {'BAN':<4}  {'ICO':<4}  {'FIG%PAGE':<9}  {'PRE':<4}  {'TBL':<4}"
     )
+    # One row per document. A document that failed to read prints its error in place of the
+    # numbers and is left out of the totals. FIG% is the summed area of the figure images,
+    # as a share of the page count.
     print(header)
     print("-" * len(header))
 

@@ -58,6 +58,7 @@ class Family:
     samples: list[tuple[dict[str, str], float]] = field(default_factory=list)
 
     def add(self, value: float, **labels: str) -> None:
+        """Add one sample to the metric: its value and its labels."""
         self.samples.append((labels, value))
 
 

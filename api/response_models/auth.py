@@ -7,6 +7,7 @@ from api.response_models import Response
 
 
 class Me(Response):
+    """The signed-in account and the authentication mode, as GET /api/auth/me returns them."""
     auth_mode: str = Field(description="AUTH_MODE: off, local, oidc or both.")
     username: str | None = Field(description="None when authentication is off.")
     display_name: str | None
@@ -19,10 +20,12 @@ class Me(Response):
 
 
 class SignedOut(Response):
+    """Result of signing out."""
     signed_out: bool
 
 
 class SignInMethods(Response):
+    """The sign-in methods the server offers, so that the login page can show them."""
     auth_mode: str = Field(description="AUTH_MODE: off, local, oidc or both.")
     local: bool = Field(description="A username and password form signs a user in.")
     oidc: bool = Field(description="Sign-in through the organisation's identity provider is on.")

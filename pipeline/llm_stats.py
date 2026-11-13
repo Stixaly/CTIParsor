@@ -29,6 +29,7 @@ _local = threading.local()
 
 
 def bump(key: str, n: int = 1) -> None:
+    """Add n to the counter named key. Safe to call from several threads."""
     with _lock:
         _stats[key] = _stats.get(key, 0) + n
 
@@ -67,6 +68,7 @@ def last_call_at_ceiling() -> bool:
 
 
 def snapshot() -> dict[str, Any]:
+    """A copy of all the counters, taken under the lock."""
     with _lock:
         return dict(_stats)
 

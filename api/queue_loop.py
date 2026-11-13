@@ -326,18 +326,22 @@ class WorkerLoop:
 
     @property
     def running_ids(self) -> list[str]:
+        """The ids of the jobs that this loop runs now."""
         with self._lock:
             return list(self._handles.keys())
 
     @property
     def running_count(self) -> int:
+        """The number of jobs that this loop runs now."""
         with self._lock:
             return len(self._handles)
 
     def has_slot(self) -> bool:
+        """True when the loop may start another job: there is no limit, or fewer jobs run than max_concurrent."""
         return self.max_concurrent <= 0 or self.running_count < self.max_concurrent
 
     def kick(self) -> int:
+        """Start queued jobs while slots are free, one at a time, and return how many were started."""
         with self._kick_lock:
             return self._kick_locked()
 
@@ -398,6 +402,8 @@ class WorkerLoop:
         forget_worker(self.worker_id)
 
     def heartbeat_if_due(self, now: float | None = None) -> bool:
+        """Send the heartbeat for the jobs this loop runs when its period has passed or the last stamp failed. Return
+        True when it sent one."""
         now = now or time.monotonic()
         # Retry on the next tick while the last stamp failed: a transient DB
         # error must not silence the liveness refresh for a whole period.
@@ -440,6 +446,8 @@ class WorkerLoop:
         # the container unhealthy a few minutes later, and the first good
         # stamp after it makes the touches resume.  An exception that reaches
         # this method skips the touch too.
+        """One pass of the loop: requeue the orphaned jobs, start queued jobs while slots are free, and heartbeat. The
+        alive file is touched only while the database answers. Return the number of jobs started."""
         db_ok = True
         try:
             requeue_orphans()
@@ -476,14 +484,17 @@ class WorkerLoop:
         return n
 
     def run_forever(self) -> None:
+        """Run run_once every poll_s seconds until stop() is called."""
         while not self._stop.is_set():
             self.run_once()
             self._stop.wait(self.poll_s)
 
     def stop(self) -> None:
+        """Ask run_forever to return after its current pass."""
         self._stop.set()
 
     def drain(self, timeout_s: float) -> list[str]:
+        """Wait up to timeout_s seconds for the running jobs to finish, and return the ids that are still running."""
         deadline = time.monotonic() + timeout_s
         while time.monotonic() < deadline:
             with self._lock:
@@ -494,6 +505,8 @@ class WorkerLoop:
             return list(self._handles.keys())
 
     def terminate_and_requeue(self, job_ids: Iterable[str]) -> int:
+        """Requeue the given jobs of this loop without counting the attempt, then terminate their processes. Return the
+        number of jobs requeued."""
         count = 0
         for job_id in job_ids:
             with self._lock:
@@ -550,6 +563,7 @@ def start_embedded(*, max_concurrent: int | None = None) -> WorkerLoop:
 
 
 def embedded() -> WorkerLoop | None:
+    """The loop that start_embedded started in this process, or None when none was started."""
     return _embedded
 
 

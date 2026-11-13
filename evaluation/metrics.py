@@ -177,6 +177,10 @@ def _best_pairs(weight: list[list[int]]) -> list[tuple[int, int, int]]:
     """Maximum-weight one-to-one pairing of rows and columns (Hungarian method),
     so the total does not depend on the order of either side.  A weight of 0
     is no pair.  Returns (row, column, weight) for each pair made."""
+    # The algorithm needs at least as many columns as rows, so a tall matrix is transposed
+    # first and the pairs are mapped back. Then the potentials u and v and the matching p
+    # are grown one row at a time: each augmenting path follows the cheapest reduced cost,
+    # and `way` records how to walk it back. Pairs with weight 0 are dropped at the end.
     if not weight or not weight[0]:
         return []
     transposed = len(weight) > len(weight[0])

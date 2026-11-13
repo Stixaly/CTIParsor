@@ -114,6 +114,8 @@ def main() -> int:
     prefix_findings: list[dict] = []
     section_findings: list[dict] = []
 
+    # Three checks run on each file: escape corruption, private-prefix names and section
+    # markers. A file that raises in any of them is recorded as crashed and skipped.
     for path in iter_yara_files(root, args.limit):
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
@@ -133,6 +135,8 @@ def main() -> int:
             crashes.append((str(path), str(exc)))
             continue
 
+    # The report: scan counts, then per check the total findings and the files they are in,
+    # then the first --show findings of each check and the crashes.
     print("=== YARA parsing audit ===")
     print(f"files scanned   : {files_scanned}")
     print(f"unreadable      : {unreadable}")

@@ -1,3 +1,14 @@
+"""Stage 3: LLM extraction of threat-intelligence entities and relationships.
+
+Each chunk of a report is sent to the configured provider (LLM_PROVIDER: anthropic,
+mistral, gemini, ollama, lmstudio or vllm) with a system prompt.  The JSON answer
+is parsed into an LLMEnrichmentResult: malware, threat actors, TTPs, relationships
+with their dates, and the IoC associations.  The Pydantic models in this module
+define the expected shape of an answer.  Text is sanitised before it enters a
+prompt (_sanitize_text_for_prompt()), and a failed call is retried with tenacity.
+The document-level relationship pass and the provider clients live here too.
+"""
+
 import json
 import os
 import re
@@ -288,6 +299,9 @@ def _get_vllm_client():
 
 def _get_provider_diagnostics():
     """Run startup diagnostics for provider configuration."""
+    # One branch per LLM_PROVIDER. Each branch logs a warning when the provider cannot be
+    # used (a missing key or SDK), and an info line with the endpoint and model otherwise.
+    # The OpenAI-compatible providers need the `openai` package. Nothing is called here.
     if _PROVIDER == "anthropic":
         _anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
         if not _anthropic_key:

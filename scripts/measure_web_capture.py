@@ -114,6 +114,9 @@ def _read_dom_text(url: str, timeout_ms: int = 30_000, *, enable_js: bool = Fals
 
 def measure_one(url: str, workdir: Path, *, enable_js: bool, timeout_ms: int) -> Measurement:
     """Measure the PDF capture and ingestion quality for a single URL."""
+    # Three steps: capture the page to a PDF, ingest the PDF, and read the rendered DOM text.
+    # A failure in the first two ends the measurement with ok=False. Retention is the PDF
+    # text length over the DOM text length. IoC loss counts the DOM indicators the PDF lacks.
     dest = workdir / f"{abs(hash(url))}.pdf"
 
     try:
@@ -269,6 +272,9 @@ def main() -> int:
         )
         return 2
 
+    # Without --keep, the PDFs go to a temporary directory that is removed at the end. With
+    # --keep they stay in output/web_capture_samples. Each URL is measured in turn, and the
+    # table and summary go to stdout; --json also writes the rows.
     parser = argparse.ArgumentParser(description="Measure PDF capture and ingestion quality")
     parser.add_argument("urls", nargs="*", default=_DEFAULT_URLS)
     parser.add_argument("--enable-js", action="store_true")

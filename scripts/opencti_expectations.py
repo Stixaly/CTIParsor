@@ -599,6 +599,8 @@ def summary_markdown(report: dict[str, Any]) -> str:
     for c in checks:
         lines.append(f"| {c['step']} | {_cell(c['check'])} | {_cell(c['expected'])} | {_cell(c['observed'])} "
                      f"| {'PASS' if c['pass'] else 'FAIL'} |")
+    # Warnings: one entry per name held by objects of two types, with each object's STIX
+    # type, its OpenCTI type and the bundles it came from.
     lines += ["", "## Warnings", ""]
     if not warnings:
         lines.append("None.")
@@ -617,6 +619,8 @@ def summary_markdown(report: dict[str, Any]) -> str:
         lines.append(f"Nothing, in {len(imports)} imports.")
     for label, r in refused:
         lines.append(f"- {label}: `{r.get('id')}` ({r.get('type')}): {_cell(r.get('error', ''))[:300]}")
+    # Transformations: for each bundle, the fields OpenCTI changed on import, then the
+    # changes made by the later imports. Each group of rows gets one table.
     lines += ["", "## What OpenCTI holds differently (informational)", "",
               "Field by field, each bundle against what OpenCTI exports for the same objects right after its "
               "import, then what the later imports changed in them. One example per row, cut to 120 characters "
@@ -641,6 +645,7 @@ def summary_markdown(report: dict[str, Any]) -> str:
                 lines.append(f"| {g['type']} | {_cell(g['field'])} | {g['change']} | {g['objects']} "
                              f"| {_cell(mine)} | {_cell(theirs)} |")
             lines.append("")
+    # Run figures from the run record. Missing values are printed as "?", not omitted.
     durations = run.get("durations_s") or {}
     memory = run.get("memory_mb") or {}
     lines += ["## Run", "",

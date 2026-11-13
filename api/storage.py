@@ -14,21 +14,27 @@ from abc import ABC, abstractmethod
 
 
 class JobStorage(ABC):
+    """Where a pipeline job records its state: status, entities, bundle, LLM result and progress events."""
 
     @abstractmethod
-    def update_status(self, job_id: str, status: str) -> None: ...
+    def update_status(self, job_id: str, status: str) -> None:
+        """Set the status of the job."""
 
     @abstractmethod
-    def save_entities(self, job_id: str, entities: list) -> None: ...
+    def save_entities(self, job_id: str, entities: list) -> None:
+        """Store the entities that the job extracted."""
 
     @abstractmethod
-    def save_bundle(self, job_id: str, bundle_json: str) -> None: ...
+    def save_bundle(self, job_id: str, bundle_json: str) -> None:
+        """Store the job's STIX bundle, as JSON text."""
 
     @abstractmethod
-    def save_llm_result(self, job_id: str, llm_result_json: str) -> None: ...
+    def save_llm_result(self, job_id: str, llm_result_json: str) -> None:
+        """Store the job's raw LLM result, as JSON text."""
 
     @abstractmethod
-    def emit_progress(self, job_id: str, event_type: str, data: dict) -> None: ...
+    def emit_progress(self, job_id: str, event_type: str, data: dict) -> None:
+        """Record one progress event of the job: its type and its data."""
 
 
 class InMemoryJobStorage(JobStorage):
@@ -42,16 +48,21 @@ class InMemoryJobStorage(JobStorage):
         self.events: list[tuple[str, str, dict]] = []
 
     def update_status(self, job_id: str, status: str) -> None:
+        """Keep the status of the job in memory."""
         self.statuses[job_id] = status
 
     def save_entities(self, job_id: str, entities: list) -> None:
+        """Keep a copy of the entities of the job, replacing any kept before."""
         self.entities[job_id] = list(entities)
 
     def save_bundle(self, job_id: str, bundle_json: str) -> None:
+        """Keep the bundle of the job in memory."""
         self.bundles[job_id] = bundle_json
 
     def save_llm_result(self, job_id: str, llm_result_json: str) -> None:
+        """Keep the LLM result of the job in memory."""
         self.llm_results[job_id] = llm_result_json
 
     def emit_progress(self, job_id: str, event_type: str, data: dict) -> None:
+        """Append the progress event to the list in `events`."""
         self.events.append((job_id, event_type, data))

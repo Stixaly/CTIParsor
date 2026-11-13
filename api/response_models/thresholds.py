@@ -13,6 +13,7 @@ from api.response_models import Response
 
 
 class AutoAcceptAudit(Response):
+    """The control sample of one source and entity type, and what an analyst decided on it."""
     source: str
     entity_type: str
     sampled: int = Field(description="Control-sample rows of this kind.")
@@ -22,6 +23,7 @@ class AutoAcceptAudit(Response):
 
 
 class ThresholdRow(Response):
+    """One stored cutoff for a calibrated source and entity type."""
     source: str
     entity_type: str
     threshold: float
@@ -34,6 +36,7 @@ class ThresholdRow(Response):
 
 
 class CurvePoint(Response):
+    """One score block of a proposal's curve: its score range, its row count and its acceptance rate."""
     lo: float
     hi: float
     n: int
@@ -41,6 +44,7 @@ class CurvePoint(Response):
 
 
 class Proposal(Response):
+    """One proposed cutoff for a calibrated source and entity type (pipeline.calibration.Proposal.as_dict)."""
     source: str
     entity_type: str
     current: float = Field(description="The cutoff in force when the proposal was made.")
@@ -63,6 +67,7 @@ class Proposal(Response):
 
 
 class ThresholdsOut(Response):
+    """GET /api/thresholds: the calibration settings, the control-sample audit, the defaults and the stored cutoffs."""
     enabled: bool = Field(description="THRESHOLD_CALIBRATION_ENABLED.")
     auto_accept_level: float
     control_sample_rate: float
@@ -72,6 +77,7 @@ class ThresholdsOut(Response):
 
 
 class RecalibrateOut(Response):
+    """Result of a recalibration: the proposals, and whether they were written."""
     applied: bool
     written: int
     origins: list[str] = Field(description="The decision origins the proposals were calibrated on.")
@@ -80,6 +86,7 @@ class RecalibrateOut(Response):
 
 
 class OverrideOut(Response):
+    """A manual cutoff stored for one source and entity type."""
     source: str
     entity_type: str
     threshold: float
@@ -87,10 +94,12 @@ class OverrideOut(Response):
 
 
 class DeletedKey(Response):
+    """The source and entity type of a deleted cutoff."""
     source: str
     entity_type: str
 
 
 class DeletedOut(Response):
+    """Result of deleting a manual cutoff: its key, and the default now in force for the source."""
     deleted: DeletedKey
     default: float = Field(description="The stage default now in force for the source.")

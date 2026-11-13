@@ -21,6 +21,7 @@ install, with the dev tools.
 | `pdfplumber` | Text-layer PDF extraction + scanned PDF detection |
 | `python-docx` | DOCX parsing |
 | `beautifulsoup4` | HTML parsing |
+| `soupsieve` | CSS selectors of `beautifulsoup4`; listed for its floor: 4.0 fixes CVE-2026-126190 |
 | `defusedxml` | XML parsing hardened against entity-expansion attacks (DOCX internals) |
 | `iocextract` | IPv6 candidates for Stage 2, which validates them (IPv4, URLs, emails and domains are Stage 2's own regexes) |
 | `google-re2` | Linear-time regex engine, guards catastrophic backtracking (ADR-0049; the plain `re2` package on PyPI is abandoned and does not build on Python 3.12+) |

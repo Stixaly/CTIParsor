@@ -59,44 +59,53 @@ def _one(conn: Any, sql: str, params: tuple) -> bool:
 
 
 def table_exists(conn: Any, table: str) -> bool:
+    """True when the table exists in the current schema."""
     return _one(conn, "SELECT 1 FROM information_schema.tables "
                       "WHERE table_schema = current_schema() AND table_name = ?", (table,))
 
 
 def column_exists(conn: Any, table: str, column: str) -> bool:
+    """True when the column exists in the table, in the current schema."""
     return _one(conn, "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
                       "AND table_name = ? AND column_name = ?", (table, column))
 
 
 def index_exists(conn: Any, index: str) -> bool:
+    """True when the index exists in the current schema."""
     return _one(conn, "SELECT 1 FROM pg_indexes WHERE schemaname = current_schema() AND indexname = ?",
                 (index,))
 
 
 def constraint_exists(conn: Any, table: str, constraint: str) -> bool:
+    """True when the constraint exists on the table, in the current schema."""
     return _one(conn, "SELECT 1 FROM information_schema.table_constraints "
                       "WHERE table_schema = current_schema() AND table_name = ? AND constraint_name = ?",
                 (table, constraint))
 
 
 def trigger_exists(conn: Any, trigger: str) -> bool:
+    """True when the trigger exists in the current schema."""
     return _one(conn, "SELECT 1 FROM information_schema.triggers "
                       "WHERE trigger_schema = current_schema() AND trigger_name = ?", (trigger,))
 
 
 def tables_exist(conn: Any, *tables: str) -> bool:
+    """True when every given table exists."""
     return all(table_exists(conn, t) for t in tables)
 
 
 def columns_exist(conn: Any, table: str, *columns: str) -> bool:
+    """True when every given column exists in the table."""
     return all(column_exists(conn, table, c) for c in columns)
 
 
 def indexes_exist(conn: Any, *indexes: str) -> bool:
+    """True when every given index exists."""
     return all(index_exists(conn, i) for i in indexes)
 
 
 def triggers_exist(conn: Any, *triggers: str) -> bool:
+    """True when every given trigger exists."""
     return all(trigger_exists(conn, t) for t in triggers)
 
 
@@ -133,6 +142,7 @@ def _load() -> tuple[Migration, ...]:
 
 
 def latest_version() -> int:
+    """The version of the newest migration: the number of migrations that load() returns."""
     return len(load())
 
 

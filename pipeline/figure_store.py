@@ -1,3 +1,12 @@
+"""Storage for Stage 1f figures: the reads cache and the figure spans of a job.
+
+read_to_json() and read_from_json() convert a FigureRead to and from the JSON
+kept in the figure reads table.  SqliteReadCache is the table-backed ReadCache.
+save_spans(), load_spans() and figure_at_offset() store the figure spans of a job
+and find the span that holds a character offset.  Database errors listed in
+CACHE_ERRORS do not stop the stage: without a database the figures are read again.
+"""
+
 # pipeline/figure_store.py
 from __future__ import annotations
 

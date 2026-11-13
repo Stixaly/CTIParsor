@@ -1,3 +1,5 @@
+"""Upload route (POST /api/upload): a CTI report file, with its TLP and PAP markings and an optional STIX baseline,
+becomes a job."""
 import codecs
 import re
 from pathlib import Path

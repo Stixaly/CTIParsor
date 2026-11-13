@@ -51,6 +51,7 @@ def address(conn: Any) -> str:
 
 
 def system_identifier(conn: Any) -> str | None:
+    """The system identifier of the PostgreSQL cluster, or None when the role cannot read it."""
     try:
         row = conn.execute("SELECT system_identifier::text AS sid FROM pg_control_system()").fetchone()
         return row["sid"] if row else None
