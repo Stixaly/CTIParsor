@@ -229,6 +229,17 @@ Watch these:
 - `last_success` is older than a day. No run succeeded since then.
 - `file` is the newest pair. Check it with the commands in
   [docker.md](docker.md#data-and-backups).
+- `could not write the status file` in the `backup` service's log. The pair was
+  written and checked, but `status.json` was not updated: the status volume is
+  not writable by uid 70. `last_success` then stays at the last run that did
+  write it, so `CtiparsorBackupTooOld` fires once that is more than 26 hours old.
+  `backup-init` is what makes the volume writable. Its status must be
+  `Exited (0)`: `docker compose --profile backup ps -a backup-init`. With the
+  current `compose.yaml`, `backup` starts only after that, so this message means
+  the volume's owner was changed afterwards, or the stack runs an older
+  `compose.yaml`.
+- No `ctiparsor_backup_*` metric on `/metrics`. No status file exists yet, or the
+  app cannot read it. `CtiparsorBackupTooOld` then fires with `absent(...)`.
 - The free space of `BACKUP_TARGET`. `BACKUP_KEEP` pairs take the space of
   that many dumps and archives. The backup does not check the free space
   itself: a full target makes a run fail, and the run then says so.
