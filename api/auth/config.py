@@ -60,7 +60,10 @@ class OidcSettings:
 def _secure_url(name: str, value: str) -> str:
     """`value` if it is an absolute https URL, or an http one for this machine (a test IdP).
     Raises AuthConfigError."""
-    parts = urlsplit(value)
+    try:
+        parts = urlsplit(value)
+    except ValueError as exc:                     # a malformed IPv6 host, such as "https://[" (#744)
+        raise AuthConfigError(f"{name} must be an https URL (http only for localhost), got: {value!r}") from exc
     if parts.scheme == "https" and parts.hostname:
         return value
     if parts.scheme == "http" and parts.hostname in ("localhost", "127.0.0.1", "::1"):
@@ -136,16 +139,18 @@ def read_client_secret(settings: OidcSettings) -> str:
 
 def session_ttl_hours() -> float:
     """The session lifetime in hours, from SESSION_TTL_HOURS (DEFAULT_SESSION_TTL_HOURS when unset). Raise
-    AuthConfigError when the value is not a number above 0."""
+    AuthConfigError when the value is not a number from one second to 87600 hours (ten years):
+    a shorter lifetime makes a cookie that expires at once, a longer one overflows the clock (#743)."""
     raw = (os.getenv("SESSION_TTL_HOURS") or "").strip()
     if not raw:
         return float(DEFAULT_SESSION_TTL_HOURS)
     try:
         hours = float(raw)
     except ValueError:
-        raise AuthConfigError(f"SESSION_TTL_HOURS must be a number above 0, got: {raw!r}") from None
-    if not hours > 0 or hours == float("inf"):
-        raise AuthConfigError(f"SESSION_TTL_HOURS must be a number above 0, got: {raw!r}")
+        hours = float("nan")
+    if not (1 / 3600 <= hours <= 87600):
+        raise AuthConfigError("SESSION_TTL_HOURS must be a number from 1 second to 87600 hours, "
+                              f"got: {raw!r}")
     return hours
 
 

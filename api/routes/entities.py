@@ -4,6 +4,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException
+from psycopg.errors import ForeignKeyViolation
 from pydantic import BaseModel, Field, field_validator
 
 from api.db import _lock, get_conn, now_iso, transaction
@@ -113,18 +114,24 @@ def create_entity(job_id: str, body: EntityCreate):
     # Same refusal as the PATCH below: a blank name is not an entity (issue #438, #525).
     if not body.value.strip():
         raise HTTPException(400, "value must not be empty")
-    with get_conn() as conn:
-        require_job(conn, job_id)
 
     eid = str(uuid4())
     with _lock:
         with get_conn() as conn:
             with transaction(conn):
-                conn.execute(
-                    "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) "
-                    "VALUES (?,?,?,?,?,?,?,?)",
-                    (eid, job_id, body.value, body.entity_type, body.context, body.confidence, body.mitre_id, "manual"),
-                )
+                # The job is checked in the transaction of the INSERT, not before it: a job deleted in between
+                # is a 404, not a foreign-key violation (#764).
+                require_job(conn, job_id)
+                try:
+                    conn.execute(
+                        "INSERT INTO entities (id,job_id,value,entity_type,context,confidence,mitre_id,source) "
+                        "VALUES (?,?,?,?,?,?,?,?)",
+                        (eid, job_id, body.value, body.entity_type, body.context, body.confidence, body.mitre_id,
+                         "manual"),
+                    )
+                except ForeignKeyViolation as exc:
+                    # Another process deleted the job after the check: the same answer as an unknown job.
+                    raise HTTPException(404, "Job not found") from exc
                 renew_retention(conn, job_id)
     return {"id": eid, "job_id": job_id, "value": body.value, "entity_type": body.entity_type,
             "context": body.context, "confidence": body.confidence, "mitre_id": body.mitre_id,

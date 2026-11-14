@@ -24,6 +24,7 @@ from api.routes._common import (
     read_baseline,
     read_baseline_file,
     start_job,
+    storable_text,
 )
 from pipeline.baseline_stix import MAX_BASELINE_BYTES
 from pipeline.stage4_stix_mapping import normalise_tlp
@@ -153,6 +154,11 @@ def upload_file(
             400,
             f"Unsupported format '{suffix}'. Accepted: {', '.join(SUPPORTED)}"
         )
+    # The name is stored as the job's filename: a NUL or a lone surrogate is refused before a byte is written (#759).
+    try:
+        storable_text(file.filename)
+    except ValueError as exc:
+        raise HTTPException(400, f"Invalid file name: {exc}") from exc
 
     # Before a byte of the report is written: a nearly full disk refuses it (ADR-0097 item 20).
     refuse_if_disk_is_short()

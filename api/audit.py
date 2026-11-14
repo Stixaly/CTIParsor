@@ -311,4 +311,8 @@ def stored_moment(value: str) -> str:
     moment = datetime.fromisoformat(value)
     if moment.tzinfo is None:
         moment = moment.replace(tzinfo=timezone.utc)
-    return timestamp(moment)
+    try:
+        return timestamp(moment)
+    except OverflowError:
+        # The UTC form falls outside years 1 to 9999 (#741): a bad value, as ValueError says it.
+        raise ValueError(f"the time is out of range: {value!r}") from None

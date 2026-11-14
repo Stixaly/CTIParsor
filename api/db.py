@@ -132,11 +132,18 @@ def transaction(conn: DBConnection, *, snapshot: bool = False) -> Iterator[DBCon
     stood at the first one, whatever commits meanwhile.
     """
     conn.execute("BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY" if snapshot else "BEGIN")
+    # The depth tells PgConnection.__exit__ that a transaction is open (#750).
+    pg = conn if isinstance(conn, PgConnection) else None
+    if pg is not None:
+        pg._tx_depth += 1
     try:
         yield conn
     except BaseException:
         conn.rollback()
         raise
+    finally:
+        if pg is not None:
+            pg._tx_depth -= 1
     conn.commit()
 
 

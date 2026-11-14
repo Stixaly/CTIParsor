@@ -67,9 +67,13 @@ class AuthGateMiddleware:
         set_cookie = [(k, v) for k, v in cookie.raw_headers if k == b"set-cookie"]
 
         async def send_with_cookie(message: Message) -> None:
-            """Send a message, adding the Set-Cookie headers to the response start."""
+            """Send a message, adding the Set-Cookie headers to the response start, unless the route set
+            the session cookie itself (the logout's deletion): the last Set-Cookie wins (#742)."""
             if message["type"] == "http.response.start":
-                message = {**message, "headers": [*message.get("headers", []), *set_cookie]}
+                headers = message.get("headers", [])
+                own = any(k == b"set-cookie" and v.startswith(SESSION_COOKIE.encode() + b"=") for k, v in headers)
+                if not own:
+                    message = {**message, "headers": [*headers, *set_cookie]}
             await send(message)
 
         await self.app(scope, receive, send_with_cookie)
