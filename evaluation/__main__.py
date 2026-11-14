@@ -164,7 +164,7 @@ def _predictions(result) -> dict:
 
 # The property that holds an observable's value, by SCO type.
 _SCO_VALUE = {"file": "name", "windows-registry-key": "key", "user-account": "user_id",
-              "mutex": "name"}
+              "mutex": "name", "autonomous-system": "number"}
 
 
 def _bundle_indicated(bundle) -> list[dict] | None:
@@ -191,15 +191,25 @@ def _bundle_relations(bundle) -> list[dict] | None:
     if bundle is None:
         return None
     objs = json.loads(bundle.serialize())["objects"]
+    by_id = {o["id"]: o for o in objs}
+    # An Indicator is named by the observable it is based on (#836), as bundle.py reads it.
+    based_on: dict[str, str] = {}
+    for o in objs:
+        if o.get("type") == "relationship" and o.get("relationship_type") == "based-on":
+            based_on.setdefault(o["source_ref"], o["target_ref"])
 
     def name(o):
-        return o.get("name") or o.get("value") or o.get("pattern") or o.get("id")
+        if o.get("type") == "indicator" and o["id"] in based_on:
+            o = by_id.get(based_on[o["id"]], o)
+        value = o.get(_SCO_VALUE.get(o.get("type", ""), "value")) or o.get("name") or o.get("value") or o.get("id")
+        return str(value) if value is not None else None
 
-    by_id = {o["id"]: name(o) for o in objs}
-    return [{"source": by_id.get(o["source_ref"], o["source_ref"]), "type": o["relationship_type"],
-             "target": by_id.get(o["target_ref"], o["target_ref"]),
+    names = {k: name(o) for k, o in by_id.items()}
+    # `based-on` is the Indicator's plumbing to its observable, not a relation the analyst receives.
+    return [{"source": names.get(o["source_ref"], o["source_ref"]), "type": o["relationship_type"],
+             "target": names.get(o["target_ref"], o["target_ref"]),
              "evidence_label": o.get("x_evidence_label"), "policy_rule": o.get("x_policy_rule")}
-            for o in objs if o.get("type") == "relationship"]
+            for o in objs if o.get("type") == "relationship" and o.get("relationship_type") != "based-on"]
 
 
 def _stay_on_the_release(meta_path: Path, name: str) -> None:

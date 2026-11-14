@@ -71,7 +71,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--dry-run", action="store_true", help="Rollback after printing counts")
     parser.add_argument("--append", action="store_true", help="Allow appending to existing target")
     parser.add_argument("--batch", type=int, default=500, help="Rows per executemany batch")
-    return parser.parse_args(argv)
+    args = parser.parse_args(argv)
+    if args.batch < 1:
+        parser.error("--batch must be >= 1")
+    return args
 
 
 def open_source(path: Path) -> sqlite3.Connection:

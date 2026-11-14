@@ -679,6 +679,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     report = build_report(run, result)
     out = Path(args.out_dir)
+    out.mkdir(parents=True, exist_ok=True)
     (out / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
     (out / "report.md").write_text(summary_markdown(report), encoding="utf-8")
     failed = [c for c in report["checks"] if not c["pass"]]
