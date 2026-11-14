@@ -219,6 +219,20 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "The actor × targeted country/sector `targets` edges are built only when the report names one "
      "threat actor; with several, only the `targets` rows the report states ship (ADR-0101)",
      "mapping"),
+    ("d8d90e9", "2026-11-14",
+     "Extraction: an alias list keeps its last name after an Oxford comma and starts on an accented "
+     "capital, and an annotation in parentheses is not an alias; CyNER spans lose a trailing "
+     "separator and a failed batch is retried by chunk; GLiNER offsets and casing; Stage 3 keeps "
+     "an entry with a null field or a MITRE id alone and keeps a second chunk's quote; Suricata and "
+     "YARA atoms (bracketed headers, trailing comments, noise, comment-only imports); gazetteer "
+     "apostrophes (ADR-0102; #766-#770, #772-#776, #796-#800, #803)",
+     "extraction"),
+    ("cd467cf", "2026-11-14",
+     "Mapping: one id, one object (two TTPs with one MITRE id, two spellings of a registry key, "
+     "AS12345 and 12345, a File named like a host), a network-traffic host of the right type, native "
+     "relationship dates kept when an LLM conflict is on a role the analyst set, a baseline URL "
+     "with capitals found in the text (ADR-0102; #777-#782, #784, #786, #802)",
+     "mapping"),
 )
 
 
