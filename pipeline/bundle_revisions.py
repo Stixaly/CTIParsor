@@ -233,6 +233,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "relationship dates kept when an LLM conflict is on a role the analyst set, a baseline URL "
      "with capitals found in the text (ADR-0102; #777-#782, #784, #786, #802)",
      "mapping"),
+    ("05e3a0c", "2026-11-14",
+     "A network-traffic destination written against an arrow without spaces (tcp/443->evil.com, "
+     "udp/53=>1.2.3.4) is read: an entity whose text holds one now yields a network-traffic object "
+     "(#860)",
+     "mapping"),
 )
 
 

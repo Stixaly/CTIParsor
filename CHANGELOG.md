@@ -62,6 +62,11 @@ theme.
   - **Not fixed here**: the vendored Snort parser (#789 to #793, ADR-0070), and issues closed without a
     change (ADR-0102).
 
+- **Two defects found by the bug triage.** A network-traffic destination written against an arrow without
+  spaces (`tcp/443->evil.com`) is read, so its entity yields a `network-traffic` object (#860, a
+  `BUNDLE_AFFECTING` entry scoped "mapping"); the Review relationship creator takes a source or target
+  the parent sets after it opened, so a second Shift+click fills the target (#861).
+
 - **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
   qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's
   PDF ran past the default 1,800 s. The default is unchanged.
