@@ -9,6 +9,22 @@ theme.
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-14
+
+- **1.0, the first stable release.** It makes three promises, and only these
+  ([support-policy.md](docs/support-policy.md#what-10-promises)):
+  - **a stable contract**: the surfaces recorded in `contract/` (the HTTP API, the CLI, the configuration,
+    the STIX output, the formats) change incompatibly only in a new major version;
+  - **data that survives**: an upgrade from the previous release, and a restore from a backup, keep the
+    reports, the review decisions, the baselines and the bundles;
+  - **measured, published limits**: the extraction measured on the bundle the release exports, with its
+    denominators and limits.
+
+  What 1.0 does not promise is listed in the same page. The qualified LLM configuration is a local vLLM
+  serving Qwen3.8 27B, for text and figures (ADR-0100); other providers are supported, not qualified.
+  The release record, [docs/releases/1.0-readiness.md](docs/releases/1.0-readiness.md), lists each gate,
+  its evidence on this release's commit and image, and the maintainer's decision.
+- **From 0.8.0**: no schema migration, no API change and no configuration change.
 ## [0.8.0] - 2026-11-13
 
 A minor release under ADR-0085 §8: it adds two schema migrations, changes API answers and bundle
