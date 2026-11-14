@@ -88,7 +88,7 @@ export const EDGE_ORIGIN_LABEL: Record<string, string> = {
   ioc_based_on:             'Indicator based-on the observable it was built from',
   ioc_association:          'LLM IoC → malware association',
   embedded_rule_title:      'Rule title names this malware/tool',
-  targeted_location:        'Every actor × every targeted country/sector',
+  targeted_location:        "The report's only actor × every targeted country/sector",
   policy_pin:               'Pinned Relationship Policy rule',
   completion_reference:     'ATT&CK curated relationship',
   completion_transitive:    'Transitive inference',

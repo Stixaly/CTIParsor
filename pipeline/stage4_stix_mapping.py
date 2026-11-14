@@ -567,6 +567,10 @@ _OBSERVABLE_SCO_TYPES: frozenset[str] = frozenset({
 _EV_OBSERVED = {"x_evidence_label": "observed"}
 _EV_REPORTED = {"x_evidence_label": "reported"}
 
+# The targets product is not built when the report names several threat actors
+# (ledger `refused` reason, beside the review reasons of Stage 4b).
+AMBIGUOUS_ACTOR = "ambiguous_actor"
+
 
 @dataclass
 class _RowEdge:
@@ -1691,36 +1695,42 @@ def build_stix_bundle(
     # reverse of one whose verb names no direction.
     _forbidden = _forbidden_triples(refused_relationships or (), llm_result.relationships)
 
-    # --- Targets SROs: threat actors → targets → locations and sectors ---
-    # Every actor × every targeted country/sector: the LLM's lists say what the
-    # report targets, not which actor targets it, so this is a product, and the
-    # ledger says so (origin "targeted_location", ADR-0061).
-    for actor_name in llm_result.threat_actors:
-        actor = name_to_stix.of_type(actor_name.lower(), "threat-actor")
-        if not actor:
-            continue
+    # --- Targets SROs: the report's only threat actor → targets → locations and sectors ---
+    # The LLM's lists say what the report targets, not which actor targets it,
+    # so the actor × target product is built only when the report names one
+    # actor (origin "targeted_location", ADR-0061).  With two or more distinct
+    # actors it would be an attribution by co-mention: nothing is built here.
+    # The pairs wait in `_pending_product` until Stage 4b has merged the
+    # aliases, since two spellings of one actor are one actor (resolved below,
+    # after graph completion).  A `targets` row the report states still ships,
+    # whatever the number of actors.
+    _actors = [(name, obj) for name in llm_result.threat_actors
+               if (obj := name_to_stix.of_type(name.lower(), "threat-actor"))]
+    _single_actor = len({_field(obj, "id") for _, obj in _actors}) == 1
+    _pending_product: list[tuple[str, Any, Any, str]] = []
+
+    def _product_edge(actor_name: str, actor, tgt, target_name: str) -> None:
+        if _refused_by_review(actor, "targets", tgt, "targeted_location", _forbidden,
+                              actor=actor_name, target=target_name):
+            return
+        if not _single_actor:
+            _pending_product.append((actor_name, actor, tgt, target_name))
+            return
+        rel = _add_relationship(stix_objects, actor, "targets", tgt,
+                                pol_index=_pol_index, seen=seen_rel_keys,
+                                custom=_EV_REPORTED)
+        if rel is not None:
+            led.object(rel, "targeted_location", actor=actor_name, target=target_name)
+
+    for actor_name, actor in _actors:
         for country in llm_result.targeted_countries:
             location = name_to_stix.of_type(f"location:{country.lower()}", "location")
             if location:
-                if _refused_by_review(actor, "targets", location, "targeted_location", _forbidden,
-                                      actor=actor_name, target=country):
-                    continue
-                rel = _add_relationship(stix_objects, actor, "targets", location,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=country)
+                _product_edge(actor_name, actor, location, country)
         for sector in llm_result.targeted_sectors:
             identity = name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
             if identity:
-                if _refused_by_review(actor, "targets", identity, "targeted_location", _forbidden,
-                                      actor=actor_name, target=sector):
-                    continue
-                rel = _add_relationship(stix_objects, actor, "targets", identity,
-                                        pol_index=_pol_index, seen=seen_rel_keys,
-                                        custom=_EV_REPORTED)
-                if rel is not None:
-                    led.object(rel, "targeted_location", actor=actor_name, target=sector)
+                _product_edge(actor_name, actor, identity, sector)
 
     # --- SROs — semantic relationships (deduplicated, spec-validated) ---
     # Reuses the shared seen_rel_keys set so a semantic edge that duplicates a
@@ -1905,6 +1915,42 @@ def build_stix_bundle(
                           _completion_stats.remapped_relationships,
                           _completion_stats.merged_names)
     led.refused_inferences(_completion_stats.refused)
+
+    # --- Targets product with several actors, after the alias merge ---
+    # Two spellings of one actor are one actor once Stage 4b has merged them:
+    # count the actors that are left, and build the product when it is one.
+    # Otherwise each pair that no edge of the bundle already covers (a row of
+    # the report, a pinned rule, graph completion) is listed as ambiguous.
+    if _pending_product:
+        _merged = _completion_stats.merged_ids
+        _live = {getattr(o, "id", None): o for o in stix_objects}
+        _present = {(o["source_ref"], o["relationship_type"], o["target_ref"])
+                    for o in stix_objects if _field(o, "type") == "relationship"}
+        _banned = {(_merged.get(s, s), v, _merged.get(t, t)): why for (s, v, t), why in _forbidden.items()}
+        _pairs = []
+        for actor_name, actor, tgt, target_name in _pending_product:
+            actor = _live.get(_merged.get(actor.id, actor.id))
+            tgt = _live.get(_merged.get(tgt.id, tgt.id))
+            if actor is not None and tgt is not None:
+                _pairs.append((actor_name, actor, tgt, target_name))
+        _one_actor = len({actor.id for _, actor, _, _ in _pairs}) == 1
+        for actor_name, actor, tgt, target_name in _pairs:
+            pair_key = _pin_edge_key(actor, _apply_policy("targets", actor, tgt, _pol_index), tgt)
+            if pair_key is None or pair_key in _present:
+                continue
+            if pair_key in _banned:
+                led.refused_edge(pair_key[0], pair_key[1], pair_key[2], origin="targeted_location",
+                                 reason=_banned[pair_key], actor=actor_name, target=target_name)
+            elif not _one_actor:
+                led.refused_edge(pair_key[0], pair_key[1], pair_key[2], origin="targeted_location",
+                                 reason=AMBIGUOUS_ACTOR, actor=actor_name, target=target_name)
+            else:
+                rel = _add_relationship(stix_objects, actor, "targets", tgt,
+                                        pol_index=_pol_index, seen=set(_present),
+                                        custom=_EV_REPORTED)
+                if rel is not None:
+                    _present.add(pair_key)
+                    led.object(rel, "targeted_location", actor=actor_name, target=target_name)
 
     # --- Baseline merge (ADR-0090, lot 4) — only with a baseline ---
     # After 4b, so graph completion only ever saw CTIParsor's own objects.

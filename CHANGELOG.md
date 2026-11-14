@@ -9,6 +9,14 @@ theme.
 
 ## [Unreleased]
 
+- **The targets product needs one threat actor** (ADR-0101). Stage 4 no longer links every threat actor of a
+  report to every country and sector it targets: the product is built only if the report names one actor,
+  counted by object after Stage 4b's alias merge. With two or more, each pair no bundle edge covers is listed
+  in the mapping ledger's `refused` (reason `ambiguous_actor`); a `targets` row the report states still ships
+  with its quote. The edge's "Why" text says the actor is the only one named. This changes the bundle output
+  (a `BUNDLE_AFFECTING` entry scoped "mapping" goes with the commit); no migration and no API change. The
+  effect on precision and recall is not measured yet (`inhouse-bundle`).
+
 - **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
   qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's
   PDF ran past the default 1,800 s. The default is unchanged.

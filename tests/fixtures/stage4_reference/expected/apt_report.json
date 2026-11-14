@@ -1879,7 +1879,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `targets` **Poland**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **Poland** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
+   "description": "**APT29** `targets` **Poland**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **Poland** as a target. It is the only threat actor the report names, so CTIParsor links it to every target the report names; the report may not say so in one sentence.\n\n**Evidence:** reported",
    "id": "relationship--R39",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -1919,7 +1919,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `targets` **energy**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **energy** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
+   "description": "**APT29** `targets` **energy**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **energy** as a target. It is the only threat actor the report names, so CTIParsor links it to every target the report names; the report may not say so in one sentence.\n\n**Evidence:** reported",
    "id": "relationship--R40",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -1936,7 +1936,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**APT29** `targets` **government**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **government** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
+   "description": "**APT29** `targets` **government**\n\n**Why:** The report names **Cozy Bear** as a threat actor and **government** as a target. It is the only threat actor the report names, so CTIParsor links it to every target the report names; the report may not say so in one sentence.\n\n**Evidence:** reported",
    "id": "relationship--R41",
    "modified": "<build-time>",
    "object_marking_refs": [

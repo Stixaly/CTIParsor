@@ -32,6 +32,10 @@ Shape of `to_dict()` (version 1):
                      because a row with that triple was rejected
                      ("rejected_by_analyst") or is held for review
                      ("held_for_review"); ADR-0013, amendment 2026-10-26.
+                     Or, for "targeted_location", because the report names
+                     several threat actors, counted after the alias merge of
+                     Stage 4b, and the actor × target product is not built
+                     ("ambiguous_actor").
                      `origin` is the one the edge would have had in
                      `objects` ("ioc_association", "targeted_location",
                      "policy_pin", "completion_*"); `rule` the x_policy_rule or

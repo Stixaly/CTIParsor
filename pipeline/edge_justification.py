@@ -109,8 +109,8 @@ def _targeted_location(info: Mapping[str, Any], subject: tuple[str, str]) -> str
     actor = _named(info.get("actor")) or subject[0]
     target = _named(info.get("target")) or subject[1]
     return (f"The report names **{actor}** as a threat actor and **{target}** as a target. "
-            "CTIParsor links every threat actor of the report to every target it names, "
-            "so the report may not say that this actor targets this one.")
+            "It is the only threat actor the report names, so CTIParsor links it to "
+            "every target the report names; the report may not say so in one sentence.")
 
 
 def _policy_pin(sro: Mapping[str, Any]) -> str | None:
