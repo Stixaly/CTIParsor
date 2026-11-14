@@ -33,6 +33,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 
 from api.logging_config import get_logger
+from pipeline.detection.yara_atoms import _mask_literals, _strip_comments
 
 logger = get_logger(__name__)
 
@@ -150,11 +151,13 @@ def with_declared_imports(body: str, imports: Iterable[str]) -> tuple[str, tuple
     """Prefix the ``import`` lines the report declared and the rule uses.
 
     Never invents an import: a module the report did not import stays out, and
-    the compiler reports it.
+    the compiler reports it.  The use is looked for in the code only: a string
+    or a comment that names ``cuckoo.exe`` does not need ``import "cuckoo"`` (#800).
     """
+    code = _mask_literals(_strip_comments(body))
     added = tuple(
         m for m in imports
-        if re.search(rf"\b{re.escape(m)}\.", body)
+        if re.search(rf"\b{re.escape(m)}\.", code)
         and not re.search(rf'^\s*import\s+"{re.escape(m)}"', body, re.MULTILINE)
     )
     if not added:

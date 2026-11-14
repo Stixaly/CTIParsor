@@ -19,6 +19,7 @@ from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.detection.suricata_atoms import (
     extract_atoms,
     parse_options,
+    rule_body,
     rule_header,
     rule_metadata,
     technique_ids,
@@ -117,12 +118,10 @@ class SuricataAdapter(RuleCorpusAdapter):
         if not header:
             return None
 
-        # Extract body between first '(' and last ')'
-        first_open = line.find("(")
-        last_close = line.rfind(")")
-        if first_open == -1 or last_close == -1 or last_close <= first_open:
+        # Options between the '(' and the ')' that closes them
+        body = rule_body(line)
+        if body is None:
             return None
-        body = line[first_open + 1 : last_close]
 
         opts = dict(parse_options(body))
         sid = opts.get("sid", "").strip()

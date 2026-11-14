@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import http.client
 import json
 import lzma
 import os
@@ -268,7 +269,7 @@ def _fetch_text(url: str, *, timeout: int) -> str | None:
         with _SAFE_OPENER.open(req, timeout=timeout) as resp:
             data = resp.read(4096)
         return data.decode("utf-8", errors="replace")
-    except (urllib.error.URLError, OSError, TimeoutError, ValueError):
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException):
         return None
 
 
@@ -300,6 +301,9 @@ def _safe_members(tar: tarfile.TarFile, dest: Path) -> tuple[list[tarfile.TarInf
             continue
         p = PurePosixPath(member.name)
         if p.is_absolute() or ".." in p.parts:
+            skipped += 1
+            continue
+        if "\x00" in member.name:   # a PAX name may carry NUL: is_contained raises on it (#795)
             skipped += 1
             continue
         if not is_contained(dest / member.name, dest):
@@ -352,7 +356,7 @@ def fetch_tarball(corpus: dict, *, timeout: int = 900) -> tuple[bool, str]:
     try:
         try:
             size = _download(url, archive, timeout=timeout)
-        except (urllib.error.URLError, OSError, TimeoutError, ValueError) as e:
+        except (urllib.error.URLError, OSError, TimeoutError, ValueError, http.client.HTTPException) as e:
             return _failed("download failed", e)
 
         sha256_obj = hashlib.sha256()

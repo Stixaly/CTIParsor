@@ -143,6 +143,39 @@ def _split_options(body: str) -> list[str]:
     return fragments
 
 
+def rule_body(rule_line: str) -> str | None:
+    """Return the options between the rule's `(` and the `)` that closes them.
+
+    The closing `)` is the first one outside a double-quoted string, so a `)` in
+    a trailing `# comment` after the rule does not widen the body (issue #797).
+    A line whose quotes never close falls back to the last `)`, as before.
+    Returns None when the line has no body.
+    """
+    first_open = rule_line.find("(")
+    if first_open == -1:
+        return None
+    in_string = False
+    i = first_open + 1
+    n = len(rule_line)
+    while i < n:
+        ch = rule_line[i]
+        if in_string:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                in_string = False
+        elif ch == '"':
+            in_string = True
+        elif ch == ")":
+            return rule_line[first_open + 1:i]
+        i += 1
+    last_close = rule_line.rfind(")")
+    if last_close <= first_open:
+        return None
+    return rule_line[first_open + 1:last_close]
+
+
 def parse_options(body: str) -> list[tuple[str, str]]:
     """Parse the rule body into (key, value) pairs.
 
@@ -258,6 +291,9 @@ def _normalize(cls: str, raw: str) -> list[str]:
             s = s[:-1]
         if s.startswith("www."):
             s = s[4:]
+        # Noise is judged on the stripped name: "www.example.com" is example.com.
+        if s in NOISE_LITERALS:
+            return []
         if looks_like_domain(s) and len(s) >= 4:
             return [s]
         return []
@@ -337,12 +373,9 @@ def extract_atoms(rule_line: str, *, max_atoms: int = 40) -> list[tuple[str, str
     if not isinstance(rule_line, str) or max_atoms <= 0:
         return []
 
-    # Extract body between first ( and last )
-    first_open = rule_line.find("(")
-    last_close = rule_line.rfind(")")
-    if first_open == -1 or last_close == -1 or last_close <= first_open:
+    body = rule_body(rule_line)
+    if body is None:
         return []
-    body = rule_line[first_open + 1:last_close]
 
     options = parse_options(body)
 
@@ -414,6 +447,31 @@ def extract_atoms(rule_line: str, *, max_atoms: int = 40) -> list[tuple[str, str
     return out
 
 
+def _header_fields(header_part: str) -> list[str]:
+    """Split a rule header on blanks, keeping each `[...]` list as one field.
+
+    `[1.2.3.4, 5.6.7.8]` and `[80, 443]` hold blanks but are one address or port
+    field: a plain `split()` cut them and shifted every field after them (#796).
+    """
+    fields: list[str] = []
+    current: list[str] = []
+    depth = 0
+    for ch in header_part:
+        if ch == "[":
+            depth += 1
+        elif ch == "]" and depth:
+            depth -= 1
+        if depth == 0 and ch.isspace():
+            if current:
+                fields.append("".join(current))
+                current = []
+        else:
+            current.append(ch)
+    if current:
+        fields.append("".join(current))
+    return fields
+
+
 def rule_header(rule_line: str) -> dict[str, str]:
     """Parse the header portion of a Suricata rule (before the first parenthesis).
 
@@ -430,7 +488,7 @@ def rule_header(rule_line: str) -> dict[str, str]:
     if first_open == -1:
         return {}
     header_part = rule_line[:first_open]
-    fields = header_part.split()
+    fields = _header_fields(header_part)
     if len(fields) < 7:
         return {}
     return {
@@ -460,11 +518,9 @@ def rule_metadata(rule_line: str) -> dict[str, list[str]]:
     """
     if not isinstance(rule_line, str):
         return {}
-    first_open = rule_line.find("(")
-    last_close = rule_line.rfind(")")
-    if first_open == -1 or last_close == -1 or last_close <= first_open:
+    body = rule_body(rule_line)
+    if body is None:
         return {}
-    body = rule_line[first_open + 1:last_close]
     options = parse_options(body)
     result: dict[str, list[str]] = {}
     for key, value in options:
