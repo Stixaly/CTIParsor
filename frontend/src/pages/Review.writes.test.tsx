@@ -326,6 +326,18 @@ describe('Review — a relationship the server refused on creation (#813)', () =
   }, 20_000)
 })
 
+describe('Review — a second Shift+click while the creator is open (#861)', () => {
+  it('fills the target of the open creator, which then can be created', async () => {
+    renderReview()
+    await opened()
+
+    fireEvent.click(document.querySelector('mark[data-eid="e-high"]')!, { shiftKey: true })
+    fireEvent.click(document.querySelector('mark[data-eid="e-auto"]')!, { shiftKey: true })
+
+    expect(await screen.findByRole('button', { name: 'Create relationship' })).toBeEnabled()
+  }, 20_000)
+})
+
 describe('Review — a drag ended by the page or by the browser (#816)', () => {
   const mark = () => document.querySelector('mark[data-eid="e-high"]') as HTMLElement
 

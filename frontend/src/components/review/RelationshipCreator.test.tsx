@@ -75,6 +75,22 @@ describe('RelationshipCreator — the chosen verb (#555)', () => {
   })
 })
 
+describe('RelationshipCreator — initial changes after mount', () => {
+  it('takes a target the parent sets after mount, and enables Create', () => {
+    const props = { entities: ENTITIES, onCancel: vi.fn(), onCreate: vi.fn(), onAddEntity: vi.fn() }
+    const { rerender } = render(
+      <RelationshipCreator {...props} initial={{ srcId: 'a', x: 300, y: 300 }} />,
+    )
+    expect(screen.getByRole('button', { name: 'Create relationship' })).toBeDisabled()
+
+    // A second Shift+click on another entity: the parent sets tgtId on the same creator
+    rerender(<RelationshipCreator {...props} initial={{ srcId: 'a', tgtId: 'm', x: 300, y: 300 }} />)
+
+    expect(screen.getByText('WellMess')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Create relationship' })).toBeEnabled()
+  })
+})
+
 // Clear the target chip, then pick the entity named `value` from the search
 function pickTarget(value: string) {
   const clearButtons = document.querySelectorAll<HTMLButtonElement>('.rc-chip-x')
