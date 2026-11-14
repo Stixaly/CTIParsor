@@ -205,6 +205,12 @@ export default function RelationshipCreator({
   // Set once the analyst picks a verb: a verb they picked is not replaced (#555)
   const verbPicked = useRef(false)
 
+  // The parent can change `initial` while the creator is open (a second Shift+click
+  // sets the target).  Follow each id only when its prop changes, so a pick made in
+  // a picker is kept until the parent sends a different value.
+  useEffect(() => { setSrcId(initial.srcId ?? '') }, [initial.srcId])
+  useEffect(() => { setTgtId(initial.tgtId ?? '') }, [initial.tgtId])
+
   // Auto-suggest relationship type whenever source or target changes.  A refresh
   // of `entities` (or an inline add) used to reset the verb the analyst had picked:
   // a picked verb is kept for as long as the pair still offers it (#555).
