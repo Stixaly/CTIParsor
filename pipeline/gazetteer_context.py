@@ -169,7 +169,7 @@ def embedded(text: str, start: int, end: int) -> bool:
 
 @functools.lru_cache(maxsize=256)
 def _phrase(phrase: str) -> re.Pattern:
-    body = re.escape(phrase).replace("'", "['’]").replace("’", "['’]")
+    body = re.sub(r"['’]", "['’]", re.escape(phrase))
     return re.compile(r"(?<![\w-])" + body + r"s?(?![\w-])", re.I)
 
 

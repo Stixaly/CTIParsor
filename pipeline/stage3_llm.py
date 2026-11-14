@@ -1244,6 +1244,11 @@ def _normalize_llm_json(data: dict) -> dict:
             if not isinstance(item, dict):
                 continue
             t = dict(item)
+            # #772 — a null on a field with a non-null default is an absence:
+            # Pydantic rejects None there and the whole TTP was dropped.
+            for k in ("description", "evidence_label"):
+                if k in t and t[k] is None:
+                    del t[k]
             if "technique_name" not in t:
                 for k in ("name", "technique", "label", "title"):
                     if isinstance(t.get(k), str) and t[k].strip():
@@ -1254,6 +1259,10 @@ def _normalize_llm_json(data: dict) -> dict:
                     if isinstance(t.get(k), str) and t[k].strip():
                         t["mitre_id"] = t.pop(k)
                         break
+            # #772 — an id alone is kept: stage3c resolves the canonical name from it.
+            if not isinstance(t.get("technique_name"), str) and isinstance(t.get("mitre_id"), str) \
+                    and t["mitre_id"].strip():
+                t["technique_name"] = ""
             # ADR-0028 — accept the aliases models reach for instead of
             # `evidence_text`, the same way relationship keys are normalised
             # below.  Without this the quote is silently dropped and the
@@ -1287,6 +1296,11 @@ def _normalize_llm_json(data: dict) -> dict:
             if not isinstance(item, dict):
                 continue
             r = dict(item)
+            # #772 — a null confidence (or other defaulted field) is an absence,
+            # not a value: Pydantic rejects it and the relationship was dropped.
+            for k in ("confidence", "relationship_type", "evidence_label"):
+                if k in r and r[k] is None:
+                    del r[k]
             if "source_value" not in r:
                 for k in ("source", "from", "subject", "source_entity", "actor"):
                     if isinstance(r.get(k), str) and r[k].strip():
@@ -2079,8 +2093,10 @@ def _merge_results(
                     for v in ttp_map.values()
                     if v.mitre_id
                 )
-                if not already_covered and name_key not in ttp_map:
-                    ttp_map[name_key] = t
+                # Better-evidenced wins here too (#773): a later chunk's quote
+                # must not be lost to an earlier id-less duplicate.
+                if not already_covered:
+                    ttp_map[name_key] = _prefer(ttp_map.get(name_key), t)
 
     rel_map: dict[tuple, RelationshipExtracted] = {}
     for r in results:

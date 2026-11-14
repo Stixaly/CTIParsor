@@ -133,6 +133,25 @@ def _drop_reasoning_blocks(text: str) -> tuple[str, bool]:
     return "".join(kept) + text[i:], removed
 
 
+def _json_starts_before(text: str, end: int) -> bool:
+    """True when a valid JSON object or array starts at a bracket before `end`
+    and reads past `end`.  A `</think>` inside such a value is data, not the end
+    of a reasoning block.  A value that closes before `end` is a draft in the
+    reasoning, not the answer, and does not count."""
+    scan = JsonScan(text)
+    for i in range(end):
+        if text[i] in "{[":
+            try:
+                _, value_end = scan.decode(i)
+            except json.JSONDecodeError:
+                continue
+            except ScanExhausted:
+                return False
+            if value_end > end:
+                return True
+    return False
+
+
 def strip_reasoning(text: str) -> str:
     """Return the answer without the reasoning block some models write first.
 
@@ -164,7 +183,8 @@ def strip_reasoning(text: str) -> str:
         return ""
     end = text.find(_REASONING_CLOSE)
     if (end != -1 and _REASONING_OPEN not in text[:end]
-            and not stripped.startswith(("{", "[", "```"))):
+            and not stripped.startswith(("{", "[", "```"))
+            and not _json_starts_before(text, end)):
         return text[end + len(_REASONING_CLOSE):].strip()
     kept, removed = _drop_reasoning_blocks(text)
     if not removed:

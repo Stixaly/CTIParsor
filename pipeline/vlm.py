@@ -364,7 +364,7 @@ class AnthropicVisionBackend:
         if self._client is None:
             if anthropic is None:
                 raise RuntimeError("anthropic SDK not installed")
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=self.timeout)
         return self._client
 
     def available(self) -> bool:

@@ -1083,8 +1083,14 @@ def export_plan(times: list[TemporalAssertion], mode: str = DEFAULT_EXPORT_MODE)
     # the reason. A conflict among bound roles withholds every bound, and an analyst
     # value replaces the automatic values of the same role.
     mode = mode if mode in EXPORT_MODES else DEFAULT_EXPORT_MODE
-    conflicted = any(a.status == "conflict" and a.role in BOUND_ROLES for a in times)
     analyst_roles = {a.role for a in times if a.origin == "analyst"}
+    # A conflict only counts while its assertion is active: an LLM conflict on a
+    # role the analyst has already set is superseded and must not withhold the pair.
+    conflicted = any(
+        a.status == "conflict" and a.role in BOUND_ROLES
+        and not (a.role in analyst_roles and a.origin != "analyst")
+        for a in times
+    )
     outcome: dict[str, tuple[str, str | None]] = {}
     candidates: dict[str, list[tuple[TemporalAssertion, datetime, str]]] = {"start": [], "end": []}
     for a in times:

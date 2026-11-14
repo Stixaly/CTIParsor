@@ -188,7 +188,9 @@ def test_the_model_is_loaded_without_the_deprecated_resume_download(fake_gliner_
     """GLiNER defaults resume_download=False and huggingface_hub warns on any
     value but None — the model-tests CI job printed that warning every run."""
     assert stage2e_gliner._load_gliner() == "model"
-    assert fake_gliner_lib.calls == [(stage2e_gliner._GLINER_MODEL_ID, {"resume_download": None})]
+    assert fake_gliner_lib.calls == [
+        (stage2e_gliner._GLINER_MODEL_ID, {"resume_download": None, "local_files_only": True}),
+    ]
     assert stage2e_gliner.gliner_available() is True
 
 

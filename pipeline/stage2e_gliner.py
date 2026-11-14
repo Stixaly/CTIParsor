@@ -174,7 +174,13 @@ def _load_gliner():
         # GLiNER defaults resume_download to False and forwards it to
         # huggingface_hub's snapshot_download, which warns on any value but
         # None ("deprecated and ignored").  None is the hub's own "not passed".
-        model = GLiNER.from_pretrained(_GLINER_MODEL_ID, resume_download=None)
+        # The cached model first, without a request to the Hub (issue #771, as
+        # stage 2d does); a model missing from the cache is downloaded as before.
+        try:
+            model = GLiNER.from_pretrained(_GLINER_MODEL_ID, resume_download=None, local_files_only=True)
+        except Exception as exc:
+            logger.debug(f"GLiNER not loadable from local cache ({type(exc).__name__}: {exc})")
+            model = GLiNER.from_pretrained(_GLINER_MODEL_ID, resume_download=None)
         logger.info(f"GLiNER model loaded: {_GLINER_MODEL_ID}")
         return model
     except ImportError:
@@ -326,8 +332,8 @@ def run_gliner(text: str) -> GLiNERRun:
     # Collect non-empty chunks, then ask the model in batches of _BATCH_SIZE.
     # A batch that raises, or whose answer is not one list per chunk, is asked
     # again one chunk at a time.
-    # best[key] = (score, context_snippet, span_text)
-    best: dict[tuple[str, EntityType], tuple[float, str, str]] = {}
+    # best[key] = (score, context_snippet, span_text, value)
+    best: dict[tuple[str, EntityType], tuple[float, str, str, str]] = {}
 
     # Build the flat list of (chunk_text, char_offset) upfront
     all_chunks = [(t, off) for t, off in _iter_chunks(text) if t.strip()]
@@ -376,22 +382,26 @@ def run_gliner(text: str) -> GLiNERRun:
                 if re.fullmatch(r"\d[\d.\-]*\d?", value):
                     continue
 
-                # Context: surrounding text in the chunk (±50 chars)
-                span_start = pred.get("start", 0)
+                # Context: surrounding text in the chunk (±50 chars).  Offsets that
+                # are not ints count as absent (issue #767): a None must not raise here.
+                pred_start = pred.get("start")
+                span_start = pred_start if isinstance(pred_start, int) else 0
+                pred_end   = pred.get("end")
+                span_end   = pred_end if isinstance(pred_end, int) else span_start
                 ctx_start  = max(0, span_start - 50)
-                ctx_end    = min(len(chunk_text), pred.get("end", span_start) + 50)
+                ctx_end    = min(len(chunk_text), span_end + 50)
                 context    = chunk_text[ctx_start:ctx_end].strip()
 
                 key = (value.lower(), etype)
                 if key not in best or score > best[key][0]:
-                    best[key] = (score, context, _span_text(chunk_text, pred, value))
+                    best[key] = (score, context, _span_text(chunk_text, pred, value), value)
 
     # ── Convert to RawEntity ─────────────────────────────────────────────────
     results: list[RawEntity] = []
-    for (value_lower, etype), (score, context, span_text) in best.items():
+    for (value_lower, etype), (score, context, span_text, value) in best.items():
         # The casing the span has in the text (GLiNER's offsets), else the first
-        # whole-word match of the value in the context.
-        display_value = span_text or _recover_casing(value_lower, context)
+        # whole-word match of the value in the context, else the value as GLiNER gave it.
+        display_value = span_text or _recover_casing(value_lower, context, value)
         results.append(RawEntity(
             value=display_value,
             entity_type=etype,
@@ -418,11 +428,12 @@ def _span_text(chunk_text: str, pred: dict, value: str) -> str:
     return span if span.lower() == value.lower() else ""
 
 
-def _recover_casing(value_lower: str, context: str) -> str:
+def _recover_casing(value_lower: str, context: str, fallback: str | None = None) -> str:
     """
     Try to find the original-cased version of *value_lower* in *context*, as a
-    whole word: "rat" is not the "rat" inside "crates".  Falls back to the
-    lower-cased value if no whole-word match is found.
+    whole word: "rat" is not the "rat" inside "crates".  Falls back to *fallback*
+    (the value as the model gave it) if given, else to the lower-cased value, if
+    no whole-word match is found.
     """
     # Case-insensitive search in context.  glued_to_a_word, not `\b`: it reads
     # non-ASCII letters as word characters, and a value that starts or ends with
@@ -432,7 +443,7 @@ def _recover_casing(value_lower: str, context: str) -> str:
     for m in pattern.finditer(context):
         if not glued_to_a_word(context, *m.span()):
             return m.group()
-    return value_lower
+    return value_lower if fallback is None else fallback
 
 
 # ---------------------------------------------------------------------------

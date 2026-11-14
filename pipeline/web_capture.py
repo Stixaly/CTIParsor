@@ -852,7 +852,7 @@ def capture_url_to_pdf(
 ) -> CaptureResult:
     """Capture a URL to a PDF file using Playwright."""
     if not _PLAYWRIGHT_AVAILABLE:
-        raise CaptureError(
+        raise CaptureUnavailable(
             "Web capture is unavailable — Playwright is not installed. "
             "Run: pip install playwright && python -m playwright install chromium"
         )

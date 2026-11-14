@@ -106,12 +106,15 @@ def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None
     if not index or not _RAPIDFUZZ_AVAILABLE:
         return technique_name, mitre_id, None
 
+    # An id the LLM padded with spaces (" T1566 ") is still that id (#776).
+    mid = mitre_id.strip().lower() if mitre_id else None
+
     # 0. A revoked id the report still writes (T1562) is its replacement
     #    (T1685): resolving it by name instead found the Mobile technique of
     #    the same name (T1629), the only one left with it.
-    if mitre_id and mitre_id.lower() not in index:
+    if mid and mid not in index:
         from pipeline.mitre_db import replacement_for
-        new_id = replacement_for(mitre_id)
+        new_id = replacement_for(mid)
         if new_id and new_id.lower() in index:
             e = index[new_id.lower()]
             return e["name"], e["id"], e["url"]
@@ -121,8 +124,8 @@ def _resolve(technique_name: str, mitre_id: str | None) -> tuple[str, str | None
     # 1. Try the provided MITRE ID first — it is the highest-authority signal.
     #    This prevents cross-domain name collisions (e.g. "Phishing" exists as
     #    T1566 in Enterprise and T1660 in Mobile; the ID breaks the tie).
-    if mitre_id and mitre_id.lower() in index:
-        e = index[mitre_id.lower()]
+    if mid and mid in index:
+        e = index[mid]
         return e["name"], e["id"], e["url"]
 
     # 2. Exact name match (only useful when no valid ID was provided)
@@ -250,6 +253,11 @@ def normalize_ttps(
     # ── 2. Resolve and merge LLM TTPs ───────────────────────────────────────
     for ttp in ttps:
         canon_name, canon_id, _ = _resolve(ttp.technique_name, ttp.mitre_id)
+        # An id the index does not know, with no name to fall back on, is
+        # nothing: #772 keeps such a TTP past normalisation, so it ends here.
+        if not canon_name.strip():
+            logger.debug(f"[Stage 3c] TTP discarded, id unknown and no name: {ttp.mitre_id!r}")
+            continue
         dedup_key = canon_id.lower() if canon_id else canon_name.lower()
 
         # Prefer the LLM's own quote; fall back to the corroborating semantic

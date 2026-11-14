@@ -41,7 +41,9 @@ def _run(monkeypatch, cyner_found):
     monkeypatch.setattr(gaz, "available", lambda: True)
     monkeypatch.setattr(gaz, "match_gazetteer_traced", lambda text: ([_e("Snake", EntityType.TOOL)], []))
     monkeypatch.setattr(cyner, "cyner_available", lambda: True)
-    monkeypatch.setattr(cyner, "extract_cyner_entities", lambda text: list(cyner_found))
+    # The orchestrator calls run_cyner (#768): its status is the seam now.
+    monkeypatch.setattr(cyner, "run_cyner", lambda text: cyner.CyNERRun(
+        entities=list(cyner_found), loaded=True, chunks=1, answered=1))
     return run_document(Document(text=_TEXT), _options())
 
 

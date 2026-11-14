@@ -30,6 +30,7 @@ from __future__ import annotations
 import functools
 import os
 import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
@@ -272,10 +273,11 @@ def _split_fragments(value: str) -> list[str]:
     """Split a comma- or slash-separated list span into its parts (CyNER
     sometimes merges several distinct malware names named in a list into one
     span). A value with no such separator is returned unchanged as a
-    single-item list."""
+    single-item list. A separator left alone at the end ("Emotet,") leaves
+    one part, which is returned without it (#775)."""
     parts = [p.strip() for p in _COMMA_SLASH_RE.split(value)]
     parts = [p for p in parts if p]
-    return parts if len(parts) > 1 else [value]
+    return parts or [value]
 
 
 # ── Lazy-loaded model ─────────────────────────────────────────────────────────
@@ -401,6 +403,62 @@ def cyner_unavailable_reason() -> str:
     return "model or index unavailable"
 
 
+@dataclass
+class CyNERRun:
+    """What one pass of the stage over a text did, for the stage report (#768),
+    as GLiNERRun does for Stage 2e: the entities, and whether the model answered."""
+
+    entities: list[RawEntity] = field(default_factory=list)
+    loaded: bool = False          # there was a model to ask
+    chunks: int = 0               # non-empty windows of the text
+    answered: int = 0             # windows with a well-formed answer from the model
+    retried_batches: int = 0      # batch answers refused, asked again chunk by chunk
+    error: str = ""               # why nothing was loaded, or the last unanswered chunk's error
+
+    @property
+    def unanswered(self) -> int:
+        """The windows of the text that the model did not answer: chunks minus answered."""
+        return self.chunks - self.answered
+
+    def failure(self) -> str:
+        """Why the stage cannot be recorded as run, "" when it can: no model,
+        or a model that answered none of the chunks it was given."""
+        if not self.loaded:
+            return self.error or "the model was not loaded"
+        if self.chunks and not self.answered:
+            return f"the model answered none of the {self.chunks} chunks: {self.error}"
+        return ""
+
+    def note(self) -> str:
+        """What a stage that ran still has to say: chunks left unanswered, and
+        batches the pipeline did not answer."""
+        parts = []
+        if self.unanswered:
+            parts.append(f"{self.unanswered} of {self.chunks} chunks unanswered: {self.error}")
+        if self.retried_batches:
+            parts.append(f"{self.retried_batches} batch answers refused, asked again chunk by chunk")
+        return "; ".join(parts)
+
+
+def _per_chunk_predictions(raw, chunks: int) -> list[list[dict]]:
+    """One list of prediction dicts for each chunk, from the pipeline's answer,
+    or ValueError. A single-chunk answer may come back flat (one list of
+    predictions): it is read as the answer for that chunk. Anything else that
+    is not one list per chunk is an error, never "nothing found"."""
+    if chunks == 1 and isinstance(raw, list) and all(isinstance(p, dict) for p in raw):
+        raw = [raw]
+    if not isinstance(raw, list) or len(raw) != chunks:
+        raise ValueError(f"expected one list of predictions for each of {chunks} chunks, "
+                         f"got {type(raw).__name__}")
+    answers: list[list[dict]] = []
+    for preds in raw:
+        preds = preds or []
+        if not isinstance(preds, list) or not all(isinstance(p, dict) for p in preds):
+            raise ValueError("expected a list of prediction dicts for each chunk")
+        answers.append(preds)
+    return answers
+
+
 def extract_cyner_entities(text: str) -> list[RawEntity]:
     """
     Run CyNER over *text* and return cybersecurity named entities.
@@ -409,11 +467,24 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     gazetteer (Stage 2b) are NOT filtered here — the caller (worker.py) handles
     deduplication so that the higher-precision source wins.
 
-    Returns an empty list if the model cannot be loaded.
+    Returns an empty list if the model cannot be loaded or answers no chunk.
+    run_cyner() also says whether the model answered.
+    """
+    return run_cyner(text).entities
+
+
+def run_cyner(text: str) -> CyNERRun:
+    """
+    Run CyNER over *text*; return the entities and what the model was asked
+    (see CyNERRun).
+
+    The chunks go to the model in one call.  A call that raises, or whose
+    answer is not one list per chunk, is asked again one chunk at a time, so
+    one dense chunk does not cost the entities of every other chunk (#768).
     """
     ner_pipeline = _load_pipeline()
     if ner_pipeline is None:
-        return []
+        return CyNERRun(error="the model could not be loaded")
 
     # Never hand the whole document to the model in one call.  DeBERTa-v3 uses
     # relative positions, so a 50 000-character input does not raise — it runs,
@@ -424,17 +495,25 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
     # ~1 600 characters (≈ 500 tokens, the model's window) with an overlap keep
     # each forward pass bounded; the pipeline accepts a list and batches it.
     chunks = [c for c, _ in _iter_chunks(text) if c.strip()]
+    run = CyNERRun(loaded=True, chunks=len(chunks))
     if not chunks:
-        return []
+        return run
     try:
-        per_chunk = ner_pipeline(chunks, batch_size=_BATCH_SIZE)
+        per_chunk = _per_chunk_predictions(ner_pipeline(chunks, batch_size=_BATCH_SIZE), len(chunks))
+        run.answered = len(chunks)
     except Exception as e:
-        logger.error(f"CyNER inference error: {e}")
-        return []
-    # A single-chunk call returns a flat list rather than a list of lists.
-    if per_chunk and isinstance(per_chunk[0], dict):
-        per_chunk = [per_chunk]
-    predictions: list[dict] = [p for preds in per_chunk for p in (preds or [])]
+        logger.warning(f"CyNER batch inference error (falling back to single chunks): {e}")
+        run.retried_batches += 1
+        per_chunk = []
+        for chunk in chunks:
+            try:
+                per_chunk.append(_per_chunk_predictions(ner_pipeline([chunk], batch_size=_BATCH_SIZE), 1)[0])
+                run.answered += 1
+            except Exception as e2:
+                logger.error(f"CyNER inference error on one chunk: {e2}")
+                run.error = f"{type(e2).__name__}: {e2}"
+                per_chunk.append([])
+    predictions: list[dict] = [p for preds in per_chunk for p in preds]
 
     cutoff = {etype: get_threshold("cyner", etype.value, _MEDIUM_THRESH) for etype in _LABEL_MAP.values()}
 
@@ -498,7 +577,8 @@ def extract_cyner_entities(text: str) -> list[RawEntity]:
                 source="cyner",
             ))
 
-    return drop_denied(results)
+    run.entities = drop_denied(results)
+    return run
 
 
 # ---------------------------------------------------------------------------

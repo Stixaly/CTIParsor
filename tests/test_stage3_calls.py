@@ -550,7 +550,7 @@ def test_a_top_level_field_of_the_wrong_type_takes_its_default_and_keeps_the_rel
 
 
 def test_a_malformed_ttp_is_dropped_and_the_relation_beside_it_kept(caplog):
-    text = ('{"ttps": [{"technique_name": "Phishing", "description": null}], '
+    text = ('{"ttps": [{"technique_name": ["Phishing"]}], '
             '"relationships": [{"source_value": "APT29", "relationship_type": "uses", "target_value": "X"}]}')
     result = s3._parse_llm_response(text)
     assert result.ttps == []
