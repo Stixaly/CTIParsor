@@ -25,6 +25,9 @@ from pipeline.regex_safety import PY_WHITESPACE, compile_pattern, glued_to_a_wor
 _TRANSPORT = ("tcp", "udp", "icmp")
 _APPLICATION = ("http", "https", "dns", "tls", "smtp", "ftp", "ssh")
 _WORD = compile_pattern(r"[a-z0-9]+", re.IGNORECASE)
+# #860: an arrow ends a token too ("tcp/443->evil.com").  Only arrows: a "/" or
+# a ":" is part of the host or the port, not a separator.
+_ARROW = compile_pattern("->|=>|→")
 # PY_WHITESPACE, not `\s`, which RE2 keeps to ASCII: "port\xa0443" names a port.
 # re.ASCII: `re` reads `\b` as RE2 does, and the caller drops a match glued to a
 # word RE2 cut it out of ("téléport 443").
@@ -68,7 +71,7 @@ def parse_network_traffic(text: str) -> TrafficDescriptor | None:
         return None
     found = None
     host_token = ""
-    for token in text.split():
+    for token in _ARROW.sub(" ", text).split():
         found = _host(token)
         if found:
             host_token = token
