@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import CoverageExportPanel from './CoverageExportPanel'
 import type { RuleSelection, SelectableRule } from '../../hooks/useRuleSelection'
 import type { TechEntry } from './model'
+import type { DetectionFormat } from '../../types'
 
 // The ZIP is built from a blob, so the export goes through a temporary <a>.
 // Firefox ignores click() on an <a> that is not in the document (#546).
@@ -161,5 +162,65 @@ describe('CoverageExportPanel — tactic header corpora (#567)', () => {
     // The tactic row and its one technique row both say 2 corpora.
     expect(screen.getAllByText('2 corpora')).toHaveLength(2)
     expect(screen.queryByText('0 corpora')).toBeNull()
+  })
+})
+
+// Only RULE_B is selected: checking it is the change a re-render brings.
+const ONLY_RULE_B: RuleSelection = {
+  ...NONE_SELECTED,
+  excluded: new Set(['r1']),
+  isSelected: (id) => id === 'r2',
+  selectedCount: 1,
+  selectedBytes: 80,
+  selectedOf: (ids) => ids.filter((id) => id === 'r2').length,
+  bytesOf: (ids) => (ids.includes('r2') ? 80 : 0),
+}
+
+// The tri-state checkbox of a row, found from the row's label.
+const checkboxOf = (label: string) => screen.getByText(label).parentElement?.parentElement?.firstElementChild
+
+// #833 — rows are declared at module level: a row keeps its checkbox node when another row changes.
+describe('CoverageExportPanel — rows keep their checkbox (#833)', () => {
+  it('keeps the checkbox node of a row when another row is checked', () => {
+    const panel = (selection: RuleSelection) => (
+      <CoverageExportPanel
+        jobId="job-1"
+        reportName="report.pdf"
+        columns={[]}
+        rules={[RULE, RULE_B]}
+        rulesById={new Map([[RULE.id, RULE], [RULE_B.id, RULE_B]])}
+        selection={selection}
+        hasPromoted
+      />
+    )
+    const { rerender } = render(panel(NONE_SELECTED))
+    fireEvent.click(screen.getByRole('button', { name: 'By format · corpus' }))
+    const before = checkboxOf('corpus-a')
+    expect(before).not.toBeNull()
+
+    rerender(panel(ONLY_RULE_B))
+
+    expect(checkboxOf('corpus-a')).toBe(before)
+  })
+})
+
+// #834 — a rule of a format the panel does not know is in no group, and does not break the panel.
+describe('CoverageExportPanel — unknown rule format (#834)', () => {
+  it('renders a rule of an unexpected format in no group, without an exception', () => {
+    const ODD = { ...RULE_B, id: 'r3', format: 'nmap' as DetectionFormat, corpus: 'corpus-odd' } as SelectableRule
+    render(
+      <CoverageExportPanel
+        jobId="job-1"
+        reportName="report.pdf"
+        columns={[]}
+        rules={[RULE, ODD]}
+        rulesById={new Map([[RULE.id, RULE], [ODD.id, ODD]])}
+        selection={SELECTION}
+        hasPromoted
+      />,
+    )
+    fireEvent.click(screen.getByRole('button', { name: 'By format · corpus' }))
+    expect(screen.getByText('corpus-a')).toBeInTheDocument()
+    expect(screen.queryByText('corpus-odd')).toBeNull()
   })
 })

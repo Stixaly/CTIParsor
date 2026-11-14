@@ -15,7 +15,7 @@ from typing import overload
 from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from api.db import get_rule_conn
 from api.response_models.settings import (
@@ -26,6 +26,7 @@ from api.response_models.settings import (
     RebuildOut,
     SyncOut,
 )
+from api.routes._common import storable_text
 from pipeline.detection.builder import rebuild_store
 from pipeline.detection.registry import _ADAPTERS, add_corpus, merged_corpora, remove_corpus
 from pipeline.detection.store import corpus_counts
@@ -88,6 +89,13 @@ class CorpusIn(BaseModel):
     priority: int | None = None
     private: bool = False
     enabled: bool = True
+
+    @field_validator("name", "adapter", "git", "tarball", "path", "subdir", "license")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: str | None) -> str | None:
+        # A NUL breaks Path.resolve() and a lone surrogate breaks the UTF-8 response,
+        # after the overlay was written: a 422 here, before add_corpus (#761, #762).
+        return storable_text(v)
 
 
 class CorpusPatch(BaseModel):
@@ -163,7 +171,11 @@ def _validate_git_remote(value: str) -> None:
     A private corpus over SSH is cloned by hand into corpora/ and registered
     with its `path` only (that module's docstring).
     """
-    if urlsplit(value).scheme.lower() != "https":
+    try:
+        scheme = urlsplit(value).scheme.lower()
+    except ValueError as exc:   # unbalanced IPv6 brackets ("https://[::1"): not a URL at all
+        raise HTTPException(400, "'git' is not a valid URL") from exc
+    if scheme != "https":
         raise HTTPException(
             400,
             "'git' must be an https:// URL — ssh://, git://, file:// and scp-style "

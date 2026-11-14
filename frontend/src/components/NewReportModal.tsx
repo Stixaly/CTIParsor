@@ -289,16 +289,6 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
     }
   }, [open, mode])
 
-  // 3. Escape
-  useEffect(() => {
-    if (!open) return
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [open, onClose])
-
   const onDone = (d: { job_id: string; filename: string }) => {
     setError(null)
     qc.invalidateQueries({ queryKey: ['jobs'] })
@@ -332,6 +322,17 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
   })
 
   const busy = fileMut.isPending || textMut.isPending || urlMut.isPending
+
+  // 3. Escape.  Not while a request is in flight: its answer would reset a form the
+  // analyst may have reopened (#826), as Cancel already refuses to.
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !busy) onClose()
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [open, onClose, busy])
 
   const handleSubmit = () => {
     if (!canSubmit) return
@@ -393,6 +394,7 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
     e.target.value = ''
   }
   const handleBackdropMouseDown = (e: React.MouseEvent) => {
+    if (busy) return
     if (e.target === e.currentTarget) onClose()
   }
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); setModalDrag(true) }
@@ -506,6 +508,7 @@ export default function NewReportModal({ open, initialFile, initialBundle, initi
             type="button"
             aria-label="Close"
             title="Close"
+            disabled={busy}
             onClick={onClose}
             style={{
               width: 26, height: 26, border: '1px solid var(--rule)', borderRadius: 6,

@@ -207,8 +207,9 @@ def test_a_run_hands_the_hook_the_losers_before_extraction_ready_issue_397(monke
     monkeypatch.setattr(gaz, "match_gazetteer_traced", lambda text: (
         [RawEntity(value="Snake", entity_type=EntityType.TOOL, source="gazetteer")], []))
     monkeypatch.setattr(cyner, "cyner_available", lambda: True)
-    monkeypatch.setattr(cyner, "extract_cyner_entities", lambda text: [
-        RawEntity(value="Snake", entity_type=EntityType.MALWARE, source="cyner")])
+    # The orchestrator calls run_cyner (#768): its status is the seam now.
+    monkeypatch.setattr(cyner, "run_cyner", lambda text: cyner.CyNERRun(entities=[
+        RawEntity(value="Snake", entity_type=EntityType.MALWARE, source="cyner")], loaded=True, chunks=1, answered=1))
     calls: list = []
 
     class Recording(Hooks):

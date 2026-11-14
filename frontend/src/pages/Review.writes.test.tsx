@@ -68,6 +68,8 @@ const api = vi.hoisted(() => ({
   fetchEntities: vi.fn(),
   fetchRelationships: vi.fn(),
   finalizeJob: vi.fn(),
+  finalizeJobQuick: vi.fn(),
+  createRelationship: vi.fn(),
   fetchCoverageReportRules: vi.fn(),
 }))
 
@@ -82,8 +84,8 @@ vi.mock('../api/client', async () => ({
   updateRelationship: api.updateRelationship,
   bulkUpdateEntities: api.bulkUpdateEntities,
   bulkUpdateRelationships: api.bulkUpdateRelationships,
-  createEntity: vi.fn(), createRelationship: vi.fn(),
-  finalizeJob: api.finalizeJob, finalizeJobQuick: vi.fn(() => Promise.resolve({})),
+  createEntity: vi.fn(), createRelationship: api.createRelationship,
+  finalizeJob: api.finalizeJob, finalizeJobQuick: api.finalizeJobQuick,
   sourceUrl: (id: string) => `/api/jobs/${id}/source`,
   detectionsExportUrl: (id: string) => `/api/jobs/${id}/detections/export`,
   errorDetail: (e: unknown) => String(e),
@@ -140,11 +142,15 @@ beforeEach(() => {
   api.fetchRelationships.mockReset().mockImplementation(() => Promise.resolve(store.rels.map(r => ({ ...r }))))
   api.fetchCoverageReportRules.mockReset().mockImplementation(() => Promise.resolve(NO_BASE_RULES))
   api.finalizeJob.mockReset()
+  api.finalizeJobQuick.mockReset().mockImplementation(() => Promise.resolve({}))
+  api.createRelationship.mockReset()
   localStorage.clear()
 })
 
 afterEach(() => {
   vi.restoreAllMocks()
+  // A test may stub the hit test a drag uses (#813); jsdom has none.
+  delete (document as { elementFromPoint?: unknown }).elementFromPoint
 })
 
 describe('Review — a failed Undo of the auto-accept (#706)', () => {
@@ -254,5 +260,109 @@ describe('Review — answers that arrive out of order (#706)', () => {
     await act(async () => { await new Promise(r => setTimeout(r, 30)) })
     expect(card('e-high')).toHaveClass('rejected')
     expect(card('e-high')).not.toHaveClass('accepted')
+  }, 20_000)
+})
+
+describe('Review — an edit made while the bundle is being finalized (#809)', () => {
+  it('keeps the bundle outdated when Complete Review returns after an edit', async () => {
+    let answer!: () => void
+    api.finalizeJob.mockImplementation(() => new Promise(resolve => { answer = () => resolve({}) }))
+    renderReview()
+    await opened()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+    await waitFor(() => expect(api.finalizeJob).toHaveBeenCalledTimes(1))
+    fireEvent.click(within(card('e-high')).getByTitle('Accept (A)'))
+    await screen.findByText(/Bundle outdated/)
+
+    await act(async () => { answer() })
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(screen.getByText(/Bundle outdated/)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Download STIX' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /^Complete Review/ })).toBeInTheDocument()
+  }, 20_000)
+
+  it('keeps the bundle outdated when the background rebuild returns after an edit', async () => {
+    let answer!: () => void
+    api.finalizeJobQuick.mockImplementationOnce(() => new Promise(resolve => { answer = () => resolve({}) }))
+    renderReview()
+    await opened()
+
+    fireEvent.click(within(card('e-high')).getByTitle('Accept (A)'))
+    await screen.findByText(/Bundle outdated/)
+    // The 4 s debounce starts the rebuild; the analyst rejects a card while it runs.
+    await waitFor(() => expect(api.finalizeJobQuick).toHaveBeenCalledTimes(1), { timeout: 8_000 })
+    fireEvent.click(within(card('e-control')).getByTitle('Reject (R)'))
+    await waitFor(() => expect(card('e-control')).toHaveClass('rejected'))
+
+    await act(async () => { answer() })
+    await act(async () => { await new Promise(r => setTimeout(r, 30)) })
+    expect(screen.getByText(/Bundle outdated/)).toBeInTheDocument()
+    expect(screen.queryByText(/Bundle current/)).not.toBeInTheDocument()
+  }, 20_000)
+})
+
+describe('Review — a relationship the server refused on creation (#813)', () => {
+  it('says so, in an alert and in the failure banner, when createRelationship is rejected', async () => {
+    const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
+    api.createRelationship.mockRejectedValueOnce(new Error('500: boom'))
+    // A drag from one entity onto the other opens the creator with both ends chosen.
+    // jsdom has no elementFromPoint: the release is pointed at the second entity's mark.
+    Object.defineProperty(document, 'elementFromPoint', {
+      value: () => document.querySelector('mark[data-eid="e-auto"]'), configurable: true,
+    })
+    renderReview()
+    await opened()
+
+    fireEvent.pointerDown(document.querySelector('mark[data-eid="e-high"]')!, { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 200, clientY: 200 })
+    fireEvent.pointerUp(window, { clientX: 200, clientY: 200 })
+    fireEvent.click(await screen.findByRole('button', { name: 'Create relationship' }))
+
+    await waitFor(() => expect(alert).toHaveBeenCalledWith(
+      expect.stringContaining('Could not create relationship'),
+    ))
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Could not create relationship/)
+  }, 20_000)
+})
+
+describe('Review — a drag ended by the page or by the browser (#816)', () => {
+  const mark = () => document.querySelector('mark[data-eid="e-high"]') as HTMLElement
+
+  it('removes the drag listeners when the page unmounts during a drag', async () => {
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const { unmount } = renderReview()
+    await opened()
+
+    fireEvent.pointerDown(mark(), { button: 0, clientX: 10, clientY: 10 })
+    unmount()
+    expect(remove).toHaveBeenCalledWith('pointermove', expect.any(Function))
+    expect(remove).toHaveBeenCalledWith('pointerup', expect.any(Function))
+  }, 20_000)
+
+  it('removes the drag listeners when the browser cancels the pointer', async () => {
+    const remove = vi.spyOn(window, 'removeEventListener')
+    renderReview()
+    await opened()
+
+    fireEvent.pointerDown(mark(), { button: 0, clientX: 10, clientY: 10 })
+    fireEvent.pointerMove(window, { clientX: 100, clientY: 100 })
+    fireEvent.pointerCancel(window)
+    expect(remove).toHaveBeenCalledWith('pointermove', expect.any(Function))
+  }, 20_000)
+
+  it('does not leave the "finalized" toast timer running after the page unmounts', async () => {
+    api.finalizeJob.mockResolvedValue({})
+    const setT = vi.spyOn(globalThis, 'setTimeout')
+    const clearT = vi.spyOn(globalThis, 'clearTimeout')
+    const { unmount } = renderReview()
+    await opened()
+
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+    await screen.findByRole('button', { name: 'Download STIX' })
+    const toastIdx = setT.mock.calls.findIndex(([, ms]) => ms === 2600)
+    expect(toastIdx).toBeGreaterThanOrEqual(0)
+    unmount()
+    expect(clearT).toHaveBeenCalledWith(setT.mock.results[toastIdx].value)
   }, 20_000)
 })

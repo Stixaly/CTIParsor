@@ -1,5 +1,6 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { canWrite, fetchMe, roleAtLeast, signOut as apiSignOut, type Me, type Role } from '../api/auth'
+import { setCsrfToken } from '../api/session'
 
 /** loading: /me not answered yet · off: AUTH_MODE=off, no sign-in at all ·
  *  anonymous: authentication is on and nobody is signed in · signed-in. */
@@ -31,10 +32,16 @@ export function useAuth(): AuthState {
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>('loading')
   const [me, setMeState] = useState<Me | null>(null)
+  // Bumped by every refresh, sign-in and sign-out: an answer from an older one is ignored,
+  // so a /me sent before a sign-in cannot sign the user out after it (#820).
+  const generation = useRef(0)
 
   const refresh = useCallback(async () => {
+    const mine = ++generation.current
     try {
       const found = await fetchMe()
+      if (mine !== generation.current) return
+      setCsrfToken(found?.csrf_token ?? null)
       if (found === null) {
         setMeState(null)
         setStatus('anonymous')
@@ -46,18 +53,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStatus('signed-in')
       }
     } catch {
-      setStatus('error')
+      if (mine === generation.current) setStatus('error')
     }
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
 
   const setMe = useCallback((next: Me) => {
+    generation.current += 1
     setMeState(next)
     setStatus(next.auth_mode === 'off' ? 'off' : 'signed-in')
   }, [])
 
   const signOut = useCallback(async () => {
+    generation.current += 1
     try { await apiSignOut() } finally {
       setMeState(null)
       setStatus('anonymous')

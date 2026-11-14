@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { act, render } from '@testing-library/react'
 import GraphCanvas from './GraphCanvas'
 import { parallelOffsets, type EdgeKind, type GraphEdge, type GraphNode } from './graphLayout'
 
@@ -112,5 +112,57 @@ describe('GraphCanvas — pointer buttons (#570)', () => {
     press(container.querySelector('[data-node="a"]')!, 0)
     press(window, 0, 'pointerup')
     expect(onSelect).toHaveBeenCalledWith('a')
+  })
+})
+
+// #832 — a drag or a pan that ends in pointercancel, or on unmount, lets go.
+describe('GraphCanvas — a drag cut short (#832)', () => {
+  // A pointer event on the window or an element, inside act so React flushes the repaint.
+  const pointer = (type: string, target: EventTarget, clientX = 10, clientY = 10) =>
+    act(() => { target.dispatchEvent(new MouseEvent(type, { button: 0, bubbles: true, clientX, clientY })) })
+  const nodeTransform = (container: HTMLElement) =>
+    container.querySelector('[data-node="a"]')!.getAttribute('transform')
+  const viewTransform = (container: HTMLElement) =>
+    container.querySelector('svg > g')!.getAttribute('transform')
+
+  it('stops moving the node after pointercancel', () => {
+    const { container } = renderCanvas([])
+    const before = nodeTransform(container)
+    pointer('pointerdown', container.querySelector('[data-node="a"]')!)
+    pointer('pointermove', window, 40, 40)
+    const dragged = nodeTransform(container)
+    expect(dragged).not.toBe(before)
+
+    pointer('pointercancel', window)
+    pointer('pointermove', window, 90, 90)
+
+    expect(nodeTransform(container)).toBe(dragged)
+  })
+
+  it('stops the node drag’s window listeners when the canvas unmounts mid-drag', () => {
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const { container, unmount } = renderCanvas([])
+    pointer('pointerdown', container.querySelector('[data-node="a"]')!)
+    const moves = add.mock.calls.filter(([type]) => type === 'pointermove')
+    const moveListener = moves[moves.length - 1][1]
+
+    unmount()
+
+    expect(remove).toHaveBeenCalledWith('pointermove', moveListener)
+    add.mockRestore()
+    remove.mockRestore()
+  })
+
+  it('stops panning the background after pointercancel', () => {
+    const { container } = renderCanvas([])
+    pointer('pointerdown', container.querySelector('svg')!)
+    pointer('pointermove', window, 30, 30)
+    const panned = viewTransform(container)
+
+    pointer('pointercancel', window)
+    pointer('pointermove', window, 90, 90)
+
+    expect(viewTransform(container)).toBe(panned)
   })
 })

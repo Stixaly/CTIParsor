@@ -164,7 +164,7 @@ def _worker_warning(workers: int) -> list[str]:
 
 def main() -> int:
     """Load `.env`, resolve settings, print warnings, and start uvicorn."""
-    load_dotenv()
+    load_dotenv(Path(REPO_ROOT) / ".env")
     _require_database_url()
     host = _resolve_host()
     port = _resolve_port()

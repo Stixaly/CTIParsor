@@ -898,13 +898,19 @@ class _Run:
         from pipeline.stage2d_cyner import (
             cyner_available,
             cyner_unavailable_reason,
-            extract_cyner_entities,
+            run_cyner,
         )
         if self.gate("2d", cyner_available, unavailable_reason=cyner_unavailable_reason):
             t0 = time.monotonic()
-            self.r.cyner = extract_cyner_entities(text)
+            cyner_run = run_cyner(text)
+            self.r.cyner = cyner_run.entities
             entities = BaseExtractionStage.merge_into(entities, self.r.cyner)
-            self.record("2d", RAN, ner_note, time.monotonic() - t0, entities=len(self.r.cyner))
+            # `ran` only when the model was asked and answered (#768, as 2e).
+            failure = cyner_run.failure()
+            note = "; ".join(filter(None, [ner_note, cyner_run.note()]))
+            self.record("2d", FAILED if failure else RAN, failure or note,
+                        time.monotonic() - t0, entities=len(self.r.cyner),
+                        chunks=cyner_run.chunks, chunks_unanswered=cyner_run.unanswered)
 
         # Stage 2e — GLiNER zero-shot NER: sectors, campaigns, infrastructure,
         # novel actors and malware ("0-CTI", CY4GATE 2025 — ADR-0004 P2-A).
@@ -977,7 +983,13 @@ class _Run:
         elif self.gate("3", _provider_ready,
                        f"LLM provider not ready ({provider_label()})"):
             results = self._chunks_to_llm()
-            self._document_relations(results)
+            # A Stage 3 with no usable answer would only send the same provider
+            # another call (#787). An off 3doc keeps its own "disabled" status:
+            # _document_relations records it and makes no call.
+            if self.r.ran("3") or not self._document_relations_on():
+                self._document_relations(results)
+            else:
+                self.record("3doc", SKIPPED, "Stage 3 failed")
         else:
             for sid in ("3d", "3f", "3e", "3doc"):
                 self.record(sid, SKIPPED, "Stage 3 did not run")
@@ -1262,16 +1274,19 @@ class _Run:
         # Results in chunk order; a skipped chunk contributes an empty result.
         return [chunk_results.get(i, LLMEnrichmentResult()) for i in range(1, total + 1)]
 
+    def _document_relations_on(self) -> bool:
+        """The 3doc switch: off when disabled, else the run's option, else the environment's."""
+        from pipeline.stage3_llm import document_level_relations_enabled
+        return self.opts.switch("3doc", self.opts.document_relations, document_level_relations_enabled)
+
     def _document_relations(self, results: list) -> None:
         """ADR-0057 (opt-in): one call over the whole report for relationships
         whose two facts sit in different chunks.  Its result is appended to the
         per-chunk ones, so the existing merge dedups it."""
-        from pipeline.stage3_llm import document_level_relations_enabled, enrich_document_relations
+        from pipeline.stage3_llm import enrich_document_relations
         from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
 
-        enabled = (self.opts.document_relations if self.opts.document_relations is not None
-                   else document_level_relations_enabled())
-        if "3doc" in self.opts.disabled or not enabled:
+        if not self._document_relations_on():
             self.record("3doc", SKIPPED, "disabled")
             return
         t0 = time.monotonic()

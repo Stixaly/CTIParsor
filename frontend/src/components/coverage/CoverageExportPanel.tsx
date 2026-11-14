@@ -48,6 +48,110 @@ interface Props {
   inventoryFailed?: boolean
 }
 
+interface RowProps {
+  ids: string[]
+  dot: string
+  label: string
+  sub?: string
+  indent?: number
+  group?: boolean
+  /** The format this row stands for in the format view. Given explicitly: a
+   *  header with no rule has no ids to read it from (#566). */
+  format?: DetectionFormat
+  right: string
+  rightColor: string
+  bg?: string
+  selection: RuleSelection
+  view: 'tactic' | 'format'
+  /** The panel's format chips, which know the rules of the report. */
+  fmtChip: (scopeIds: string[], f: DetectionFormat) => JSX.Element
+}
+
+// Generic selectable row (group or child).  Defined at module level: a row
+// declared inside the panel is a new component on every render, so its checkbox
+// was unmounted and remounted on each selection change (#833).
+function Row({
+  ids,
+  dot,
+  label,
+  sub,
+  indent = 0,
+  group = false,
+  format,
+  right,
+  rightColor,
+  bg,
+  selection,
+  view,
+  fmtChip,
+}: RowProps) {
+  const sel = selection.selectedOf(ids)
+  const total = ids.length
+  const live = sel > 0
+  return (
+    <div
+      style={{
+        ...GRID,
+        padding: '6px 0',
+        borderBottom: '1px solid var(--rule-soft)',
+        cursor: 'pointer',
+        background: bg,
+      }}
+      onClick={() => selection.toggleScope(ids)}
+    >
+      <TriCheckbox sel={sel} total={total} size={16} onToggle={() => selection.toggleScope(ids)} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: indent }}>
+        <span
+          style={{
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: dot,
+            flexShrink: 0,
+          }}
+        />
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: group ? 600 : 400,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            color: live ? (group ? 'var(--ink)' : 'var(--ink-2)') : 'var(--ink-4)',
+          }}
+        >
+          {label}
+        </span>
+        {sub ? (
+          <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--ink-3)', flexShrink: 0 }}>{sub}</span>
+        ) : null}
+      </div>
+      <div style={{ display: 'flex', gap: 3 }}>
+        {view === 'tactic'
+          ? DETECTION_FORMATS.map((f) => fmtChip(ids, f))
+          : format ? fmtChip(ids, format) : null}
+      </div>
+      <span style={{ fontFamily: mono, fontSize: 11.5, textAlign: 'right' }}>
+        {total ? `${sel}/${total}` : '—'}
+      </span>
+      <span style={{ fontFamily: mono, fontSize: 11, textAlign: 'right', color: 'var(--ink-2)' }}>
+        {total ? fmtBytes(selection.bytesOf(ids)) : '—'}
+      </span>
+      <span
+        style={{
+          fontSize: 11,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          color: rightColor,
+        }}
+      >
+        {right}
+      </span>
+    </div>
+  )
+}
+
 export default function CoverageExportPanel({
   jobId,
   reportName,
@@ -74,6 +178,10 @@ export default function CoverageExportPanel({
     const corpusSet = new Set<string>()
     let totalBytes = 0
     for (const r of rules) {
+      // A rule of a format the panel does not know (#834) is in no group: it is left
+      // out of the corpora and the bytes too.  Optional chaining alone would still
+      // count it there.
+      if (!formatIds[r.format]) continue
       formatIds[r.format].push(r.id)
       corpusSet.add(r.corpus)
       totalBytes += r.bytes
@@ -93,7 +201,7 @@ export default function CoverageExportPanel({
   }, [rules, rulesById])
 
   // Selection-derived values, recomputed each render.
-  const selRules = rules.filter((r) => selection.isSelected(r.id))
+  const selRules = rules.filter((r) => formatIds[r.format] && selection.isSelected(r.id))
   const restricted = selRules.filter((r) => r.license === 'none').length
   const any = selection.selectedCount > 0
 
@@ -119,99 +227,6 @@ export default function CoverageExportPanel({
       >
         {FORMAT_STYLE[f].letter} {set.length ? sel : '—'}
       </span>
-    )
-  }
-
-  // Generic selectable row (group or child).
-  const Row = ({
-    ids,
-    dot,
-    label,
-    sub,
-    indent = 0,
-    group = false,
-    format,
-    right,
-    rightColor,
-    bg,
-  }: {
-    ids: string[]
-    dot: string
-    label: string
-    sub?: string
-    indent?: number
-    group?: boolean
-    /** The format this row stands for in the format view. Given explicitly: a
-     *  header with no rule has no ids to read it from (#566). */
-    format?: DetectionFormat
-    right: string
-    rightColor: string
-    bg?: string
-  }) => {
-    const sel = selection.selectedOf(ids)
-    const total = ids.length
-    const live = sel > 0
-    return (
-      <div
-        style={{
-          ...GRID,
-          padding: '6px 0',
-          borderBottom: '1px solid var(--rule-soft)',
-          cursor: 'pointer',
-          background: bg,
-        }}
-        onClick={() => selection.toggleScope(ids)}
-      >
-        <TriCheckbox sel={sel} total={total} size={16} onToggle={() => selection.toggleScope(ids)} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, paddingLeft: indent }}>
-          <span
-            style={{
-              width: 7,
-              height: 7,
-              borderRadius: '50%',
-              background: dot,
-              flexShrink: 0,
-            }}
-          />
-          <span
-            style={{
-              fontSize: 12.5,
-              fontWeight: group ? 600 : 400,
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              color: live ? (group ? 'var(--ink)' : 'var(--ink-2)') : 'var(--ink-4)',
-            }}
-          >
-            {label}
-          </span>
-          {sub ? (
-            <span style={{ fontFamily: mono, fontSize: 10.5, color: 'var(--ink-3)', flexShrink: 0 }}>{sub}</span>
-          ) : null}
-        </div>
-        <div style={{ display: 'flex', gap: 3 }}>
-          {view === 'tactic'
-            ? DETECTION_FORMATS.map((f) => fmtChip(ids, f))
-            : format ? fmtChip(ids, format) : null}
-        </div>
-        <span style={{ fontFamily: mono, fontSize: 11.5, textAlign: 'right' }}>
-          {total ? `${sel}/${total}` : '—'}
-        </span>
-        <span style={{ fontFamily: mono, fontSize: 11, textAlign: 'right', color: 'var(--ink-2)' }}>
-          {total ? fmtBytes(selection.bytesOf(ids)) : '—'}
-        </span>
-        <span
-          style={{
-            fontSize: 11,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: rightColor,
-          }}
-        >
-          {right}
-        </span>
-      </div>
     )
   }
 
@@ -458,6 +473,9 @@ export default function CoverageExportPanel({
                     return (
                       <div key={col.tactic}>
                         <Row
+                          selection={selection}
+                          view={view}
+                          fmtChip={fmtChip}
                           ids={ids}
                           dot="var(--accent)"
                           label={col.label}
@@ -487,6 +505,9 @@ export default function CoverageExportPanel({
                           }
                           return (
                             <Row
+                              selection={selection}
+                              view={view}
+                              fmtChip={fmtChip}
                               key={t.id}
                               ids={t.ruleIds}
                               dot={coverageColor(t.score).border}
@@ -507,6 +528,9 @@ export default function CoverageExportPanel({
                     return (
                       <div key={f}>
                         <Row
+                          selection={selection}
+                          view={view}
+                          fmtChip={fmtChip}
                           ids={formatIds[f]}
                           dot={formatDot(f)}
                           label={FORMAT_STYLE[f].label}
@@ -526,6 +550,9 @@ export default function CoverageExportPanel({
                           const none = c.license === 'none'
                           return (
                             <Row
+                              selection={selection}
+                              view={view}
+                              fmtChip={fmtChip}
                               key={c.corpus}
                               ids={c.ids}
                               dot={formatSoft(f)}

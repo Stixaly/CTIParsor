@@ -267,7 +267,7 @@ def test_aliases_split_where_the_masked_text_splits():
     assert _split_aliases(raw, raw) == ["Berserk Bear", "Dragonfly", "Ghost Blizzard", "Sandworm Team"]
     raw = "Cléand Bear and Dragonfly"
     assert _split_aliases(raw, _masked(raw)) == ["Cléand Bear", "Dragonfly"]
-    assert len(_masked("𝔘 Müller")) == len("𝔘 Müller") and _masked("Ünd café") == "znd cafz"
+    assert len(_masked("𝔘 Müller")) == len("𝔘 Müller") and _masked("Ünd café") == "Znd cafz"
 
 
 # ── Every module-level `\w`, `\d` and `\b` is reviewed ───────────────────────

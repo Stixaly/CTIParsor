@@ -214,6 +214,9 @@ def run_directory(input_dir: str, output_dir: str, options: RunOptions | None = 
     if not input_path.exists():
         print(f"[ERREUR] Dossier introuvable : {input_dir}")
         sys.exit(1)
+    if not input_path.is_dir():
+        print(f"[ERREUR] Pas un dossier : {input_dir}")
+        sys.exit(1)
 
     files = sorted([
         f for f in input_path.iterdir()

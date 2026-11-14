@@ -144,6 +144,11 @@ class PgConnection:
     - a connection the server dropped is reopened transparently on next use.
     """
 
+    # How many transaction() blocks are open on this connection (api.db): an exception leaving a nested `with`
+    # block must not roll back the outer transaction (#750). A class default, so an instance built without
+    # __init__ (tests) still has it.
+    _tx_depth = 0
+
     def __init__(self, url: str, *, schema: str | None = None, application_name: str = "ctiparsor"):
         self.url = url
         self.schema = schema
@@ -217,7 +222,9 @@ class PgConnection:
         return self
 
     def __exit__(self, exc_type: Any, exc: Any, tb: Any) -> Any:
-        if exc_type is not None:
+        # Inside transaction(): the exception goes on to transaction(), which rolls back. Rolling back here would
+        # undo the outer transaction behind a caller that caught the exception (#750).
+        if exc_type is not None and self._tx_depth == 0:
             try:
                 self.rollback()
             except Exception:  # noqa: S110 — `exc` propagates; a failed rollback must not mask it

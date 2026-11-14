@@ -505,6 +505,9 @@ def _normalize(cls: str, raw: str) -> list[str]:
             s = s[:-1]
         if s.startswith("www."):
             s = s[4:]
+        # Noise is judged on the stripped name: "www.example.com" is example.com.
+        if s in NOISE_LITERALS:
+            return []
         if len(s) >= 4:
             return [s]
         return []

@@ -75,7 +75,7 @@ const TYPE_GROUPS = [
   { group: 'Strategic / actor',        types: ['threat-actor', 'intrusion-set', 'campaign', 'identity', 'location'] },
   { group: 'Capability',               types: ['malware', 'tool', 'attack-pattern', 'vulnerability'] },
   { group: 'Infrastructure & detection', types: ['infrastructure', 'indicator', 'course-of-action'] },
-  { group: 'Observables (SCO)',         types: ['domain-name', 'ipv4-addr', 'ipv6-addr', 'url', 'email-addr', 'email-message', 'file', 'autonomous-system', 'windows-registry-key', 'user-account', 'mutex', 'mac-addr'] },
+  { group: 'Observables (SCO)',         types: ['domain-name', 'ipv4-addr', 'ipv6-addr', 'url', 'email-addr', 'email-message', 'file', 'autonomous-system', 'windows-registry-key', 'user-account', 'mutex', 'mac-addr', 'network-traffic'] },
 ]
 
 // ── Verb vocabulary (mirrors VALID_REL_TYPES in stage4_stix_mapping.py) ───────
@@ -583,20 +583,30 @@ function RulesEditor({ rules, setRules, query, paused, statIndex }: {
     setRules(rs => [...rs, { ...r, id: 'rule-' + Date.now() }])
 
   const q = query.trim().toLowerCase()
+  // Rules come from the stored policy unchecked: a field that is not a string
+  // must not throw in the search (#815).
+  const hit = (v: unknown, f: (s: string) => boolean) => typeof v === 'string' && f(v)
   const filtered = rules.filter(r =>
     !q ||
-    typeLabel(r.src).toLowerCase().includes(q) ||
-    typeLabel(r.tgt).toLowerCase().includes(q) ||
-    r.verb.toLowerCase().includes(q) ||
-    r.src.includes(q) || r.tgt.includes(q)
+    hit(r.src, s => typeLabel(s).toLowerCase().includes(q) || s.includes(q)) ||
+    hit(r.tgt, s => typeLabel(s).toLowerCase().includes(q) || s.includes(q)) ||
+    hit(r.verb, s => s.toLowerCase().includes(q))
   )
 
-  // Group by source category
-  const groups = TYPE_GROUPS.map(g => ({
-    label: g.group,
-    color: typeDot(g.types[0]),
-    rules: filtered.filter(r => g.types.includes(r.src)),
-  })).filter(g => g.rules.length)
+  // Group by source category.  A source type in no group lands under "Other",
+  // so every rule that is counted is also shown (#815).
+  const groups = [
+    ...TYPE_GROUPS.map(g => ({
+      label: g.group,
+      color: typeDot(g.types[0]),
+      rules: filtered.filter(r => g.types.includes(r.src)),
+    })),
+    {
+      label: 'Other',
+      color: typeDot(''),
+      rules: filtered.filter(r => !TYPE_GROUPS.some(g => g.types.includes(r.src))),
+    },
+  ].filter(g => g.rules.length)
 
   return (
     <div style={{
@@ -764,9 +774,11 @@ function PreviewPanel({ rules, globalMode }: { rules: PolicyRule[]; globalMode: 
 
 // ── Import/Export modal ───────────────────────────────────────────────────────
 
-function IOModal({ rules, globalMode, onClose, onImport }: {
+function IOModal({ rules, globalMode, editable, onClose, onImport }: {
   rules: PolicyRule[]
   globalMode: 'enforce' | 'auto'
+  /** False until the stored policy has loaded: an import would be overwritten by it (#814). */
+  editable: boolean
   onClose: () => void
   onImport: (rules: PolicyRule[], gm: 'enforce' | 'auto') => void
 }) {
@@ -805,7 +817,9 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
         src: r.src, verb: r.verb || 'related-to', tgt: r.tgt,
         mode: r.mode === 'auto' ? 'auto' : 'pin',
         enabled: r.enabled !== false,
-      })).filter((r: PolicyRule) => r.src && r.tgt)
+      })).filter((r: PolicyRule) =>
+        // Not just truthy: a number in src, tgt or verb would crash the editor (#815).
+        typeof r.src === 'string' && r.src && typeof r.tgt === 'string' && r.tgt && typeof r.verb === 'string')
       if (!clean.length) throw new Error('no valid rules')
       onImport(clean, o.global === 'auto' ? 'auto' : 'enforce')
       setMsg({ ok: true, t: `Imported ${clean.length} rules` })
@@ -898,7 +912,7 @@ function IOModal({ rules, globalMode, onClose, onImport }: {
           ) : (
             <>
               <button onClick={onClose} style={ghostBtn}>Cancel</button>
-              <button onClick={apply} disabled={!draft.trim()} style={primaryBtn(!!draft.trim())}>
+              <button onClick={apply} disabled={!editable || !draft.trim()} style={primaryBtn(editable && !!draft.trim())}>
                 Apply policy
               </button>
             </>
@@ -929,7 +943,9 @@ export default function Policy() {
   const qc = useQueryClient()
 
   // ── Remote state ────────────────────────────────────────────────────────────
-  const { data: remotePolicy } = useQuery({
+  const {
+    data: remotePolicy, isError: policyFailed, error: policyError, refetch: refetchPolicy,
+  } = useQuery({
     queryKey: ['relationship-policy'],
     queryFn: getRelationshipPolicy,
   })
@@ -938,6 +954,10 @@ export default function Policy() {
     mutationFn: putRelationshipPolicy,
     onSuccess: () => qc.invalidateQueries({ queryKey: ['relationship-policy'] }),
   })
+
+  // Nothing is editable until the stored policy has answered: an edit made
+  // before that is overwritten by the answer when it arrives (#814).
+  const editable = remotePolicy !== undefined
 
   // ── Local state (seeded from server on first load) ──────────────────────────
   const [rules,      setRulesRaw]  = useState<PolicyRule[]>(DEFAULT_RULES)
@@ -1116,6 +1136,22 @@ export default function Policy() {
 
       {/* The server validates every rule (verb, types, one rule per pair); a
           refused save used to fail silently and the page kept the edit. */}
+      {/* Without the stored policy nothing is editable, and the page says why:
+          a silent page looks broken, and an edit would overwrite what was not read (#814). */}
+      {policyFailed && (
+        <div role="alert" style={{
+          padding: '10px 30px', fontSize: 12.5, color: 'var(--no)',
+          background: 'color-mix(in oklab, var(--no) 8%, var(--bg))',
+          borderBottom: '1px solid color-mix(in oklab, var(--no) 30%, var(--rule))',
+          display: 'flex', alignItems: 'center', gap: 12,
+        }}>
+          <span style={{ flex: 1 }}>
+            The stored policy could not be loaded, so it cannot be edited: {errorDetail(policyError)}
+          </span>
+          <button onClick={() => refetchPolicy()} style={ghostBtn}>Retry</button>
+        </div>
+      )}
+
       {saveMut.isError && (
         <div role="alert" style={{
           padding: '10px 30px', fontSize: 12.5, color: 'var(--no)',
@@ -1177,6 +1213,7 @@ export default function Policy() {
               <button
                 key={opt.id}
                 onClick={() => changeGlobalMode(opt.id)}
+                disabled={!editable}
                 style={{
                   flex: 1, padding: '8px 6px', border: 'none', borderRadius: 7,
                   cursor: 'pointer', display: 'flex', flexDirection: 'column',
@@ -1237,7 +1274,7 @@ export default function Policy() {
         <span style={{ flex: 1 }} />
 
         <div style={{ display: 'flex', gap: 8 }}>
-          <button onClick={resetDefaults} style={ghostBtn} title="Restore the default data model">
+          <button onClick={resetDefaults} disabled={!editable} style={ghostBtn} title="Restore the default data model">
             Reset
           </button>
           <button onClick={() => setIoOpen(true)} style={ghostBtn}>
@@ -1315,11 +1352,12 @@ export default function Policy() {
               onSelectBudgetMode={changePinMode}
               onToggleEvidence={changeEvidence}
               onSelectWindow={changeWindow}
+              disabled={!editable}
             />
           </div>
 
           {/* Scrollable rule list */}
-          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 0' }}>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 0' }} inert={!editable}>
             <RulesEditor rules={rules} setRules={setRules} query={query} paused={paused}
               statIndex={statIndex} />
           </div>
@@ -1336,6 +1374,7 @@ export default function Policy() {
         <IOModal
           rules={rules}
           globalMode={globalMode}
+          editable={editable}
           onClose={() => setIoOpen(false)}
           onImport={(rs, gm) => {
             setRulesRaw(rs)

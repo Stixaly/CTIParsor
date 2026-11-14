@@ -1444,3 +1444,15 @@ except three steps of job 1: `reuse lint`, the migration check from the
 last release and the pull request's base commit
 (`scripts/check_migration_from.py`), and the backup and restore check
 (`scripts/check_backup_restore.py`).
+
+## Regression tests named after their issue
+
+Bug fixes carry a non-regression test named after the issue (`..._issue_NNN` in the test name or
+`bugfix_NNN` in the file name), and it must fail without the fix. The triage of 2026-11-14 (ADR-0102)
+added these files: `test_auth_bugfix_740_745.py`, `test_worker_bugfix_747_748_750.py`,
+`test_api_bugfix_758_759_764_765.py`, `test_api_bugfix_760_761_762.py`, `test_stage2g_bugfix_766_769_770.py`,
+`test_stage2e_bugfix_767_774_771.py`, `test_stage2d_bugfix_768_775.py`, `test_stage3_bugfix_772_773_776.py`,
+`test_stage4_bugfix_777_780_782_784.py`, `test_stage4_bugfix_778_779_781.py`, `test_bugfix_783_785_787.py`,
+`test_bugfix_786_788.py`, `test_detection_bugfix_794_795_798_800.py`, `test_detection_bugfix_796_797_799.py`,
+`test_bugfix_802_806.py`, `test_bugfix_836_841.py`; and, under `frontend/src`, the tests added next to each
+fixed component.

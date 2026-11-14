@@ -16,6 +16,51 @@ theme.
   with its quote. The edge's "Why" text says the actor is the only one named. This changes the bundle output
   (a `BUNDLE_AFFECTING` entry scoped "mapping" goes with the commit); no migration and no API change. The
   effect on precision and recall is not measured yet (`inhouse-bundle`).
+- **Bug triage of 2026-11-14: fixes #740 to #841** (decisions in
+  [ADR-0102](docs/adr/0102-bug-triage-2026-11-14-behaviour-decisions.md); each fix has a regression test
+  named after its issue). Bundles change for the same report (two `BUNDLE_AFFECTING` entries).
+  - **API, authentication, worker**: a concurrent create of one OIDC user name is a 409, not a 500
+    (#740); a time out of range is a 400 (#741); a logout keeps its cookie deletion when the session was
+    slid (#742); an absurd session lifetime is refused at start-up (#743); a malformed OIDC URL is an
+    `AuthConfigError` (#744); stopping the embedded loop requeues its jobs (#747); the pipeline subprocess
+    ignores SIGINT (#748); a caught error in a nested `get_conn()` no longer commits the outer
+    transaction (#750); a NUL byte or lone surrogate in a bulk id is a 422 and in an upload's file name a
+    400 (#758, #759); `POST /api/settings/corpora` answers 4xx, never 500, on input it cannot parse or
+    store (#760, #761, #762); an entity created while its job is deleted, and a status PATCH racing a
+    delete, answer 404 (#764, #765).
+  - **Extraction pipeline**: Stage 2g keeps the last alias after an Oxford comma, reads accented
+    capitals and drops a parenthetical annotation (#766, #769, #770); Stage 2d strips a trailing separator
+    and retries a failed batch by chunk, recording FAILED when no chunk answered (#768, #775); Stage 2e
+    reads offsets that are `None` and keeps the model's casing (#767, #774); GLiNER loads from its local
+    cache first (#771); Stage 3 keeps an entry with a `null` field or a MITRE id alone, keeps a second
+    chunk's evidence quote and trims spaces around an id (#772, #773, #776); gazetteer apostrophes are
+    matched by one class (#803).
+  - **STIX mapping and validation**: one id, one object in the bundle (#777, #778, #779, #780, #782,
+    #784); a network-traffic takes a host of the right type (#781); a baseline URL with capitals in its
+    path is found in the text (#786); an LLM conflict on a role the analyst set no longer withholds both
+    native relationship dates (#802); a bundle whose `objects` is null or not a list is INVALID (#783,
+    #785); Stage 3doc is skipped after a failed Stage 3 (#787).
+  - **Detection**: bracketed Suricata header lists, trailing comments and noise after normalization
+    (#796, #797, #799); YARA dedup keys ignore comments and a module named in a string or comment is not
+    an import (#798, #800); a download cut mid-stream is a failed sync and a PAX member name with a NUL
+    byte is refused (#794, #795).
+  - **Frontend**: `fetchMe` no longer sets the CSRF token, `AuthContext` does (#820); the Policy page
+    is read-only until its GET answers, with an alert and Retry on failure (#814); Policy shows rules of
+    every type and ignores malformed imports (#815, #825, #823); Review and Graph report a failed
+    relationship write, do not mark a bundle current after an edit made during a finalize, and release
+    their drag listeners (#809, #811, #812, #813, #816, #829, #832); `useSSE` ends on a refused stream
+    (#819); `EntityPopover` closes on Escape after Back (#824); the new-report modal cannot be closed
+    while a request is running (#826); smaller fixes in the source viewer, the PDF viewer, the coverage
+    export and the API client (#822, #827, #828, #833, #834).
+  - **Tooling**: the in-house runner's relations skip the technical based-on edges and name an object by
+    its value, not by a pattern or an id (#836); `inhouse.score` ignores a negative relation without a
+    whole triple instead of raising (#838); `run_directory` refuses a file given for a folder (#839);
+    `--batch 0` is a usage error in both migration scripts instead of migrating nothing and exiting 0
+    (#840); the OpenCTI expectations report creates a missing `--out-dir` (#841); `run_api` reads the
+    repository's `.env` from any directory (#837); the Anthropic vision client gets the configured
+    timeout (#805); `capture_url_to_pdf` without Playwright raises `CaptureUnavailable` (#806).
+  - **Not fixed here**: the vendored Snort parser (#789 to #793, ADR-0070), and issues closed without a
+    change (ADR-0102).
 
 - **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
   qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's

@@ -187,6 +187,9 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   // Bumped to cancel a running view animation when the user takes over.
   const animSeq   = useRef(0)
   const lastLayout = useRef<Props['layout'] | null>(null)
+  // Ends the node drag in progress, if any: its window listeners go and the node
+  // is let go.  Also run on unmount, where no pointerup will come (#832).
+  const endDrag   = useRef<(() => void) | null>(null)
 
   const repaint   = useCallback(() => setTick(t => t + 1), [])
 
@@ -424,11 +427,14 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
     svg.addEventListener('pointerdown', onDown)
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    // A cancelled pointer (the browser took it over) ends the pan as a release does (#832).
+    window.addEventListener('pointercancel', onUp)
     return () => {
       svg.removeEventListener('wheel', onWheel)
       svg.removeEventListener('pointerdown', onDown)
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onUp)
     }
   }, [applyView, onSelect])
 
@@ -446,6 +452,8 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
   const onNodeDown = useCallback((e: React.PointerEvent, id: string) => {
     if (e.button !== 0) return
     e.stopPropagation()
+    // A drag whose pointerup never came ends before this one starts.
+    endDrag.current?.()
     const w  = screenToWorld(e.clientX, e.clientY)
     const p  = posRef.current[id] ?? { x: 0, y: 0 }
     const di = { id, dx: p.x - w.x, dy: p.y - w.y, moved: false }
@@ -463,19 +471,35 @@ const GraphCanvas = forwardRef<GraphCanvasHandle, Props>(function GraphCanvas(
       }
       repaint()
     }
-    const up = () => {
+    // The node is let go: the simulation settles it again.
+    const release = () => {
       const sim = simRef.current
       if (sim) {
         const sn = sim.nodes().find((n: SimNode) => n.id === id)
         if (sn) { sn.fx = null; sn.fy = null; sim.alphaTarget(0) }
       }
-      if (!di.moved) onSelect(id)
+    }
+    const stop = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      endDrag.current = null
     }
+    const up = () => {
+      release()
+      if (!di.moved) onSelect(id)
+      stop()
+    }
+    // Cancelled, or unmounted mid-drag: no click on the node.
+    const cancel = () => { release(); stop() }
+    endDrag.current = cancel
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
   }, [screenToWorld, repaint, onSelect])
+
+  // Unmounted mid-drag: the window listeners and the pinned node go (#832).
+  useEffect(() => () => { endDrag.current?.() }, [])
 
   // ── Neighbor tracing ────────────────────────────────────────────────────
 

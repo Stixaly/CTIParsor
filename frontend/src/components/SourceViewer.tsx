@@ -117,13 +117,18 @@ function TextSource({ url, filename, entities, focusedId, onFocusEntity, onEntit
   // Scroll the focused entity's first occurrence into view when it changes
   // (e.g. clicking an entity in the marginalia).  If the entity has no verbatim
   // occurrence in the raw source, notify the parent so it can show the hint.
+  // The last notification is remembered: a change to `entities` alone (accepting
+  // another entity) must not repeat it (#827).
+  const notifiedRef = useRef<{ focusedId: string; text: string } | null>(null)
   useEffect(() => {
-    if (!focusedId || text == null) return
+    if (!focusedId || text == null) { notifiedRef.current = null; return }
     const node = markRefs.current[focusedId]
-    if (node) { node.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
+    if (node) { notifiedRef.current = null; node.scrollIntoView({ behavior: 'smooth', block: 'center' }); return }
     // A rejected entity is in the text, just not highlighted: saying it was
     // "not found verbatim" was wrong.
-    if (entities.find(e => e.id === focusedId)?.accepted === false) return
+    if (entities.find(e => e.id === focusedId)?.accepted === false) { notifiedRef.current = null; return }
+    if (notifiedRef.current?.focusedId === focusedId && notifiedRef.current.text === text) return
+    notifiedRef.current = { focusedId, text }
     onEntityNotInText?.(focusedId)
   }, [focusedId, text, entities, onEntityNotInText])
 

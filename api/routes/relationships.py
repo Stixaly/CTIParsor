@@ -68,6 +68,14 @@ class RelBulk(BaseModel):
     ids: list[str]
     action: str                    # "accept" | "reject" | "reset"
 
+    @field_validator("ids")
+    @classmethod
+    def _no_nul_or_lone_surrogate(cls, v: list[str]) -> list[str]:
+        # PostgreSQL refuses these in an id too: a 422 here, a 500 at the UPDATE otherwise (#758).
+        for rel_id in v:
+            storable_text(rel_id)
+        return v
+
 
 # A review group is every row that shares a target; the largest measured on
 # the 7 real reports was 6.  The cap keeps one call to one bounded statement.

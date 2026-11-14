@@ -7,6 +7,7 @@ import json
 import multiprocessing as mp
 import os
 import re
+import signal
 import sys
 import threading
 import time
@@ -810,6 +811,9 @@ def _subprocess_entry(job_id: str, file_path: str, original_filename: str,
     RLIMIT_AS is applied inside _run_pipeline; it now correctly limits only this
     subprocess, not the uvicorn process.
     """
+    # Ctrl+C reaches the whole process group. Only the supervisor (api/queue_loop.py main) handles SIGINT:
+    # it drains, then requeues what is left. This child stops on the SIGTERM the supervisor sends (#748).
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
     # ── Thread-count caps ────────────────────────────────────────────────────
     # Each OpenMP worker allocates its own BLAS workspace.  2 threads is a
     # reasonable default for WSL/single-socket CPU inference.  Users who have

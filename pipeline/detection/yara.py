@@ -19,6 +19,7 @@ from pipeline.detection.base import RuleCorpusAdapter
 from pipeline.detection.yara_atoms import (
     YaraRule,
     _ends_with_matches,
+    _strip_comments,
     extract_atoms,
     rule_platform,
     split_rules,
@@ -154,17 +155,21 @@ class YaraAdapter(RuleCorpusAdapter):
     def _dedup_key(self, rule: YaraRule) -> str:
         if not rule.strings:
             return ""
-        strings = _normalized_strings(rule.body)
+        # Section keywords are searched without comments (#798): a `/* strings: */`
+        # block must not pass for a section. _strip_comments keeps every offset, so
+        # the condition is still cut from the raw body, where a comment makes a key differ.
+        code = _strip_comments(rule.body)
+        strings = _normalized_strings(code)
         if not strings:
             return ""
         # The condition is part of the rule's semantics: two rules with the
         # same strings but different conditions ("$a and $b" vs "$a or $b")
         # are NOT duplicates and must not be folded into one.
-        m = _CONDITION_RE.search(rule.body)
+        m = _CONDITION_RE.search(code)
         if m:
             cond = _collapse_blanks(rule.body[m.end():])
         else:
-            ci = rule.body.find("condition:")
+            ci = code.find("condition:")
             cond = _collapse_blanks(rule.body[ci + len("condition:"):]) if ci >= 0 else ""
         payload = json.dumps(
             {"format": "yara", "strings": strings, "condition": cond},

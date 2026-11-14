@@ -69,8 +69,11 @@ _MARKER = (rf"(?i:also{_S}+known{_S}+as|a\.k\.a\.|aka|tracked{_S}+as"
            rf"|formerly{_S}+known{_S}+as|formerly)")
 
 # "Static Tundra (aka Berserk Bear, Ghost Blizzard, ...)"
+# One level of nested parentheses is read inside the list (#770): "Cozy Bear
+# (NOBELIUM)" no longer ends the list at its first ")".
 _PAREN_PATTERN = compile_pattern(
-    rf"(?P<anchor>{_ANCHOR}){_S}*\({_S}*{_MARKER}{_S}*[:,]?{_S}*(?P<aliases>[^)]{{3,200}})\)"
+    rf"(?P<anchor>{_ANCHOR}){_S}*\({_S}*{_MARKER}{_S}*[:,]?{_S}*"
+    rf"(?P<aliases>(?:[^()]|\([^()]*\)){{3,200}})\)"
 )
 
 # "Static Tundra, also known as Berserk Bear, Ghost Blizzard and Sandworm."
@@ -78,7 +81,7 @@ _PAREN_PATTERN = compile_pattern(
 # list that also keeps the match width fixed rather than unbounded.
 _INLINE_PATTERN = compile_pattern(
     rf"(?P<anchor>{_ANCHOR}),?{_S}+{_MARKER}{_S}+"
-    rf"(?P<aliases>{_ANCHOR}(?:{_S}*(?:,|/|\band\b|\bor\b){_S}*{_ANCHOR}){{0,8}})"
+    rf"(?P<aliases>{_ANCHOR}(?:{_S}*(?:,|/|,?{_S}*\band\b|,?{_S}*\bor\b){_S}*{_ANCHOR}){{0,8}})"
 )
 
 _ALIAS_SPLIT_RE = compile_pattern(r",|/|\band\b|\bor\b")
@@ -88,16 +91,18 @@ _ALIAS_SPLIT_RE = compile_pattern(r",|/|\band\b|\bor\b")
 # "Group", and "Ghøst Blizzard" was no alias.  Python's class written out
 # (PY_NON_ASCII_WORD) is too large for RE2 to repeat 40 times, as _ANCHOR does
 # in _INLINE_PATTERN.  So the patterns read the text with every non-ASCII word
-# character turned into "z": a word character to both engines, never the
-# capital that starts a word, and in none of the patterns' words ("áka" must
-# not read "aka", nor "Ánd" "and").  The names are cut from the text itself at
-# the same offsets: one character stands for one.
+# character turned into a letter: "Z" for a capital, which starts a name ("Élite
+# Bear", #769), and "z" for any other, a word character to both engines and in
+# none of the patterns' words ("áka" must not read "aka", nor "Ánd" "and").
+# The names are cut from the text itself at the same offsets: one character
+# stands for one.
 _NON_ASCII_WORDS = compile_pattern(f"[{PY_NON_ASCII_WORD}]+")
 
 
 def _masked(text: str) -> str:
-    """`text` with every non-ASCII word character replaced by "z"."""
-    return _NON_ASCII_WORDS.sub(lambda m: "z" * len(m.group()), text)
+    """`text` with every non-ASCII word character replaced by "Z" if it is a capital, else "z"."""
+    return _NON_ASCII_WORDS.sub(
+        lambda m: "".join("Z" if c.isupper() else "z" for c in m.group()), text)
 
 
 # Leftover marker fragments that can survive splitting on a malformed match
@@ -116,8 +121,9 @@ _STRIP = "".join(c for c in map(chr, range(0x3001)) if c.isspace()) + ".,;:'\"()
 
 def _clean_alias(raw: str) -> str | None:
     # Every run of blanks and line breaks becomes one space: the name is emitted as
-    # "Berserk Bear" whatever the text put between its words.
-    value = " ".join(raw.split()).strip(_STRIP)
+    # "Berserk Bear" whatever the text put between its words.  A "(" starts an
+    # annotation, not the name: "Cozy Bear (NOBELIUM)" is "Cozy Bear" (#770).
+    value = " ".join(raw.split()).split("(")[0].strip(_STRIP)
     if len(value) < 3:
         return None
     if value.lower() in _STOPWORDS:

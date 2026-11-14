@@ -4,7 +4,7 @@ import {
   deleteEntity, deleteJob, deleteRelationship, detectionsExportUrl, downloadExportSelection, errorDetail, fetchAttackIndex,
   fetchBaselineIntake, fetchBaselineStatus, fetchBundle, fetchBundleLedger, fetchCoverage, fetchCoverageReportRules,
   fetchCoverageRules, fetchDetectionProposals, fetchEntities, fetchJob, fetchRelationships, finalizeJob, finalizeJobQuick,
-  inspectBaseline, sourceUrl, updateEntity, updateJobStatus, updateRelationship, uploadFile,
+  inspectBaseline, req, sourceUrl, updateEntity, updateJobStatus, updateRelationship, uploadFile,
 } from './client'
 import { enrichmentView, isImported } from '../types'
 
@@ -245,5 +245,19 @@ describe('downloadExportSelection errors (#547)', () => {
     const err = await failure(downloadExportSelection('j1', ['r1']))
     expect(err.message).toBe('400: {"detail":"Too many rules"}')
     expect(errorDetail(err)).toBe('Too many rules')
+  })
+})
+
+// #822: a caller's headers add to the JSON Content-Type, they do not replace it.
+describe('req keeps the JSON Content-Type next to the caller\'s headers (#822)', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('sends Content-Type application/json and the caller\'s header', async () => {
+    const fetchSpy = vi.fn((_url: string, _init?: RequestInit) => Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }))
+    vi.stubGlobal('fetch', fetchSpy)
+    await req('/x', { method: 'PATCH', headers: { 'X-Test': '1' } })
+    const init = fetchSpy.mock.calls[0][1] as RequestInit
+    expect(init.headers).toEqual({ 'Content-Type': 'application/json', 'X-Test': '1' })
+    expect(init.method).toBe('PATCH')
   })
 })

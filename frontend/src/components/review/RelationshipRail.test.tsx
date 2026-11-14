@@ -283,3 +283,49 @@ describe('RelationshipRail — a relationship the bundle supplied (ADR-0090)', (
     expect(Array.from(select.options).map(o => o.value)).toContain('uses')
   })
 })
+
+// #829 — the resize handle: a cancelled pointer ends the drag, and a second drag
+// does not leave the first one's listeners behind.
+describe('RelationshipRail — the resize handle (#829)', () => {
+  const resizeHandle = () => document.querySelector('.rel-resize') as HTMLElement
+  const railClass = () => document.querySelector('.rel-rail') as HTMLElement
+  const pointerMovesOf = (spy: { mock: { calls: unknown[][] } }) =>
+    spy.mock.calls.filter(([t]) => t === 'pointermove').map(([, fn]) => fn)
+
+  it('stops the drag when the browser cancels the pointer', () => {
+    renderFull([rel()])
+    fireEvent.pointerDown(resizeHandle(), { clientY: 200 })
+    expect(railClass()).toHaveClass('rel-dragging')
+    fireEvent.pointerCancel(window)
+    expect(railClass()).not.toHaveClass('rel-dragging')
+  })
+
+  it('removes the first drag listeners when a second drag starts before the first ends', () => {
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    renderFull([rel()])
+    fireEvent.pointerDown(resizeHandle(), { clientY: 200 })
+    fireEvent.pointerDown(resizeHandle(), { clientY: 220 })
+    fireEvent.pointerUp(window)
+    const removed = pointerMovesOf(remove)
+    expect(pointerMovesOf(add).filter(fn => !removed.includes(fn))).toEqual([])
+    expect(railClass()).not.toHaveClass('rel-dragging')
+  })
+
+  it('removes the drag listeners when the rail unmounts during a drag', () => {
+    const add = vi.spyOn(window, 'addEventListener')
+    const remove = vi.spyOn(window, 'removeEventListener')
+    const { unmount } = render(
+      <RelationshipRail
+        rels={[rel()]} onAccept={noop} onReject={noop} onReset={noop} onJump={noop}
+        onChangeType={noop} onChangeDates={noop} showInDoc={false} setShowInDoc={noop}
+        onNewRelationship={noopNum}
+      />,
+    )
+    fireEvent.pointerDown(resizeHandle(), { clientY: 200 })
+    fireEvent.pointerDown(resizeHandle(), { clientY: 220 })
+    unmount()
+    const removed = pointerMovesOf(remove)
+    expect(pointerMovesOf(add).filter(fn => !removed.includes(fn))).toEqual([])
+  })
+})

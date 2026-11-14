@@ -279,6 +279,8 @@ export default function Review() {
   const [kbdOpen, setKbdOpen] = useState(false)
   const [finalizing, setFinalizing] = useState(false)
   const [finalized, setFinalized] = useState(false)
+  /** The "finalized" toast's timer, cleared on unmount (#816). */
+  const finalizedTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   /** True after a successful manual finalize, until the next mutation.
    *  Drives the primary button's "Complete Review" → "Download STIX" toggle. */
   const [reviewCompleted, setReviewCompleted] = useState(false)
@@ -299,6 +301,9 @@ export default function Review() {
   /** True while the background quick-finalize API call is in-flight. */
   const [autoFinalizing, setAutoFinalizing] = useState(false)
   const autoFinalizeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Counts every edit (markDirty).  A rebuild that started before an edit does not
+   *  describe the page any more, so its answer must not clear bundleStale (#809). */
+  const editSeqRef = useRef(0)
   /** Writes the server did not save, until the analyst retries or dismisses them (#706). */
   const [writeFailures, setWriteFailures] = useState<WriteFailure[]>([])
   const failureKey = useRef(0)
@@ -407,6 +412,12 @@ export default function Review() {
   const createRelMutation = useMutation({
     mutationFn: (body: Parameters<typeof createRelationship>[1]) => createRelationship(jobId!, body),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['relationships', jobId] }); markDirty() },
+    // The creator closes before the answer (createRel), so a refusal must say so here (#813).
+    onError: (err: Error) => {
+      console.error('[createRelationship] failed:', err.message)
+      alert(`Could not create relationship: ${errorDetail(err)}`)
+      reportWriteFailure(`Could not create relationship: ${errorDetail(err)}`)
+    },
   })
 
   // ── local-first entity mutations ─────────────────────────────────────────
@@ -623,8 +634,21 @@ export default function Review() {
   }
 
   // ── drag-to-relate ───────────────────────────────────────────────────────
+  // The window listeners of the drag in progress.  They go on release, on a
+  // cancelled pointer and when the page unmounts, so none outlives the drag (#816).
+  const dragListenersRef = useRef<{ move: (e: PointerEvent) => void; end: (e: PointerEvent) => void; cancel: () => void } | null>(null)
+  const detachDragListeners = useCallback(() => {
+    const l = dragListenersRef.current
+    if (!l) return
+    window.removeEventListener('pointermove', l.move)
+    window.removeEventListener('pointerup', l.end)
+    window.removeEventListener('pointercancel', l.cancel)
+    dragListenersRef.current = null
+  }, [])
+
   const onMarkDragStart = (eid: string, fromPoint: Point, evt: PointerEvent) => {
     if (readOnly) return
+    detachDragListeners()
     let moved = false
     const startX = evt.clientX, startY = evt.clientY
     dragStateRef.current = { srcId: eid, from: fromPoint, to: fromPoint }
@@ -640,8 +664,7 @@ export default function Review() {
       }
     }
     const onUp = (e: PointerEvent) => {
-      window.removeEventListener('pointermove', onMove)
-      window.removeEventListener('pointerup', onUp)
+      detachDragListeners()
       if (!moved) { dragStateRef.current = null; setDragState(null); return }
       const el = document.elementFromPoint(e.clientX, e.clientY)
       const mark = el?.closest('mark[data-eid]')
@@ -651,8 +674,15 @@ export default function Review() {
         setRelCreator({ srcId: eid, tgtId, x: e.clientX, y: e.clientY })
       }
     }
+    // A cancelled pointer ends the drag without relating anything.
+    const onCancel = () => {
+      detachDragListeners()
+      dragStateRef.current = null; setDragState(null)
+    }
+    dragListenersRef.current = { move: onMove, end: onUp, cancel: onCancel }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
   }
 
   // ── shift-click to relate ─────────────────────────────────────────────────
@@ -707,19 +737,28 @@ export default function Review() {
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
     autoFinalizeTimer.current = null
     setFinalizing(true)
+    const seq = editSeqRef.current
     try {
       await finalizeJob(jobId)   // full finalize: rebuilds the bundle and completes the report
       qc.invalidateQueries({ queryKey: ['jobs'] })
       // The server marks the report completed; the breadcrumb follows without
       // refetching the whole report text.
       qc.setQueryData<Job>(['job', jobId], j => j && { ...j, status: 'completed' })
-      setBundleStale(false)      // bundle is now definitively current
-      setReviewCompleted(true)   // flips the primary button to "Download STIX"
+      // An edit made while the finalize was in flight is not in this bundle (#809):
+      // the page stays outdated and keeps "Complete Review" until the next rebuild.
+      if (editSeqRef.current === seq) {
+        setBundleStale(false)      // bundle is now definitively current
+        setReviewCompleted(true)   // flips the primary button to "Download STIX"
+      }
       // Stay on the page — the bundle is downloadable in place. A brief toast
       // confirms completion. The report is marked "Completed" server-side and
       // will appear in the Completed column when the user returns to the dashboard.
       setFinalized(true)
-      setTimeout(() => setFinalized(false), 2600)
+      if (finalizedTimer.current) clearTimeout(finalizedTimer.current)
+      finalizedTimer.current = setTimeout(() => {
+        finalizedTimer.current = null
+        setFinalized(false)
+      }, 2600)
     } catch (e) {
       if (e instanceof BundleRefusedError) {
         // The server did not complete the report (one it had completed is back
@@ -826,10 +865,13 @@ export default function Review() {
     autoFinalizeTimer.current = null
     if (!jobId) return
     setAutoFinalizing(true)
+    const seq = editSeqRef.current
     try {
       await finalizeJobQuick(jobId)
       qc.invalidateQueries({ queryKey: ['jobs'] })
-      setBundleStale(false)
+      // An edit during the rebuild has its own debounce timer, so the bundle is
+      // rebuilt again; until then it stays outdated (#809).
+      if (editSeqRef.current === seq) setBundleStale(false)
     } catch {
       // Non-blocking — keep stale=true so the user knows the bundle is outdated.
       // They can always click the manual Finalize button.
@@ -839,6 +881,7 @@ export default function Review() {
   }
 
   const markDirty = () => {
+    editSeqRef.current += 1
     setBundleStale(true)
     // A STIX object changed/was added → the completed bundle is no longer in
     // sync with the report, so revert the button to "Complete Review".
@@ -857,7 +900,9 @@ export default function Review() {
     }
     if (hoverTimerRef.current)     clearTimeout(hoverTimerRef.current)
     if (notInTextTimer.current)    clearTimeout(notInTextTimer.current)
-  }, [jobId])
+    if (finalizedTimer.current)    clearTimeout(finalizedTimer.current)
+    detachDragListeners()
+  }, [jobId, detachDragListeners])
 
   // ── "not found verbatim" hint ─────────────────────────────────────────────
   // LLM-extracted entities (malware/actor/TTP/campaign names) are paraphrased

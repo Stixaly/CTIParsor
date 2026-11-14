@@ -160,7 +160,8 @@ def score(doc: InhouseDoc, pred: dict, canonical) -> dict:
             c = canonical(n.get("id", "").upper())
             if c is not None and c.split(".", 1)[0] in pred_parents:
                 violations.append(n)
-        elif n.get("kind") == "relation" and metrics.norm_triple(n.get("triple", [])) in pred_triples:
+        elif n.get("kind") == "relation" and isinstance(n.get("triple"), list) and len(n["triple"]) == 3 \
+                and metrics.norm_triple(n["triple"]) in pred_triples:
             violations.append(n)
     out["negatives"] = {"cases": len(g.get("negatives", [])), "violated": len(violations),
                         "violations": violations}

@@ -117,6 +117,8 @@ function SegmentGroup({ options, disabled = false }: {
           type="button"
           title={o.title}
           onClick={o.onClick}
+          // CSS alone leaves the buttons focusable and clickable by keyboard (#825).
+          disabled={disabled}
           style={{
             padding: '4px 12px',
             fontSize: 12,
@@ -154,6 +156,8 @@ interface LastRunPanelProps {
   onSelectBudgetMode: (m: 'fair-share' | 'sequential') => void
   onToggleEvidence: (on: boolean) => void
   onSelectWindow: (n: number) => void
+  /** Greys every control out: nothing may be saved before the stored policy is read (#814). */
+  disabled?: boolean
 }
 
 /**
@@ -175,6 +179,7 @@ export function LastRunPanel({
   onSelectBudgetMode,
   onToggleEvidence,
   onSelectWindow,
+  disabled = false,
 }: LastRunPanelProps) {
   // Provenance label
   let provenance: string
@@ -240,13 +245,14 @@ export function LastRunPanel({
       {/* b) Evidence gate — on/off + window */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
         <SegmentGroup
+          disabled={disabled}
           options={[
             { label: 'On', active: evidenceOn, onClick: () => onToggleEvidence(true) },
             { label: 'Off', active: !evidenceOn, onClick: () => onToggleEvidence(false) },
           ]}
         />
         <SegmentGroup
-          disabled={!evidenceOn}
+          disabled={disabled || !evidenceOn}
           options={WINDOW_STEPS.map((s) => ({
             label: s.label,
             title: s.hint,
@@ -278,6 +284,7 @@ export function LastRunPanel({
           <button
             type="button"
             onClick={() => onSelectBudgetMode('fair-share')}
+            disabled={disabled}
             style={{
               padding: '4px 12px',
               fontSize: 12,
@@ -293,6 +300,7 @@ export function LastRunPanel({
           <button
             type="button"
             onClick={() => onSelectBudgetMode('sequential')}
+            disabled={disabled}
             style={{
               padding: '4px 12px',
               fontSize: 12,

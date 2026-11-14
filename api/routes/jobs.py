@@ -446,6 +446,9 @@ def update_job_status(job_id: str, patch: StatusPatch):
                 if rowcount == 0 and row is not None:
                     again = conn.execute("SELECT status FROM jobs WHERE id=?", (job_id,)).fetchone()
                     running = again is not None and again["status"] == "processing"
+                    if again is None:
+                        # Deleted between the SELECT and the UPDATE: a 404, not the 409 of a job still running (#765).
+                        row = None
     # Raise outside the lock so the lock is always released cleanly
     if running:
         raise HTTPException(409, _PROCESSING_DETAIL)

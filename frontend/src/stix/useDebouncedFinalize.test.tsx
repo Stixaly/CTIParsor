@@ -51,4 +51,31 @@ describe('useDebouncedFinalize', () => {
     await act(async () => { resolvers[1](); await flushed })
     expect(result.current.pending).toBe(false)
   })
+
+  // Guard (#821): rebuild() calls that pile up during a request run one after the other.
+  it('never has two rebuilds in flight when rebuild() is called again during one', async () => {
+    const resolvers: Array<() => void> = []
+    let open = 0
+    let most = 0
+    api.finalizeJobQuick.mockImplementation(() => {
+      open += 1
+      most = Math.max(most, open)
+      return new Promise<void>(r => { resolvers.push(() => { open -= 1; r() }) })
+    })
+    const { result } = renderHook(() => useDebouncedFinalize('job-1'), { wrapper })
+    act(() => result.current.markDirty())
+    await act(async () => { vi.advanceTimersByTime(FINALIZE_DEBOUNCE_MS) })
+    expect(api.finalizeJobQuick).toHaveBeenCalledTimes(1)
+
+    act(() => { void result.current.rebuild(); void result.current.rebuild(); void result.current.rebuild() })
+    await act(async () => { for (let k = 0; k < 10; k++) await Promise.resolve() })
+    expect(api.finalizeJobQuick).toHaveBeenCalledTimes(1)
+
+    for (let n = 0; n < 4; n++) {
+      await act(async () => { resolvers[n]() })
+      await act(async () => { for (let k = 0; k < 10; k++) await Promise.resolve() })
+      expect(most).toBe(1)
+    }
+    expect(api.finalizeJobQuick).toHaveBeenCalledTimes(4)
+  })
 })

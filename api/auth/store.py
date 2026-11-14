@@ -14,6 +14,8 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
+import psycopg
+
 from api.auth import passwords
 from api.auth.config import DEFAULT_TOKEN_DAYS, ROLE_RANK, ROLES, session_ttl_hours
 from api.db import get_conn, transaction
@@ -124,10 +126,17 @@ def create_user(username: str, role: str, *, password: str | None = None, displa
     if conn.execute("SELECT 1 FROM users WHERE username=?", (name,)).fetchone():
         raise UsernameTakenError(f"the username {name!r} is taken")
     uid = str(uuid4())
-    conn.execute(
-        "INSERT INTO users (id, username, display_name, auth_source, oidc_subject, password_hash, role, "
-        "disabled, created_at) VALUES (?,?,?,?,?,?,?,0,?)",
-        (uid, name, display_name.strip() or name, auth_source, oidc_subject, hashed, role, _ts(_now())))
+    try:
+        conn.execute(
+            "INSERT INTO users (id, username, display_name, auth_source, oidc_subject, password_hash, role, "
+            "disabled, created_at) VALUES (?,?,?,?,?,?,?,0,?)",
+            (uid, name, display_name.strip() or name, auth_source, oidc_subject, hashed, role, _ts(_now())))
+    except psycopg.errors.UniqueViolation as exc:
+        # A concurrent create of the same name passed the check above (#740).  The subject clash is not a
+        # name clash: the OIDC callback handles it itself (api/auth/oidc.py).
+        if "oidc_subject" in (exc.diag.constraint_name or ""):
+            raise
+        raise UsernameTakenError(f"the username {name!r} is taken") from None
     return User(uid, name, display_name.strip() or name, auth_source, role, False)
 
 

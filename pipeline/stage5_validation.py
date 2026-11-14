@@ -11,6 +11,7 @@ stix2-validator package.  Nothing is downloaded.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import tempfile
@@ -123,6 +124,16 @@ def install_schemas(dest: Path | None = None) -> bool:
     return _has_schemas(dest)
 
 
+def _objects_not_a_list(bundle_json: str) -> bool:
+    """True when the root object has an "objects" that is not a JSON array (#785).
+    Malformed or too deeply nested JSON is left to validate_string's verdict."""
+    try:
+        parsed = json.loads(bundle_json)
+    except (ValueError, RecursionError):
+        return False
+    return isinstance(parsed, dict) and "objects" in parsed and not isinstance(parsed["objects"], list)
+
+
 def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResult:
     """
     Validate a serialized STIX 2.1 bundle.  Writes nothing.
@@ -158,14 +169,23 @@ def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResul
             )
         return ValidationResult(UNVERIFIED)
 
+    # "objects" must be a list (#785).  An empty list is accepted: validation_json()
+    # drops the trusted objects, so an empty list is a legitimate subset.
+    if _objects_not_a_list(bundle_json):
+        message = 'Bundle "objects" must be a list of STIX objects.'
+        if not quiet:
+            logger.error(f"[Stage 5] {message}")
+        return ValidationResult(INVALID, [message])
+
     # ── Full JSON-schema validation ───────────────────────────────────────────
     options = ValidationOptions(version="2.1")
     # Input that is not a STIX object at all is a verdict, not an exception (#500):
     # empty or malformed JSON raises ValueError, an object without id/type raises
-    # ValidationError, and a JSON list comes back as a list of results.
+    # ValidationError, and a JSON list comes back as a list of results.  A null
+    # or non-object entry in "objects" raises TypeError (#783).
     try:
         results = validate_string(bundle_json, options=options)
-    except (ValueError, ValidationError) as exc:
+    except (ValueError, ValidationError, TypeError) as exc:
         if not quiet:
             logger.error(f"[Stage 5] Input is not a STIX bundle: {exc}")
         return ValidationResult(INVALID, [str(exc)])

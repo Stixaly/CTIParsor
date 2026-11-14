@@ -451,11 +451,17 @@ class TestNormalizeLlmJson:
         assert len(out["ttps"]) == 1
         assert out["ttps"][0]["technique_name"] == "Custom Loader"
 
-    def test_ttp_without_name_dropped(self):
-        """A TTP dict with no usable name field should be silently dropped."""
-        raw = {"ttps": [{"mitre_id": "T1234"}]}  # no name/technique_name
+    def test_ttp_without_name_or_id_dropped(self):
+        """A TTP dict with neither a usable name nor an id should be silently dropped."""
+        raw = {"ttps": [{"description": "vague"}]}  # no name/technique_name, no id
         out = _normalize_llm_json(raw)
         assert out["ttps"] == []
+
+    def test_ttp_with_only_an_id_kept_for_stage3c(self):
+        """An id alone is kept (#772): stage3c resolves the name, or discards an unknown id."""
+        raw = {"ttps": [{"mitre_id": "T1234"}]}
+        out = _normalize_llm_json(raw)
+        assert out["ttps"] == [{"mitre_id": "T1234", "technique_name": ""}]
 
     def test_relationship_source_target_renamed(self):
         """Claude returned source/relationship/target instead of source_value/relationship_type/target_value."""

@@ -504,9 +504,10 @@ class WorkerLoop:
         with self._lock:
             return list(self._handles.keys())
 
-    def terminate_and_requeue(self, job_ids: Iterable[str]) -> int:
+    def terminate_and_requeue(self, job_ids: Iterable[str], *, deadline: float | None = None) -> int:
         """Requeue the given jobs of this loop without counting the attempt, then terminate their processes. Return the
-        number of jobs requeued."""
+        number of jobs requeued.  `deadline` (a time.monotonic() value) bounds the wait for each process to end: past
+        it, every job is still requeued and terminated, but each join returns at once (#747)."""
         count = 0
         for job_id in job_ids:
             with self._lock:
@@ -533,7 +534,8 @@ class WorkerLoop:
             if handle is not None:
                 try:
                     handle.terminate()
-                    handle.join(timeout=5)
+                    wait = 5 if deadline is None else max(0.0, min(5.0, deadline - time.monotonic()))
+                    handle.join(timeout=wait)
                 except Exception as exc:
                     logger.error(f"Failed to terminate handle for {job_id}: {exc}")
         if count > 0:
@@ -543,6 +545,9 @@ class WorkerLoop:
 
 _embedded: WorkerLoop | None = None
 _embedded_thread: threading.Thread | None = None
+# The whole of stop_embedded: the loop's join, the wait for a claim in flight, and the
+# joins of the job processes (#747).
+_STOP_BUDGET_S = 15.0
 _embedded_lock = threading.Lock()
 
 
@@ -569,14 +574,29 @@ def embedded() -> WorkerLoop | None:
 
 def stop_embedded(timeout_s: float = 5.0) -> None:
     """Stop the in-process loop, delete its worker_heartbeats row and forget it
-    (a no-op when none was started)."""
+    (a no-op when none was started).  The whole stop takes at most _STOP_BUDGET_S seconds."""
     global _embedded, _embedded_thread
+    deadline = time.monotonic() + _STOP_BUDGET_S
     with _embedded_lock:
         if _embedded is not None:
             _embedded.stop()
         if _embedded_thread is not None:
             _embedded_thread.join(timeout=timeout_s)
         if _embedded is not None:
+            # stop() makes the loop start no job from now on, but a claim already under way may still be
+            # spawning one, and the loop thread may outlive the join.  Waiting for the kick lock lets that
+            # claim finish, so its job is in running_ids; a kick after this point starts nothing.
+            settled = _embedded._kick_lock.acquire(timeout=max(0.0, deadline - time.monotonic()))
+            if not settled:
+                logger.warning("stop_embedded: a job claim is still in flight; requeueing without waiting for it")
+            try:
+                running = _embedded.running_ids
+            finally:
+                if settled:
+                    _embedded._kick_lock.release()
+            # Requeue the jobs still running before forgetting the loop: their daemon children die with this
+            # process, and their watchers would otherwise mark the jobs failed (#747).
+            _embedded.terminate_and_requeue(running, deadline=deadline)
             _embedded.forget()
         _embedded = None
         _embedded_thread = None
