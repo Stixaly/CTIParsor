@@ -38,7 +38,7 @@ detection rule quoted in the report itself is represented.
 | Relationship between an SDO and an observable (LLM-extracted or policy-pinned) | kept on the observable when STIX 2.1 defines that verb for the pair (`malware communicates-with domain-name`, `malware drops`/`downloads file`, `infrastructure consists-of <any observable>`); every other claim — `related-to` included — goes through the observable's `indicator` (ADR-0041, ADR-0062) |
 | Detection rule quoted verbatim in the report (YARA, Suricata, Snort, or Sigma) | `indicator` SDO with `pattern_type` set to the format and `pattern` holding the rule text as-is; auto-linked with `indicates` to a malware/tool whose name appears in the rule's own title (ADR-0042) |
 | Source document (PDF, DOCX, …) | `artifact` SCO — `payload_bin` (base64) + SHA-256 hash + MIME type, so the bundle carries the original file, not just a pointer to it (ADR-0043). The same file is also on the Report as `x_opencti_files`, which OpenCTI attaches to the Report on import (ADR-0093); the bundle holds the file twice |
-| Threat actor → country / sector | `targets` SRO |
+| Threat actor → country / sector | `targets` SRO, built when the report names one threat actor (two spellings that Stage 4b merges are one); with several, only the `targets` rows the report states (the other pairs are in the ledger `refused`) |
 | Semantic relationship | `relationship` SRO (confidence score). Its `description` is Markdown that says why the link exists, with the sentence the report quotes above it when there is one (ADR-0093) |
 | Relationship evidence grade | `x_evidence_label` custom property on each `relationship` (`observed` / `reported` / `assessed` / `inferred` / `gap`), also written in the `description` (ADR-0093). The quoted sentence of an extracted relationship is in `x_evidence_text` (ADR-0093) |
 | TTP evidence (ADR-0028) | each extracted technique keeps a **verbatim quote** from the report (`evidence_text`), its `evidence_label`, and the resolved character offsets (`evidence_start`, `evidence_end`) on its `entities` row in the database, which the entities API reads (`api/routes/entities.py`). The `attack-pattern` object in the bundle does not carry these fields; its `description` is the extractor's summary, not the quote. Measured across four reports, quotes locate to a sentence **85.6%** of the time and descriptions **38.9%**. A quote that cannot be located stores a NULL offset and demotes the grade one step; the technique is never dropped. The quote of a relationship is on the relationship (`x_evidence_text`, above), not the technique's |
@@ -355,3 +355,8 @@ listed under [What ships](#what-ships).
   listed once, with its `origin` and `reason`. The reverse of a `related-to` or
   `duplicate-of` triple is refused too. The key is absent when nothing is
   refused ([ADR-0013](adr/0013-graph-completion.md), amendment of 2026-10-26).
+  The targets product is built only when the report names one threat actor,
+  counted after the alias merge of graph completion; with two or more, no product edge is built and each pair is listed here with
+  `origin` `targeted_location` and `reason` `ambiguous_actor`. A `targets` row
+  the report states ships whatever the number of actors; a pair whose edge
+  the bundle has (a row, a pinned rule, graph completion) is not listed.

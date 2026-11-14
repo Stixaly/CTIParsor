@@ -124,8 +124,8 @@ def test_targeted_location_names_actor_and_target_from_the_ledger():
     origin = {"origin": "targeted_location", "actor": "APT29", "target": "France"}
     assert _why(justify(sro, origin, names)) == (
         "The report names **APT29** as a threat actor and **France** as a target. "
-        "CTIParsor links every threat actor of the report to every target it names, "
-        "so the report may not say that this actor targets this one.")
+        "It is the only threat actor the report names, so CTIParsor links it to "
+        "every target the report names; the report may not say so in one sentence.")
 
 
 def test_targeted_location_falls_back_on_the_titles():

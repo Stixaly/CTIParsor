@@ -215,12 +215,6 @@
     "reason": "duplicate_after_alias_merge",
     "replaced_by": "relationship--R3",
     "stix_id": "relationship--R11"
-   },
-   {
-    "kind": "relationship",
-    "reason": "duplicate_after_alias_merge",
-    "replaced_by": "relationship--R8",
-    "stix_id": "relationship--R12"
    }
   ],
   "version": 1
@@ -483,7 +477,7 @@
   {
    "created": "<build-time>",
    "created_by_ref": "identity--df314057-d669-5e4d-aa9c-5257582a7ecd",
-   "description": "**Frost Spider** `targets` **finance**\n\n**Why:** The report names **Frost Spider** as a threat actor and **finance** as a target. CTIParsor links every threat actor of the report to every target it names, so the report may not say that this actor targets this one.\n\n**Evidence:** reported",
+   "description": "**Frost Spider** `targets` **finance**\n\n**Why:** The report names **Frost Spider** as a threat actor and **finance** as a target. It is the only threat actor the report names, so CTIParsor links it to every target the report names; the report may not say so in one sentence.\n\n**Evidence:** reported",
    "id": "relationship--R8",
    "modified": "<build-time>",
    "object_marking_refs": [
@@ -545,11 +539,11 @@
     "relationship--R4",
     "indicator--645a0086-d463-5fbe-a5aa-eef115cd8a77",
     "relationship--R5",
-    "relationship--R8",
     "relationship--R2",
     "relationship--R3",
     "relationship--R7",
-    "relationship--R9"
+    "relationship--R9",
+    "relationship--R8"
    ],
    "published": "<build-time>",
    "spec_version": "2.1",

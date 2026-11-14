@@ -215,6 +215,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "OCR_LANG defaults to auto: a scanned page is read in the languages of its script, found by "
      "Tesseract's script detection, instead of English alone; OCR_LANG=eng restores the old reading",
      "extraction"),
+    ("ce9e464", "2026-11-14",
+     "The actor × targeted country/sector `targets` edges are built only when the report names one "
+     "threat actor; with several, only the `targets` rows the report states ship (ADR-0101)",
+     "mapping"),
 )
 
 

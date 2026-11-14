@@ -52,7 +52,7 @@ def test_every_relationship_says_why_it_exists():
     assert "**Confidence:** 90/100" in uses.description
 
     targets = next(r for r in rels if r.relationship_type == "targets")
-    assert "CTIParsor links every threat actor" in targets.description
+    assert "is the only threat actor the report names" in targets.description
 
 
 def test_the_report_carries_its_source_as_text_and_as_a_file():
