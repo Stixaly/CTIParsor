@@ -9,6 +9,12 @@ theme.
 
 ## [Unreleased]
 
+- **The release dossier reads what it missed.** `scripts/check_release_dossier.py` reads the job
+  logs whole from the REST API (`gh run view --log` stopped at a 70,000-character test id and lost the
+  pytest summary line), recognises only a real pytest summary line (a test id quoting one no longer
+  counts), and reads the required `CodeQL` check of code scanning on the merged pull request's head,
+  the only commit it is posted on. The long-id test of `tests/test_baseline_stix.py` has short ids.
+
 ## [1.0.0] - 2026-11-14
 
 - **1.0, the first stable release.** It makes three promises, and only these

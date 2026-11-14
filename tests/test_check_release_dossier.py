@@ -60,6 +60,9 @@ PYTEST_SUMMARY = (
 )
 
 
+PR_HEAD = "ef83f18b8361449f88dca37e837de72cba996952"
+
+
 def _read(name: str) -> str:
     return (FIXTURES / name).read_text(encoding="utf-8")
 
@@ -109,14 +112,18 @@ def recorded(**over: Any) -> list[tuple[str, Any]]:
         "statuses": _read("statuses.json"),
         "immutable": _read("immutable_releases.json"),
         "attest_slsa": _read("attestation_slsa.json"),
+        "pulls": "[]",
+        "head_check_runs": '{"check_runs": []}',
     }
     answers.update(over)
     slsa = answers["attest_slsa"]
     attest_sbom = over.get("attest_sbom", _sbom_from_slsa(slsa) if isinstance(slsa, str) else slsa)
     return [
-        (f"--job {FAST_JOB} --log", answers["fast_log"]),
-        (f"--job {CONTAINER_JOB} --log", answers["container_log"]),
-        (f"--job {PUBLISH_JOB} --log", answers["publish_log"]),
+        (f"actions/jobs/{FAST_JOB}/logs", answers["fast_log"]),
+        (f"actions/jobs/{CONTAINER_JOB}/logs", answers["container_log"]),
+        (f"actions/jobs/{PUBLISH_JOB}/logs", answers["publish_log"]),
+        (f"commits/{SHA}/pulls", answers["pulls"]),
+        (f"commits/{PR_HEAD}/check-runs", answers["head_check_runs"]),
         ("run list", answers["run_list"]),
         (f"run view {RUN_ID}", answers["run_view"]),
         ("code-scanning/analyses", answers["analyses"]),
@@ -518,6 +525,11 @@ def test_paginated_answers_are_read_page_after_page() -> None:
         ("=== 3 failed, 7132 passed in 900.0s ===", True),
         ("tests/test_x.py::test_a PASSED [ 15%]", False),
         ("collected 7135 items", False),
+        ("2026-11-14T09:52:57.9480343Z =========== 7538 passed, 9 skipped, 59 warnings in 981.93s (0:16:21) "
+         "===========", True),
+        ("Fast tests\tRun unit tests\t=== 7135 passed in 900.0s ===\r", True),
+        ("2026-11-14T09:43:40.6593761Z tests/test_check_release_dossier.py::test_the_pytest_summary_line_is_"
+         "recognised[=== 7135 passed, 12 skipped in 1034.56s (0:17:14) ===-True] PASSED [ 25%]", False),
     ],
 )
 def test_the_pytest_summary_line_is_recognised(line: str, matches: bool) -> None:
@@ -556,3 +568,72 @@ def test_the_command_line_writes_the_report_and_exits_by_verdict(tmp_path: Path)
                         gh=FakeGh(green()))
     assert code == 0
     assert json.loads((tmp_path / "ok" / "report.json").read_text(encoding="utf-8"))["verdict"] == "qualified"
+
+
+def _merged_pull(merge_sha: str = SHA) -> str:
+    return json.dumps([{"number": 855, "merge_commit_sha": merge_sha, "merged_at": "2026-11-14T09:20:00Z",
+                        "head": {"sha": PR_HEAD}}])
+
+
+def _head_codeql(conclusion: str = "success", app_id: int = 57789) -> str:
+    return json.dumps({"check_runs": [{"id": 5, "name": "CodeQL", "status": "completed", "conclusion": conclusion,
+                                       "app": {"id": app_id, "slug": "github-advanced-security"}}]})
+
+
+def test_the_job_log_is_read_whole_from_the_api_not_from_gh_run_view() -> None:
+    gh = FakeGh(green())
+    report = collect(gh)
+
+    assert item(report, "job:fast_tests").status == PASS
+    assert not [c for c in gh.calls if "--log" in c]
+    assert ["api", "--allow-escape-sequences", f"repos/{REPO}/actions/jobs/{FAST_JOB}/logs"] in gh.calls
+
+
+def test_a_summary_quoted_in_a_test_id_is_not_the_summary() -> None:
+    quoted = ("2026-11-14T09:43:40.6593761Z tests/t.py::test_s[=== 7135 passed in 1.0s ===-True] PASSED [ 25%]\n")
+    report = collect(FakeGh(green(fast_log=_read("log_fast_tests_excerpt.txt") + quoted)))
+
+    assert item(report, "job:fast_tests").status == MISSING
+
+
+def test_the_code_scanning_check_is_read_on_the_merged_pull_request_head() -> None:
+    report = collect(FakeGh(recorded(alerts="[]", fast_log=_read("log_fast_tests_excerpt.txt") + PYTEST_SUMMARY,
+                                     pulls=_merged_pull(), head_check_runs=_head_codeql())))
+    checks = item(report, "required_checks")
+
+    assert checks.status == PASS
+    assert "pull request #855" in checks.detail
+    assert checks.evidence["from_pull_request"] == {"CodeQL": "the head of pull request #855 (ef83f18)"}
+
+
+def test_a_code_scanning_check_that_failed_on_the_pull_request_fails() -> None:
+    report = collect(FakeGh(recorded(pulls=_merged_pull(), head_check_runs=_head_codeql("failure"))))
+
+    assert item(report, "required_checks").status == FAILED
+
+
+def test_a_check_of_another_app_on_the_pull_request_does_not_count() -> None:
+    report = collect(FakeGh(recorded(pulls=_merged_pull(), head_check_runs=_head_codeql(app_id=15368))))
+
+    assert item(report, "required_checks").status == MISSING
+
+
+def test_a_pull_request_not_merged_as_this_commit_is_not_read() -> None:
+    gh = FakeGh(recorded(pulls=_merged_pull(merge_sha="0" * 40), head_check_runs=_head_codeql()))
+    report = collect(gh)
+
+    assert item(report, "required_checks").status == MISSING
+    assert not [c for c in gh.calls if f"commits/{PR_HEAD}/check-runs" in " ".join(c)]
+
+
+def test_a_missing_ci_job_is_never_read_on_the_pull_request() -> None:
+    checks = _json("check_runs.json")
+    checks["check_runs"] = [c for c in checks["check_runs"] if c["name"] != "Fuzz (dates)"]
+    head = {"check_runs": [{"id": 9, "name": "Fuzz (dates)", "status": "completed", "conclusion": "success",
+                            "app": {"id": 15368}}]}
+    report = collect(FakeGh(recorded(check_runs=json.dumps(checks), pulls=_merged_pull(),
+                                     head_check_runs=json.dumps(head))))
+    checks_item = item(report, "required_checks")
+
+    assert checks_item.status == MISSING
+    assert "Fuzz (dates): missing" in checks_item.detail

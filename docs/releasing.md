@@ -521,7 +521,9 @@ verdict is `qualified`, `incomplete` (a proof is not there yet) or `failed`
 - the push run of `ci.yml` on main, and each job the release waits for
   (`fast-tests`, `frontend-tests`, `dependency-audit`, `browser-e2e`,
   `container-image`, `publish-image`). The unit-test job must log its pytest
-  summary line; a job whose log lacks it is `missing`;
+  summary line; a job whose log lacks it is `missing`. The logs are read whole
+  from the REST API (`actions/jobs/<id>/logs`): `gh run view --log` stopped at a
+  test id of 70,000 characters and lost the rest of the suite;
 - the image digest: the one `container-image` logged, the one `publish-image`
   pushed for `sha-<commit>`, and the one given with `--digest` must be the same;
 - the SLSA provenance and the SBOM attestation of that digest, verified with
@@ -533,7 +535,11 @@ verdict is `qualified`, `incomplete` (a proof is not there yet) or `failed`
   or whose version no longer matches, is an invalid exception and fails the
   dossier. An alert at `medium` or `low` is listed, not blocking;
 - the required checks of the ruleset `basic rules`, each succeeded or skipped on
-  the commit.
+  the commit. One kind is read elsewhere: a required check posted by an app
+  other than GitHub Actions (the `CodeQL` check of code scanning) runs on pull
+  requests only, so when the commit is the merge commit of a pull request it is
+  read on that pull request's head, and the report says so. A job of `ci.yml`
+  missing on the commit stays `missing`: the push run tests the merged tree.
 
 It also reads the tag rulesets and whether immutable releases are on, for the
 record. It does not change them: they are the maintainer's settings
