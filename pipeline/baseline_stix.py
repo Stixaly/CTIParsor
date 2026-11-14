@@ -1642,6 +1642,7 @@ def _first_occurrence(low: str, forms: Iterable[str]) -> tuple[int, int] | None:
     str.find, never with a pattern built from the baseline's text (untrusted)."""
     best: tuple[int, int] | None = None
     for form in forms:
+        form = form.lower()                # `low` is folded; a URL keeps the case of its path (_url_form, #786)
         start = low.find(form)
         while start != -1:
             end = start + len(form)

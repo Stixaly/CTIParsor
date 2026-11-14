@@ -699,6 +699,11 @@ class _NameIndex:
         return dict(self._direct.get(key) or self._alias.get(key) or {})
 
 
+def _key(value: str) -> str:
+    """Name-index key: stripped and lower-cased, as stix_ids normalises (#784)."""
+    return value.strip().lower()
+
+
 def build_stix_bundle(
     raw_entities: list[RawEntity],
     llm_result: LLMEnrichmentResult,
@@ -850,14 +855,24 @@ def build_stix_bundle(
         EntityType.CAMPAIGN,
         EntityType.INCIDENT,
     }
+    # The STIX type each of them becomes: a same-named object of another type
+    # (a DOMAIN example.com) is not this one (#782).
+    _sdo_stix_type = {
+        EntityType.INFRASTRUCTURE: "infrastructure",
+        EntityType.INTRUSION_SET: "intrusion-set",
+        EntityType.LOCATION: "location",
+        EntityType.IDENTITY: "identity",
+        EntityType.CAMPAIGN: "campaign",
+        EntityType.INCIDENT: "incident",
+    }
     for entity in raw_entities:
         if entity.entity_type not in _sdo_entity_types:
             continue
-        key = entity.value.lower()
-        existing = name_to_stix.candidates(key)
-        if existing:
+        key = _key(entity.value)
+        existing = name_to_stix.of_type(key, _sdo_stix_type[entity.entity_type])
+        if existing is not None:
             led.entity(entity.value, entity.entity_type.value, "merged",
-                       obj=next(iter(existing.values())), reason="same_value")
+                       obj=existing, reason="same_value")
             continue
         sdo = _entity_to_sdo(entity)
         if sdo is not None:
@@ -963,6 +978,7 @@ def build_stix_bundle(
             led.entity(entity.value, entity.entity_type.value, "dropped",
                        reason="not_in_llm_lists")
 
+    _ttp_seen_ids: dict[str, object] = {}
     for ttp in llm_result.ttps:
         external_refs = []
         if ttp.mitre_id and ttp.mitre_id.strip():
@@ -995,12 +1011,26 @@ def build_stix_bundle(
             )
         # The ATT&CK id when there is one, else the name — as OpenCTI (ADR-0066)
         ttp_id = stix_ids.attack_pattern_id(ttp.technique_name, ttp.mitre_id)
+        # Two TTPs with the same ATT&CK id (or the same name) are one object (#777):
+        # both names resolve to it, and the ids in the bundle stay unique.
+        seen = _ttp_seen_ids.get(ttp_id)
+        if seen is not None:
+            # The first TTP with this id wins: the duplicate's description and
+            # external_refs are not merged into it. The ledger keeps "merged".
+            name_to_stix.add(ttp.technique_name.lower(), seen)
+            if ttp.mitre_id:
+                name_to_stix.add(ttp.mitre_id.lower(), seen)
+            led.entity(ttp.technique_name, EntityType.TTP.value, "merged", obj=seen,
+                       reason="same_technique" if ttp.mitre_id else "same_value",
+                       mitre_id=ttp.mitre_id)
+            continue
         obj = stix2.AttackPattern(
             name=ttp.technique_name,
             description=ttp.description or "",
             external_references=external_refs,
             id=ttp_id,
         )
+        _ttp_seen_ids[ttp_id] = obj
         stix_objects.append(obj)
         name_to_stix.add(ttp.technique_name.lower(), obj)
         if ttp.mitre_id:
@@ -1156,17 +1186,17 @@ def build_stix_bundle(
             # (and a duplicated entry in Report.object_refs), which fails STIX
             # validation.  Reuse the existing object and register it under the
             # "location:" key so the targets SRO below still resolves it.
-            existing = (name_to_stix.of_type(f"location:{country.lower()}", "location")
-                        or name_to_stix.of_type(country.lower(), "location"))
+            existing = (name_to_stix.of_type(f"location:{_key(country)}", "location")
+                        or name_to_stix.of_type(_key(country), "location"))
             if existing is not None:
-                name_to_stix.add(f"location:{country.lower()}", existing)
+                name_to_stix.add(f"location:{_key(country)}", existing)
                 led.entity(country, EntityType.LOCATION.value, "merged", obj=existing,
                            reason="same_value", input="targeted_country")
                 continue
             location_id = stix_ids.location_id(country)
             obj = stix2.Location(name=country, country=iso2, id=location_id)
             stix_objects.append(obj)
-            name_to_stix.add(f"location:{country.lower()}", obj)
+            name_to_stix.add(f"location:{_key(country)}", obj)
             led.entity(country, EntityType.LOCATION.value, "emitted", obj=obj,
                        input="targeted_country")
             led.object(obj, "targeted_country")
@@ -1182,17 +1212,17 @@ def build_stix_bundle(
             # pipeline IDENTITY RawEntity (stored under the bare value key) or
             # from an earlier iteration of this loop.  See the targeted_countries
             # dedup above — a duplicate identical-id Identity fails validation.
-            existing = (name_to_stix.of_type(f"identity:{sector.lower()}", "identity")
-                        or name_to_stix.of_type(sector.lower(), "identity"))
+            existing = (name_to_stix.of_type(f"identity:{_key(sector)}", "identity")
+                        or name_to_stix.of_type(_key(sector), "identity"))
             if existing is not None:
-                name_to_stix.add(f"identity:{sector.lower()}", existing)
+                name_to_stix.add(f"identity:{_key(sector)}", existing)
                 led.entity(sector, EntityType.IDENTITY.value, "merged", obj=existing,
                            reason="same_value", input="targeted_sector")
                 continue
             identity_id = stix_ids.identity_id(sector, "class")
             obj = stix2.Identity(name=sector, identity_class="class", id=identity_id)
             stix_objects.append(obj)
-            name_to_stix.add(f"identity:{sector.lower()}", obj)
+            name_to_stix.add(f"identity:{_key(sector)}", obj)
             led.entity(sector, EntityType.IDENTITY.value, "emitted", obj=obj,
                        input="targeted_sector")
             led.object(obj, "targeted_sector")
@@ -1201,10 +1231,19 @@ def build_stix_bundle(
                        reason="not_representable", input="targeted_sector")
 
     # --- CourseOfAction SDOs (recommended mitigations) ---
+    _coa_seen_ids: dict[str, object] = {}
     for coa in llm_result.course_of_action:
         try:
             coa_id = stix_ids.course_of_action_id(coa)
+            # "Enable MFA" and "enable mfa" are one mitigation: one object (#780)
+            seen = _coa_seen_ids.get(coa_id)
+            if seen is not None:
+                name_to_stix.add(f"coa:{coa.lower()}", seen)
+                led.entity(coa, "course-of-action", "merged", obj=seen,
+                           reason="same_value", input="course_of_action")
+                continue
             obj = stix2.CourseOfAction(name=coa, id=coa_id)
+            _coa_seen_ids[coa_id] = obj
             stix_objects.append(obj)
             name_to_stix.add(f"coa:{coa.lower()}", obj)
             led.object(obj, "course_of_action")
@@ -1540,6 +1579,30 @@ def build_stix_bundle(
 
         try:
             indicator_id = stix_ids.indicator_id(pattern)
+            if indicator_id in indicators_by_id:
+                # #778: another spelling of the same pattern (HKLM\... and
+                # HKEY_LOCAL_MACHINE\...) already made this Indicator: one object
+                # per id, and the malware edge is added only if it is not there.
+                indicator = indicators_by_id[indicator_id]
+                name_to_stix.add(f"indicator:{ioc_key}", indicator)
+                seen_indicators.add(ioc_key)
+                led.entity(assoc.ioc_value, "indicator", "merged", obj=indicator,
+                           reason="same_observable", malware_name=assoc.malware_name)
+                if hasattr(sco, "id"):
+                    sco_id_to_indicator[sco.id] = indicator
+                if not _association_refused(sco, indicator, malware, assoc):
+                    rel = _add_relationship(
+                        stix_objects, indicator, "indicates", malware,
+                        confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
+                        custom=_EV_REPORTED,
+                    )
+                    if rel is not None:
+                        led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
+                                   malware_name=assoc.malware_name)
+                # Same as a new Indicator: its SCO is based-on it (a no-op when
+                # the SCO is the one already linked, which the seen set decides).
+                _based_on(indicator, sco)
+                continue
             indicator = stix2.Indicator(
                 name=f"Malicious IoC: {assoc.ioc_value}",
                 pattern=pattern,
@@ -2334,11 +2397,19 @@ def _network_traffic_sco(value: str, scos: list, value_to_sco: dict, canonical_t
     d = parse_network_traffic(value)
     if d is None:
         return None
-    host = value_to_sco.get(d.host) or canonical_to_sco.get(d.host)
+    if typed is not None:
+        # #781: the host is looked up by its own type: a File or a mutex named
+        # like the host is not the destination, and a reference to it is not a
+        # valid dst_ref.
+        host = typed.get((_SCO_ENTITY_TYPE[d.host_type][0].value, d.host.lower()))
+    else:
+        host = value_to_sco.get(d.host) or canonical_to_sco.get(d.host)
     if host is None:
         host = _HOST_SCO[d.host_type](value=d.host)
         scos.append(host)
-        value_to_sco[d.host] = canonical_to_sco[d.host] = host
+        # setdefault: a same-valued SCO of another type keeps its value index entry.
+        value_to_sco.setdefault(d.host, host)
+        canonical_to_sco.setdefault(d.host, host)
         if typed is not None:
             typed[(_SCO_ENTITY_TYPE[d.host_type][0].value, d.host.lower())] = host
         if ledger is not None:
@@ -2371,10 +2442,19 @@ def _url_key(value: str) -> str:
 def _observable_key(entity: RawEntity) -> tuple[str, str]:
     """What makes two entities one observable: their type, and their value
     normalized as that type allows (hive-expanded registry keys, URLs by
-    `_url_key`, everything else lower-cased).  The value alone merged a file
-    and a mutex both named svchost.exe into one SCO (#289)."""
+    `_url_key`, ASNs by their number, everything else lower-cased).  The value
+    alone merged a file and a mutex both named svchost.exe into one SCO (#289)."""
     if entity.entity_type == EntityType.URL:
         return (entity.entity_type.value, _url_key(entity.value))
+    if entity.entity_type == EntityType.ASN:
+        # #779: "AS12345" and "12345" are one autonomous-system (_entity_to_sco
+        # builds it from the number alone).  Not a number: the value as written.
+        num = entity.value.upper().removeprefix("AS").strip()
+        if num.isdigit():
+            try:
+                return (entity.entity_type.value, str(int(num)))
+            except ValueError:    # a digit character int() refuses, e.g. "²"
+                pass
     return (entity.entity_type.value, _expand_registry_hive(entity.value).lower())
 
 
