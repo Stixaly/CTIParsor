@@ -233,16 +233,23 @@ export default function PdfViewer({ url, filename, entities, focusedId, onFocusE
 
   // Wait for page 1's size before rendering, so a fit-to-width opening does
   // not render every page at 100 % first.
+  // The document on screen.  Page 1's answer for a document that is no longer
+  // this one (the url changed while it was read) must not overwrite the new one (#828).
+  const currentPdf = useRef<DocumentCallback | null>(null)
+  // Cleared by the cleanup, not the body: on mount the document may already be loaded.
+  useEffect(() => () => { currentPdf.current = null }, [url])
   const onDocLoadSuccess = useCallback((pdf: DocumentCallback) => {
+    currentPdf.current = pdf
     setError(null)
     setCurrentPage(1)
     pdf.getPage(1)
       .then(p => {
+        if (currentPdf.current !== pdf) return
         const v = p.getViewport({ scale: 1 })
         setBaseSize({ w: v.width, h: v.height })
       })
-      .catch(() => setBaseSize(null))
-      .finally(() => setNumPages(pdf.numPages))
+      .catch(() => { if (currentPdf.current === pdf) setBaseSize(null) })
+      .finally(() => { if (currentPdf.current === pdf) setNumPages(pdf.numPages) })
   }, [])
 
   const onLoadError = useCallback((err: Error) => {

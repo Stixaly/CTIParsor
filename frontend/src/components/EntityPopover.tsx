@@ -212,20 +212,20 @@ export default function EntityPopover({
   // ── keyboard ───────────────────────────────────────────────────────────────
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Escape') { e.preventDefault(); onClose() }
     if (e.key === 'Enter' && firstMatch) { e.preventDefault(); pick(firstMatch) }
   }
 
-  // The warning hides the search input, and with it its onKeyDown: while it is
-  // shown, Escape is taken on the window instead (#559).
+  // Escape is taken on the window while the popover is mounted, so it works whether
+  // the search input is shown or not (the warning and « ← Back » remount it, #559, #824).
+  // The input's keydown bubbles here: Escape closes once. An Escape another
+  // component already took (a menu or a dialog above) is not taken again.
   useEffect(() => {
-    if (!pendingConfirm) return
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') { e.preventDefault(); onClose() }
+      if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); onClose() }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [pendingConfirm, onClose])
+  }, [onClose])
 
   // ── position (clamped to viewport) ────────────────────────────────────────
 

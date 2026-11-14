@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Login from './Login'
-import { AuthProvider } from '../context/AuthContext'
+import { AuthProvider, useAuth } from '../context/AuthContext'
+import { apiFetch } from '../api/client'
 import { resetSession } from '../api/session'
 import type { Me } from '../api/auth'
 
@@ -154,5 +155,46 @@ describe('Login', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
     fireEvent.submit(screen.getByLabelText('Password').closest('form')!)
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'))
+  })
+})
+
+// #820: the first /me was sent before the sign-in and answers 401 after it: the user stays signed in.
+describe('Login and a /me answered after the sign-in (#820)', () => {
+  function Status() {
+    return <p data-testid="status">{useAuth().status}</p>
+  }
+
+  it('keeps the user signed in, and the next write carries the CSRF token', async () => {
+    let answerMe!: (res: Response) => void
+    const spy = vi.fn((url: string) => {
+      if (url === '/api/auth/methods') return Promise.resolve(new Response(JSON.stringify(METHODS)))
+      if (url === '/api/auth/me') return new Promise<Response>(resolve => { answerMe = resolve })
+      if (url === '/api/auth/login') return Promise.resolve(new Response(JSON.stringify(ME)))
+      return Promise.resolve(new Response('{}'))
+    })
+    vi.stubGlobal('fetch', spy)
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/login']}>
+          <AuthProvider>
+            <Status />
+            <Routes>
+              <Route path="/login" element={<Login />} />
+              <Route path="*" element={<Where />} />
+            </Routes>
+          </AuthProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await fill()
+    await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'))
+
+    await act(async () => { answerMe(new Response('{"detail":"Authentication required"}', { status: 401 })) })
+    expect(screen.getByTestId('status')).toHaveTextContent('signed-in')
+
+    await apiFetch('/api/jobs/j1', { method: 'PATCH' })
+    const write = spy.mock.calls.find(([url]) => url === '/api/jobs/j1') as unknown as [string, RequestInit]
+    expect(write[1].headers).toMatchObject({ 'X-CSRF-Token': 'csrf-1' })
   })
 })

@@ -75,9 +75,21 @@ export function useRuleSelection(
 
   // Load persisted exclusions whenever the job changes.
   useEffect(() => {
-    if (jobId === undefined) return
+    if (jobId === undefined) {
+      commit(new Set())
+      return
+    }
     commit(loadStringSet(`coverage.selection.${jobId}`))
   }, [jobId, commit])
+
+  // The job the current `rules` were received for. After a job switch the caller
+  // still holds the previous job's rules until the new inventory arrives, so the
+  // prune below must wait for the rules to change (#823). Effects run in
+  // declaration order: the job is recorded before the rules take it.
+  const latestJobId = useRef(jobId)
+  useEffect(() => { latestJobId.current = jobId }, [jobId])
+  const rulesJobId = useRef(jobId)
+  useEffect(() => { rulesJobId.current = latestJobId.current }, [rules])
 
   // Persisted by the MUTATORS, never by an effect on `excluded` — the same rule
   // `usePromotedRules` documents, and for the same reason. An effect with
@@ -95,7 +107,7 @@ export function useRuleSelection(
   // TRAP: never prune while `rules` is empty — rules arrive asynchronously, and
   // purging on the empty array would wipe the persisted selection on first render.
   useEffect(() => {
-    if (rules.length === 0 || !complete) return
+    if (rules.length === 0 || !complete || rulesJobId.current !== jobId) return
     const validIds = new Set(rules.map(r => r.id))
     const prev = excludedRef.current
     const next = new Set(prev)
@@ -109,7 +121,7 @@ export function useRuleSelection(
     if (!changed) return
     persist(next)
     commit(next)
-  }, [rules, complete, persist, commit])
+  }, [rules, complete, jobId, persist, commit])
 
   const byId = useMemo(() => new Map(rules.map(r => [r.id, r])), [rules])
 

@@ -62,9 +62,11 @@ function refusedErrors(body: string): string[] | null {
 }
 
 export async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // The caller's headers add to the JSON Content-Type; they must not replace it (#822).
+  const { headers, ...rest } = init ?? {}
   const res = await apiFetch(`${BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
-    ...init,
+    ...rest,
+    headers: { 'Content-Type': 'application/json', ...headers },
   })
   if (!res.ok) {
     const msg = await res.text().catch(() => res.statusText)

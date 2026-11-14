@@ -147,6 +147,39 @@ describe('useRuleSelection — an inventory still loading (#285)', () => {
   })
 })
 
+// #823: a job switch must not leave the previous job's exclusions or rules behind.
+describe('useRuleSelection — job changes (#823)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    vi.restoreAllMocks()
+  })
+
+  it('clears the exclusions when the job becomes undefined', () => {
+    localStorage.setItem('coverage.selection.jobA', JSON.stringify(['a1']))
+    const { result, rerender } = renderHook(
+      ({ jobId }: { jobId: string | undefined }) => useRuleSelection(jobId, RULES_A),
+      { initialProps: { jobId: 'jobA' as string | undefined } },
+    )
+    expect(result.current.isSelected('a1')).toBe(false)
+    rerender({ jobId: undefined })
+    expect(result.current.excluded.size).toBe(0)
+  })
+
+  it('does not prune or persist job B exclusions against job A rules', () => {
+    localStorage.setItem('coverage.selection.jobB', JSON.stringify(['b1']))
+    const writes = recordWrites()
+    const { rerender } = renderHook(
+      ({ jobId, rules, complete }: { jobId: string; rules: SelectableRule[]; complete: boolean }) =>
+        useRuleSelection(jobId, rules, complete),
+      { initialProps: { jobId: 'jobA', rules: RULES_A, complete: true } },
+    )
+    // The caller keeps job A's rules until job B's inventory arrives.
+    rerender({ jobId: 'jobB', rules: RULES_A, complete: true })
+    expect(localStorage.getItem('coverage.selection.jobB')).toBe(JSON.stringify(['b1']))
+    expect(writes.filter(([k]) => k === 'coverage.selection.jobB')).toEqual([])
+  })
+})
+
 // #545: three separate defects in the same hook, one test each.
 describe('useRuleSelection — initial state, toggles and writes (#545)', () => {
   beforeEach(() => {

@@ -64,7 +64,14 @@ export function useSSE(jobId: string | null) {
     es.onerror = () => {
       // The browser does not retry a refused stream (readyState CLOSED): a 401 ends the
       // session, and asking /api/auth/me says so (the client then goes to /login).
-      if (es.readyState === 2) void checkSession()
+      // Nothing more comes from it, so it is lost at once (#819).
+      if (es.readyState === 2) {
+        void checkSession()
+        setLost(true)
+        setDone(true)
+        es.close()
+        return
+      }
       errorCountRef.current += 1
       if (errorCountRef.current >= MAX_ERRORS) {
         setLost(true)

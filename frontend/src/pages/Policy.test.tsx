@@ -132,3 +132,102 @@ describe('Policy page — saving', () => {
     }
   })
 })
+
+// #814: the stored policy arrives after the page has rendered. Until it does,
+// nothing may be edited, or its answer overwrites the edit.
+describe('Policy page — before the stored policy arrives (#814)', () => {
+  it('disables the mode switch, Reset and the rule editor until the GET answers', async () => {
+    let answer: (v: unknown) => void = () => {}
+    api.getRelationshipPolicy.mockImplementation(() => new Promise(r => { answer = r }))
+    renderPolicy()
+    expect(screen.getByRole('button', { name: /Full auto/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /Enforce my model/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeDisabled()
+    expect(document.querySelector('[inert]')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /Full auto/ }))   // no-op before the answer
+    await act(async () => { answer(STORED) })
+    await waitFor(() => expect(screen.getByRole('button', { name: /Full auto/ })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeEnabled()
+    expect(document.querySelector('[inert]')).toBeNull()
+    expect(api.putRelationshipPolicy).not.toHaveBeenCalled()
+  })
+})
+
+// #814, the other save paths: the budget and evidence controls and the import
+// Apply button each save the page's rules, so each waits for the stored policy too.
+describe('Policy page — budget, evidence and import before the stored policy arrives (#814)', () => {
+  it('disables the budget, evidence and import controls until the GET answers', async () => {
+    let answer: (v: unknown) => void = () => {}
+    api.getRelationshipPolicy.mockImplementation(() => new Promise(r => { answer = r }))
+    renderPolicy()
+    expect(screen.getByRole('button', { name: 'Sequential' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Fair share' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Off' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Wide' })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: /Import \/ Export/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'import' }))
+    fireEvent.change(document.querySelector('textarea') as HTMLTextAreaElement, {
+      target: { value: JSON.stringify({ rules: [{ src: 'malware', verb: 'uses', tgt: 'tool' }] }) },
+    })
+    expect(screen.getByRole('button', { name: 'Apply policy' })).toBeDisabled()
+    await act(async () => { answer(STORED) })
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sequential' })).toBeEnabled())
+    expect(screen.getByRole('button', { name: 'Off' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Wide' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: 'Apply policy' })).toBeEnabled()
+    expect(api.putRelationshipPolicy).not.toHaveBeenCalled()
+  })
+
+  it('says why nothing is editable when the GET fails, and retries on demand', async () => {
+    api.getRelationshipPolicy.mockRejectedValueOnce(new Error('network down'))
+    renderPolicy()
+    expect(await screen.findByRole('alert')).toHaveTextContent('could not be loaded')
+    expect(screen.getByRole('button', { name: /Full auto/ })).toBeDisabled()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: /Full auto/ })).toBeEnabled())
+    expect(api.getRelationshipPolicy).toHaveBeenCalledTimes(2)
+    expect(screen.queryByRole('alert')).toBeNull()
+  })
+})
+
+// #815: a rule whose source type is in no group was counted but never shown, and
+// a non-string field in an imported or stored rule crashed the editor.
+describe('Policy page — rule types and malformed fields (#815)', () => {
+  it('shows a rule whose source is network-traffic', async () => {
+    api.getRelationshipPolicy.mockResolvedValue({
+      ...STORED, rules: [{ src: 'network-traffic', verb: 'related-to', tgt: 'url', mode: 'pin', enabled: true }],
+    })
+    renderPolicy()
+    expect(await screen.findByText('Net Traffic')).toBeInTheDocument()
+  })
+
+  it('files a rule whose source type is in no group under Other', async () => {
+    api.getRelationshipPolicy.mockResolvedValue({
+      ...STORED, rules: [{ src: 'x-custom', verb: 'related-to', tgt: 'url', mode: 'pin', enabled: true }],
+    })
+    renderPolicy()
+    expect(await screen.findByText('Other')).toBeInTheDocument()
+  })
+
+  it('rejects an imported rule with non-string fields without crashing', async () => {
+    renderPolicy()
+    fireEvent.click(await screen.findByRole('button', { name: /Import \/ Export/ }))
+    fireEvent.click(screen.getByRole('button', { name: 'import' }))
+    fireEvent.change(document.querySelector('textarea') as HTMLTextAreaElement, {
+      target: { value: JSON.stringify({ rules: [{ src: 123, tgt: 'file', verb: 456 }] }) },
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply policy' }))
+    expect(await screen.findByText(/no valid rules/)).toBeInTheDocument()
+    expect(api.putRelationshipPolicy).not.toHaveBeenCalled()
+  })
+
+  it('a search over a stored rule with a non-string verb does not throw', async () => {
+    api.getRelationshipPolicy.mockResolvedValue({
+      ...STORED, rules: [{ src: 'malware', verb: 456, tgt: 'file', mode: 'pin', enabled: true }],
+    })
+    renderPolicy()
+    expect(await screen.findByText('Capability')).toBeInTheDocument()
+    fireEvent.change(screen.getByPlaceholderText('Filter by type or verb…'), { target: { value: 'zzz' } })
+    expect(screen.getByText('No rules match "zzz".')).toBeInTheDocument()
+  })
+})

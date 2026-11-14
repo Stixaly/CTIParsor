@@ -321,8 +321,8 @@ function DetailPanel({
 // ── Relationship Editor ───────────────────────────────────────────────────────
 
 export function RelEditor({
-  nodes, edges, byId, fate, imported, deleteError, labelOf, onClose, onPick,
-  onAccept, onReject, onReset, onDelete, onCreate, onAddEntity,
+  nodes, edges, byId, fate, imported, deleteError, relError, labelOf, onClose, onPick,
+  onAccept, onReject, onReset, onDelete, onCreate, onAddEntity, creating,
 }: {
   jobId: string
   nodes: GraphNode[]
@@ -332,6 +332,8 @@ export function RelEditor({
   /** Rows the analyst's STIX bundle supplied: the server refuses to delete them (ADR-0090). */
   imported: Set<string>
   deleteError: string | null
+  /** The server's reason for a refused accept, reject, reset or new link (#811). */
+  relError: string | null
   labelOf: (id: string) => string
   onClose: () => void
   onPick: (id: string) => void
@@ -339,8 +341,11 @@ export function RelEditor({
   onReject: (id: string) => void
   onReset:  (id: string) => void
   onDelete: (id: string) => void
-  onCreate: (srcValue: string, tgtValue: string, rel: string, evidence: string) => void
+  /** Resolves true once the link is saved, false when it was refused. */
+  onCreate: (srcValue: string, tgtValue: string, rel: string, evidence: string) => Promise<boolean>
   onAddEntity: (value: string, type: string) => Promise<void>
+  /** A new link is being saved: Add is off until it is, so a second click sends nothing. */
+  creating: boolean
 }) {
   const [filter, setFilter] = useState('')
   const [adding, setAdding] = useState(false)
@@ -401,8 +406,9 @@ export function RelEditor({
           nodes={nodes}
           byId={byId}
           onAddEntity={onAddEntity}
-          onCreate={(sv, tv, rel, ev) => { onCreate(sv, tv, rel, ev); setAdding(false) }}
+          onCreate={async (sv, tv, rel, ev) => { if (await onCreate(sv, tv, rel, ev)) setAdding(false) }}
           onCancel={() => setAdding(false)}
+          creating={creating}
         />
       )}
 
@@ -411,6 +417,11 @@ export function RelEditor({
         {deleteError && (
           <p role="alert" style={{ fontSize: 11, color: 'var(--no)', margin: '0 0 8px' }}>
             Not deleted: {deleteError}
+          </p>
+        )}
+        {relError && (
+          <p role="alert" style={{ fontSize: 11, color: 'var(--no)', margin: '0 0 8px' }}>
+            Not saved: {relError}
           </p>
         )}
         {shown.length === 0 && (
@@ -689,13 +700,14 @@ function GraphNodePicker({
 // automatic relationship type suggestion).
 
 function AddRelForm({
-  nodes, onCreate, onCancel, onAddEntity,
+  nodes, onCreate, onCancel, onAddEntity, creating,
 }: {
   nodes: GraphNode[]
   byId: Map<string, GraphNode>
-  onCreate: (srcValue: string, tgtValue: string, rel: string, evidence: string) => void
+  onCreate: (srcValue: string, tgtValue: string, rel: string, evidence: string) => Promise<void>
   onCancel: () => void
   onAddEntity: (value: string, type: string) => Promise<void>
+  creating: boolean
 }) {
   const sorted = useMemo(
     () => [...nodes].sort((a, b) => getTier(a.type) - getTier(b.type)),
@@ -727,8 +739,8 @@ function AddRelForm({
   const canAdd = srcValue && tgtValue && rel && srcValue !== tgtValue
 
   const add = () => {
-    if (!canAdd || !srcValue || !tgtValue) return
-    onCreate(srcValue, tgtValue, rel, evidence)
+    if (creating || !canAdd || !srcValue || !tgtValue) return
+    void onCreate(srcValue, tgtValue, rel, evidence)
   }
 
   const selStyle: React.CSSProperties = {
@@ -797,7 +809,7 @@ function AddRelForm({
           style={{ flex: 1, fontSize: 11, padding: '5px 0', justifyContent: 'center' }}>
           Cancel
         </button>
-        <button onClick={add} disabled={!canAdd} className="btn-primary"
+        <button onClick={add} disabled={!canAdd || creating} className="btn-primary"
           style={{ flex: 1, fontSize: 11, padding: '5px 0', justifyContent: 'center' }}>
           Add link
         </button>
@@ -837,8 +849,11 @@ export default function Graph() {
   // ── Data fetching ──────────────────────────────────────────────────────────
 
   const { data: job }           = useQuery({ queryKey: ['job', jobId],           queryFn: () => fetchJob(jobId!),           enabled: !!jobId })
-  const { data: rawEntities  = [], isLoading: entLoading  } = useQuery({ queryKey: ['entities',      jobId], queryFn: () => fetchEntities(jobId!),      enabled: !!jobId })
-  const { data: rawRelations = [], isLoading: relLoading  } = useQuery({ queryKey: ['relationships', jobId], queryFn: () => fetchRelationships(jobId!),  enabled: !!jobId })
+  const { data: rawEntities  = [], isLoading: entLoading, isError: entFailed, error: entFailure, refetch: refetchEntities } = useQuery({ queryKey: ['entities', jobId], queryFn: () => fetchEntities(jobId!), enabled: !!jobId })
+  const { data: rawRelations = [], isLoading: relLoading, isError: relFailed, error: relFailure, refetch: refetchRelations } = useQuery({ queryKey: ['relationships', jobId], queryFn: () => fetchRelationships(jobId!), enabled: !!jobId })
+  // A failed load is an error to retry, not an empty graph (#812).
+  const loadError = entFailed ? entFailure : relFailed ? relFailure : null
+  const retryLoad = () => { void refetchEntities(); void refetchRelations() }
   // A missing bundle is a state to show, not an error to retry.  So is a
   // refused one (the STIX schemas said no): it exists, but it is not served.
   const { data: served = null, isLoading: bundleLoading, error: bundleError } = useQuery({
@@ -891,6 +906,7 @@ export default function Graph() {
   const [diffOpen,     setDiffOpen]      = useState(false)
   const [baselineOpen, setBaselineOpen]  = useState(false)
   const [deleteError,  setDeleteError]   = useState<string | null>(null)
+  const [relError,     setRelError]      = useState<string | null>(null)
   const [showLabels,   setShowLabels]    = useState(false)
   const [focusSignal,  setFocusSignal]   = useState<{ id: string; seq: number } | null>(null)
   const focusSeq = useRef(0)
@@ -998,10 +1014,13 @@ export default function Graph() {
     finalize.markDirty()
   }
 
+  // A refused accept, reject or new link is shown in the editor, where it was made (#811).
   const updateRelMut = useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: object }) =>
       updateRelationship(jobId!, id, patch),
+    onMutate: () => setRelError(null),
     onSuccess: onRowsChanged,
+    onError: err => setRelError(errorDetail(err)),
   })
   const deleteRelMut = useMutation({
     mutationFn: (id: string) => deleteRelationship(jobId!, id),
@@ -1012,7 +1031,9 @@ export default function Graph() {
   const createRelMut = useMutation({
     mutationFn: (body: Parameters<typeof createRelationship>[1]) =>
       createRelationship(jobId!, body),
+    onMutate: () => setRelError(null),
     onSuccess: onRowsChanged,
+    onError: err => setRelError(errorDetail(err)),
   })
 
   // ── Download STIX bundle ───────────────────────────────────────────────────
@@ -1038,9 +1059,9 @@ export default function Graph() {
   useEffect(() => {
     if (selectedEdge && !edges.some(e => e.id === selectedEdge)) setSelectedEdge(null)
   }, [edges, selectedEdge])
-  // A refused delete is reported where it happened: a new selection or a closed
-  // editor drops it.
-  useEffect(() => { setDeleteError(null) }, [editMode, selectedId, selectedEdge])
+  // A refused delete or link change is reported where it happened: a new selection
+  // or a closed editor drops it.
+  useEffect(() => { setDeleteError(null); setRelError(null) }, [editMode, selectedId, selectedEdge])
 
   // ── Loading state ──────────────────────────────────────────────────────────
 
@@ -1232,6 +1253,15 @@ export default function Graph() {
                 <path d="M21 12a9 9 0 11-6.2-8.6" />
               </svg>
               Loading graph…
+            </div>
+          ) : loadError ? (
+            <div role="alert" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8, padding: 24 }}>
+              <Network size={40} style={{ opacity: 0.3 }} />
+              <p style={{ margin: 0, fontSize: 13, color: 'var(--no)' }}>The graph could not be loaded</p>
+              <p style={{ margin: 0, fontSize: 11, maxWidth: 560, wordBreak: 'break-word', textAlign: 'center' }}>{errorDetail(loadError)}</p>
+              <button onClick={retryLoad} className="btn-primary" style={{ fontSize: 12 }}>
+                <RefreshCw size={12} /> Retry
+              </button>
             </div>
           ) : bundleRefused ? (
             <div role="alert" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--ink-4)', gap: 8, padding: 24 }}>
@@ -1428,6 +1458,7 @@ export default function Graph() {
                 fate={review.fate}
                 imported={importedRows}
                 deleteError={deleteError}
+                relError={relError}
                 labelOf={labelOf}
                 onClose={() => setEditMode(false)}
                 onPick={pickEntity}
@@ -1436,15 +1467,17 @@ export default function Graph() {
                 onReset={id  => { if (readOnly) return; updateRelMut.mutate({ id, patch: { accepted: null } }) }}
                 onDelete={id => { if (readOnly) return; setDeleteError(null); deleteRelMut.mutate(id) }}
                 onCreate={(srcValue, tgtValue, rel, evidence) => {
-                  if (readOnly) return
-                  createRelMut.mutate({
+                  if (readOnly) return Promise.resolve(false)
+                  // A refusal lands in relError (onError); the form stays open for a fix.
+                  return createRelMut.mutateAsync({
                     source_value: srcValue,
                     relationship_type: rel,
                     target_value: tgtValue,
                     confidence: 1.0,
                     evidence_text: evidence || null,
-                  })
+                  }).then(() => true, () => false)
                 }}
+                creating={createRelMut.isPending}
                 onAddEntity={async (value, entity_type) => {
                   if (readOnly) return
                   // Pass source: 'manual' so MarginaliaCard and the Review page

@@ -15,6 +15,7 @@ const api = vi.hoisted(() => ({
   fetchBundleLedger: vi.fn(),
   deleteRelationship: vi.fn(),
   updateRelationship: vi.fn(),
+  createRelationship: vi.fn(),
   finalizeJobQuick: vi.fn(),
 }))
 
@@ -27,6 +28,7 @@ vi.mock('../api/client', async importOriginal => ({
   fetchBundleLedger: api.fetchBundleLedger,
   deleteRelationship: api.deleteRelationship,
   updateRelationship: api.updateRelationship,
+  createRelationship: api.createRelationship,
   finalizeJobQuick: api.finalizeJobQuick,
 }))
 
@@ -48,9 +50,10 @@ const BUNDLE_TITLE = 'From your STIX bundle: reject it in the review instead'
 function renderEditor(over: Partial<Parameters<typeof RelEditor>[0]> = {}) {
   const props = {
     jobId: 'job-1', nodes: NODES, edges: [edge('rel-bundle', true), edge('rel-new', null)], byId: BY_ID,
-    imported: new Set(['rel-bundle']), deleteError: null, labelOf: (id: string) => id,
+    imported: new Set(['rel-bundle']), deleteError: null, relError: null, labelOf: (id: string) => id,
     onClose: vi.fn(), onPick: vi.fn(), onAccept: vi.fn(), onReject: vi.fn(), onReset: vi.fn(),
-    onDelete: vi.fn(), onCreate: vi.fn(), onAddEntity: vi.fn(() => Promise.resolve()),
+    onDelete: vi.fn(), onCreate: vi.fn(() => Promise.resolve(true)), onAddEntity: vi.fn(() => Promise.resolve()),
+    creating: false,
     ...over,
   }
   render(<RelEditor {...props} />)
@@ -263,6 +266,113 @@ describe('Graph page — Reject on an accepted link sends accepted: false (#452)
     fireEvent.click(await screen.findByTitle('Reject'))
 
     await waitFor(() => expect(api.updateRelationship).toHaveBeenCalledWith('job-1', 'rel-1', { accepted: false }))
+  })
+})
+
+// #811 — a refused create or accept is reported, and the add form stays open to be corrected.
+describe('Graph page — a refused link change is reported (#811)', () => {
+  beforeEach(() => {
+    api.fetchJob.mockResolvedValue(JOB)
+    api.fetchEntities.mockResolvedValue(ENTITIES)
+    api.fetchRelationships.mockResolvedValue([])
+    api.fetchBundle.mockRejectedValue(new Error('404: no bundle yet'))
+    api.fetchBundleLedger.mockResolvedValue(null)
+    api.createRelationship.mockReset()
+    api.createRelationship.mockResolvedValue({})
+    api.updateRelationship.mockReset()
+    api.finalizeJobQuick.mockResolvedValue(undefined)
+  })
+
+  // Picks APT29 as the source and WINELOADER as the target in the add form.
+  async function pickPair() {
+    fireEvent.click(await screen.findByRole('button', { name: 'Review rows' }))
+    fireEvent.click(await screen.findByTitle('Edit links'))
+    fireEvent.click(await screen.findByRole('button', { name: 'New' }))
+    const [src, tgt] = screen.getAllByPlaceholderText('Search entities…')
+    fireEvent.focus(src)
+    fireEvent.mouseDown(screen.getByRole('button', { name: /APT29/ }))
+    fireEvent.focus(tgt)
+    fireEvent.mouseDown(screen.getByRole('button', { name: /WINELOADER/ }))
+  }
+
+  it('shows the server’s reason and keeps the add form open when the create is refused', async () => {
+    api.createRelationship.mockRejectedValue(new Error('409: {"detail":"this link already exists"}'))
+    renderGraph()
+    await pickPair()
+    fireEvent.change(screen.getByPlaceholderText('Evidence text (optional)'), { target: { value: 'seen in the report' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Add link' }))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('this link already exists')
+    expect(screen.getByRole('button', { name: 'Add link' })).toBeEnabled()
+    // The form kept what the analyst typed, so it is open, not reset.
+    expect(screen.getByPlaceholderText('Evidence text (optional)')).toHaveValue('seen in the report')
+  })
+
+  it('sends one create for two clicks on Add, and Add is off while the link is saved', async () => {
+    let finish!: (value: unknown) => void
+    api.createRelationship.mockReturnValue(new Promise(resolve => { finish = resolve }))
+    renderGraph()
+    await pickPair()
+    const add = screen.getByRole('button', { name: 'Add link' })
+    fireEvent.click(add)
+    await waitFor(() => expect(api.createRelationship).toHaveBeenCalledTimes(1))
+    // The second click comes once the first is on screen as saving, as a double click does.
+    await waitFor(() => expect(add).toBeDisabled())
+    fireEvent.click(add)
+    // Time for a second send to start, if the button let one through.
+    await new Promise(resolve => setTimeout(resolve, 50))
+
+    expect(api.createRelationship).toHaveBeenCalledTimes(1)
+    finish({})
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add link' })).not.toBeInTheDocument())
+  })
+
+  it('closes the add form once the create is saved', async () => {
+    renderGraph()
+    await pickPair()
+    fireEvent.click(screen.getByRole('button', { name: 'Add link' }))
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Add link' })).not.toBeInTheDocument())
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('shows the server’s reason when an accept is refused', async () => {
+    api.fetchRelationships.mockResolvedValue(RELATIONS)
+    api.updateRelationship.mockRejectedValue(new Error('500: {"detail":"the bundle is locked"}'))
+    renderGraph()
+    fireEvent.click(await screen.findByRole('button', { name: 'Review rows' }))
+    fireEvent.click(await screen.findByTitle('Edit links'))
+    fireEvent.click(await screen.findByTitle('Accept'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('the bundle is locked')
+  })
+})
+
+// #812 — a failed load is an error with a retry, not an empty graph.
+describe('Graph page — a failed load is an error, not an empty graph (#812)', () => {
+  beforeEach(() => {
+    api.fetchJob.mockResolvedValue(JOB)
+    api.fetchEntities.mockRejectedValue(new Error('500: {"detail":"database is locked"}'))
+    api.fetchRelationships.mockResolvedValue([])
+    api.fetchBundle.mockRejectedValue(new Error('404: no bundle yet'))
+    api.fetchBundleLedger.mockResolvedValue(null)
+  })
+
+  it('shows an alert with the reason instead of “No entities to display”', async () => {
+    renderGraph()
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('database is locked')
+    expect(screen.queryByText('No entities to display')).not.toBeInTheDocument()
+  })
+
+  it('retries the load from the alert', async () => {
+    renderGraph()
+    await screen.findByRole('alert')
+    api.fetchEntities.mockResolvedValue(ENTITIES)
+    fireEvent.click(screen.getByRole('button', { name: 'Retry' }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+    expect(api.fetchEntities).toHaveBeenCalledTimes(2)
   })
 })
 

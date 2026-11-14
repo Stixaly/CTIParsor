@@ -328,14 +328,23 @@ export default function RelationshipRail({
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // A cancelled pointer (#829) ends the drag like a release does.
   useEffect(() => () => {
     if (activeResizeRef.current) {
       window.removeEventListener('pointermove', activeResizeRef.current.move)
       window.removeEventListener('pointerup',   activeResizeRef.current.up)
+      window.removeEventListener('pointercancel', activeResizeRef.current.up)
     }
   }, [])
 
   const onResizeDown = (e: React.PointerEvent) => {
+    // A second pointerdown before the first drag ends: drop the first drag's
+    // listeners, or they stay attached with nothing left to remove them (#829).
+    if (activeResizeRef.current) {
+      window.removeEventListener('pointermove', activeResizeRef.current.move)
+      window.removeEventListener('pointerup',   activeResizeRef.current.up)
+      window.removeEventListener('pointercancel', activeResizeRef.current.up)
+    }
     setDragging(true)
     startRef.current = { y: e.clientY, h: clampRail(height) }
     const move = (ev: PointerEvent) => {
@@ -346,11 +355,13 @@ export default function RelationshipRail({
       setDragging(false)
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
       activeResizeRef.current = null
     }
     activeResizeRef.current = { move, up }
     window.addEventListener('pointermove', move)
     window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
   }
 
   // "To review" is what no analyst has decided: pending rows and the rows the

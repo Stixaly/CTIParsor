@@ -37,17 +37,13 @@ export function canWrite(role: Role | null | undefined, mode: Me['auth_mode'] = 
   return roleAtLeast(role, WRITE_ROLE, mode)
 }
 
-/** The signed-in user, `null` when the server says nobody is (401).  Keeps the CSRF token. */
+/** The signed-in user, `null` when the server says nobody is (401).  The caller keeps the
+ *  CSRF token: an answer that is out of date must not overwrite a sign-in (#820). */
 export async function fetchMe(): Promise<Me | null> {
   const res = await fetch('/api/auth/me', { credentials: 'same-origin' })
-  if (res.status === 401) {
-    setCsrfToken(null)
-    return null
-  }
+  if (res.status === 401) return null
   if (!res.ok) throw new Error(`${res.status}: ${await res.text().catch(() => res.statusText)}`)
-  const me = (await res.json()) as Me
-  setCsrfToken(me.csrf_token)
-  return me
+  return (await res.json()) as Me
 }
 
 export async function fetchSignInMethods(): Promise<SignInMethods> {

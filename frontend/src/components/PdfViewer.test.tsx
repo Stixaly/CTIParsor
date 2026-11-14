@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useEffect } from 'react'
 import PdfViewer from './PdfViewer'
@@ -7,6 +7,9 @@ import PdfViewer from './PdfViewer'
 // #347: after a load error <Document> was unmounted for good; a new URL must
 // get a new attempt.  react-pdf is replaced by a Document that fails on "bad".
 // Every other document has one page, which reports its rotation and scale (#562).
+// slow.pdf answers its page 1 only when the test resolves it (#828).
+const slowPage = vi.hoisted(() => ({ resolve: null as ((p: unknown) => void) | null }))
+
 vi.mock('react-pdf', () => ({
   pdfjs: { GlobalWorkerOptions: {} },
   Page: ({ scale, rotate }: { scale: number; rotate: number }) => (
@@ -17,6 +20,10 @@ vi.mock('react-pdf', () => ({
   }) => {
     useEffect(() => {
       if (file === 'bad.pdf') onLoadError(new Error('Invalid PDF structure'))
+      else if (file === 'slow.pdf') onLoadSuccess({
+        numPages: 3,
+        getPage: () => new Promise(r => { slowPage.resolve = r }),
+      })
       else onLoadSuccess({
         numPages: 1,
         getPage: () => Promise.resolve({ getViewport: () => ({ width: 600, height: 800 }) }),
@@ -50,5 +57,19 @@ describe('PdfViewer', () => {
 
     await waitFor(() => expect(screen.getByTestId('page')).toHaveAttribute('data-rotate', '0'))
     expect(screen.getByTitle('Fitted to the width')).toBeInTheDocument()
+  })
+
+  // #828: page 1 of a document the url has left must not write its page count over the new one.
+  it('ignores the page count of a document that was replaced while its page 1 was read (#828)', async () => {
+    const { rerender } = render(<PdfViewer url="slow.pdf" filename="slow.pdf" entities={[]} />)
+    await waitFor(() => expect(slowPage.resolve).not.toBeNull())
+
+    rerender(<PdfViewer url="good.pdf" filename="good.pdf" entities={[]} />)
+    expect(await screen.findByText('1 / 1')).toBeInTheDocument()
+
+    await act(async () => { slowPage.resolve?.({ getViewport: () => ({ width: 1200, height: 1500 }) }) })
+
+    expect(screen.getByText('1 / 1')).toBeInTheDocument()
+    expect(screen.queryByText('1 / 3')).not.toBeInTheDocument()
   })
 })

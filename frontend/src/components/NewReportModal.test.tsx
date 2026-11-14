@@ -717,3 +717,28 @@ describe('New report — egress warning (ADR-0097)', () => {
     expect(screen.queryByText(/forbids sending the report/)).not.toBeInTheDocument()
   })
 })
+
+describe('New report — closing while a request is in flight (#826)', () => {
+  it('ignores Escape, a backdrop press and the X button while the request is pending', async () => {
+    api.ingestText.mockReturnValue(new Promise(() => {}))
+    const onClose = vi.fn()
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    render(
+      <QueryClientProvider client={qc}>
+        <NewReportModal open onClose={onClose} onJobCreated={vi.fn()} />
+      </QueryClientProvider>,
+    )
+    const user = userEvent.setup()
+    await user.type(screen.getByPlaceholderText(/Paste the report text/), TEXT)
+    await setMarks(user, 'GREEN', 'WHITE')
+    await user.click(screen.getByRole('button', { name: 'Create job' }))
+    await waitFor(() => expect(api.ingestText).toHaveBeenCalledTimes(1))
+
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.mouseDown(screen.getByRole('dialog').parentElement as HTMLElement)
+    await user.click(screen.getByRole('button', { name: 'Close' }))
+
+    expect(onClose).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: 'Close' })).toBeDisabled()
+  })
+})
