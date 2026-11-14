@@ -99,10 +99,13 @@ LLM_TIMEOUT=600
 LLM_TEMPERATURE=0
 LLM_SEED=13
 VISION_PROVIDER=vllm
+WORKER_JOB_TIMEOUT=3600
 ```
 `LLM_TEMPERATURE` and `LLM_SEED` are the sampling of the recorded runs; the seed
 reaches vLLM only. `LLM_TIMEOUT=600` allows a local model's long answers
-(`.env.example`, section 1). A server named by a host name, rather than by an
+(`.env.example`, section 1). `WORKER_JOB_TIMEOUT=3600` gives one report an
+hour: with the figures read by the same server, a 15-chunk PDF ran past the default
+1,800 s (1,932 s, 408 s of it reading 21 figures). A server named by a host name, rather than by an
 address, must also be listed in `LLM_LOCAL_HOSTS`, or its provider counts as
 external and an AMBER report is refused ([egress policy](#egress-policy-tlp)).
 

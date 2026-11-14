@@ -51,10 +51,17 @@ are those of the recorded runs and of the maintainer's configuration:
 | `LLM_TIMEOUT` | `600` |
 | `LLM_TEMPERATURE`, `LLM_SEED` | `0`, `13` (the sampling of the recorded runs; the seed reaches vLLM only) |
 | `VISION_PROVIDER` | `vllm` (figures read by the same server) |
+| `WORKER_JOB_TIMEOUT` | `3600` (added 2026-11-14, see below) |
 
 `LLM_TEMPERATURE` and `LLM_SEED` are not in the maintainer's list of 2026-11-13.
 They are added here because the recorded runs used them and
 `docs/support-policy.md` requires them for repeatable runs.
+
+`WORKER_JOB_TIMEOUT=3600` was added by the maintainer on 2026-11-14. On the 1.0
+candidate `ee7847f`, the model journey's PDF ([1.0-model-journey.md](../releases/1.0-model-journey.md))
+was stopped at 1,932 s by the default limit of 1,800 s, in the last chunk of Stage 3. Reading its
+21 figures took 408 s of that time. The journey of 2026-11-09 passed with figures off.
+The default stays 1,800 s: a hosted model rarely needs more.
 
 **2. Anthropic stays supported as an option, not qualified.** Its code path,
 its settings and its tests stay. Its recorded run (item 11) is no longer a gate

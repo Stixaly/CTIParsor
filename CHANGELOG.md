@@ -9,6 +9,10 @@ theme.
 
 ## [Unreleased]
 
+- **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
+  qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's
+  PDF ran past the default 1,800 s. The default is unchanged.
+
 - **The release dossier reads what it missed.** `scripts/check_release_dossier.py` reads the job
   logs whole from the REST API (`gh run view --log` stopped at a 70,000-character test id and lost the
   pytest summary line), recognises only a real pytest summary line (a test id quoting one no longer
