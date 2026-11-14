@@ -590,8 +590,11 @@ def test_a_pattern_that_does_not_parse_gives_no_key_and_never_raises(pattern):
     assert bs.pattern_keys(pattern) == (set(), set())
 
 
+# Short ids: the default id is the pattern itself, and a 70,000-character id line cut the
+# output of `gh run view --log` short (2026-11-14).
 @pytest.mark.parametrize("pattern", [_nested(3000), _or_of(4000), _or_of(258), _nested(65),
-                                     "[file:name = '" + "x" * 70_000 + "']"])
+                                     "[file:name = '" + "x" * 70_000 + "']"],
+                         ids=["nested-3000", "or-4000", "or-258", "nested-65", "literal-70000"])
 def test_a_pattern_too_complex_gives_no_key_and_reaches_no_parser(pattern, monkeypatch):
     def no_parser(*args, **kwargs):
         raise AssertionError("the parser was called")

@@ -74,8 +74,11 @@ _CVE = re.compile(r"CVE-[0-9]{4}-[0-9]+")
 _INDEX_LOG = re.compile(r"image index: (sha256:[0-9a-f]{64})")
 #: The digest publish-image logs per name it pushed: "…:sha-<commit> -> sha256:…".
 _PUSHED_LOG = re.compile(r"sha-([0-9a-f]{40}) -> (sha256:[0-9a-f]{64})")
-#: pytest's final line: "=== 7135 passed, 12 skipped in 1034.56s (0:17:14) ===".
-_PYTEST_SUMMARY = re.compile(r"=+ [^\n]*\b[0-9]+ passed\b[^\n]* in [0-9]+(?:\.[0-9]+)?s")
+#: pytest's final line: "=== 7135 passed, 12 skipped in 1034.56s (0:17:14) ===".  The line must end
+#: with the closing "=" run: a test whose id quotes a summary line ends with "PASSED [ 25%]" instead.
+_PYTEST_SUMMARY = re.compile(r"=+ [^\n]*\b[0-9]+ passed\b[^\n]* in [0-9]+(?:\.[0-9]+)?s\b[^\n]*=+\r?$", re.M)
+#: The GitHub App id of GitHub Actions: a required check bound to it is a job of ci.yml.
+ACTIONS_APP_ID = 15368
 #: Grype's alert text: "A high vulnerability in binary package: python, version 3.14.10 was found".
 _GRYPE_TEXT = re.compile(
     r"vulnerability in (?P<kind>.+?) package: (?P<name>[^,\s]+), version (?P<version>\S+) was found"
@@ -413,7 +416,12 @@ def check_ci_run(ctx: Context) -> tuple[Item, dict[str, Any] | None]:
 
 
 def _job_log(ctx: Context, job_id: int) -> str:
-    return ctx.gh(["run", "view", "-R", ctx.repo, "--job", str(job_id), "--log"])
+    """The job's whole log, from the REST API.
+
+    Not `gh run view --log`: on 2026-11-14 its output stopped in the middle of the unit tests,
+    at a parametrized test id of 70,000 characters, and so had no pytest summary line.
+    """
+    return ctx.gh(["api", "--allow-escape-sequences", f"repos/{ctx.repo}/actions/jobs/{job_id}/logs"])
 
 
 def check_jobs(ctx: Context, run: dict[str, Any] | None) -> tuple[list[Item], dict[str, str]]:
@@ -634,9 +642,10 @@ def check_required_checks(ctx: Context) -> Item:
             return Item("required_checks", title, MISSING, f"no branch ruleset named {ctx.ruleset!r}",
                         action="check the ruleset's name")
         detail_json = json.loads(ctx.gh(["api", f"repos/{ctx.repo}/rulesets/{target['id']}"]))
-        contexts = [c["context"] for rule in detail_json.get("rules", [])
+        required = [(c["context"], c.get("integration_id")) for rule in detail_json.get("rules", [])
                     if rule.get("type") == "required_status_checks"
                     for c in rule.get("parameters", {}).get("required_status_checks", [])]
+        contexts = [context for context, _ in required]
         checks = pages(ctx.gh(["api", "--paginate", f"repos/{ctx.repo}/commits/{ctx.sha}/check-runs?per_page=100"]),
                        key="check_runs")
         statuses = json.loads(ctx.gh(["api", f"repos/{ctx.repo}/commits/{ctx.sha}/status"])).get("statuses", [])
@@ -663,15 +672,60 @@ def check_required_checks(ctx: Context) -> Item:
         else:
             state = MISSING
         per_context[context] = state
+    from_pr = _pull_request_checks(ctx, required, per_context)
+    for context in contexts:
+        state = per_context[context]
         if state not in (PASS, SKIPPED):
             problems.append(f"{context}: {state}")
+    evidence: dict[str, Any] = {"contexts": per_context}
+    if from_pr:
+        evidence["from_pull_request"] = from_pr
     if problems:
         status = FAILED if any(p.endswith(f": {FAILED}") for p in problems) else MISSING
         return Item("required_checks", title, status, "; ".join(problems),
                     action="a required check must succeed on this commit; read the run of that check",
-                    evidence={"contexts": per_context})
-    return Item("required_checks", title, PASS, f"{len(contexts)} required contexts, each succeeded or skipped",
-                evidence={"contexts": per_context})
+                    evidence=evidence)
+    summary = f"{len(contexts)} required contexts, each succeeded or skipped"
+    if from_pr:
+        summary += "; " + ", ".join(f"{c} read on {where}" for c, where in from_pr.items())
+    return Item("required_checks", title, PASS, summary, evidence=evidence)
+
+
+def _pull_request_checks(ctx: Context, required: list[tuple[str, Any]],
+                         per_context: dict[str, str]) -> dict[str, str]:
+    """Read on the merged pull request's head the required checks that only run on pull requests.
+
+    A required check bound to an app other than GitHub Actions (the `CodeQL` check of code scanning)
+    is posted on the pull request's head commit, never on the merge commit that lands on main. When
+    the commit is the merge commit of a merged pull request, such a check is read on that head; its
+    status there replaces `missing` in `per_context` (changed in place). A job of ci.yml is never read
+    there: the push run on main tests the merged tree, so a job missing on it stays missing.
+    Returns, per context read that way, where it was read.
+    """
+    wanted = {context: app for context, app in required
+              if per_context.get(context) == MISSING and app is not None and int(app) != ACTIONS_APP_ID}
+    if not wanted:
+        return {}
+    try:
+        pulls = json.loads(ctx.gh(["api", f"repos/{ctx.repo}/commits/{ctx.sha}/pulls"]))
+        merged = next((p for p in pulls if p.get("merge_commit_sha") == ctx.sha and p.get("merged_at")), None)
+        if merged is None:
+            return {}
+        head = str(merged["head"]["sha"])
+        checks = pages(ctx.gh(["api", "--paginate", f"repos/{ctx.repo}/commits/{head}/check-runs?per_page=100"]),
+                       key="check_runs")
+    except (DossierError, json.JSONDecodeError, KeyError, TypeError):
+        return {}
+    where = f"the head of pull request #{merged.get('number')} ({head[:7]})"
+    found: dict[str, str] = {}
+    for context, app in wanted.items():
+        runs = [c for c in checks if c.get("name") == context
+                and (c.get("app") is None or int(c["app"].get("id", -1)) == int(app))]
+        if not runs:
+            continue
+        per_context[context] = classify_check(max(runs, key=lambda c: int(c.get("id", 0))))
+        found[context] = where
+    return found
 
 
 def read_protections(ctx: Context) -> tuple[Item | None, dict[str, Any]]:
