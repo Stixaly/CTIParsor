@@ -4,10 +4,8 @@ What CTIParsor 1.0 promises, what it does not, and how each promise is checked.
 The decision and the options rejected are in
 [ADR-0094](adr/0094-what-1-0-promises.md), accepted on 2026-11-01.
 
-**1.0 is not released.** The latest release is 0.8.0 (2026-11-13). Until 1.0,
-the rules of [releasing.md, Versioning](releasing.md#versioning) apply: a minor
-release may change any surface below, and the CHANGELOG says what an operator
-must do. The 1.0 candidate `ee7847f` was qualified on 2026-11-14 and 2026-11-15
+**1.0.0 was released on 2026-11-15**, from commit `ee7847f`: the promises
+below hold from that release on. The candidate `ee7847f` was qualified on 2026-11-14 and 2026-11-15
 ([1.0-qualification.md](releases/1.0-qualification.md)). Each row below says
 what that evidence covers and what it leaves open. This page
 was checked against the code at commit 1c11b87 on 2026-10-31.
