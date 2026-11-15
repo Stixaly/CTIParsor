@@ -1109,7 +1109,7 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
 
     from pipeline.stage3_llm import LLMEnrichmentResult, RelationshipExtracted
     from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, REJECTED_BY_ANALYST, RefusedRelationship
-    from pipeline.stage5_validation import INVALID, export_bundle, validate_bundle
+    from pipeline.stage5_validation import INVALID, export_bundle, validate_without_trusted
 
     with _lock:
         with get_conn() as conn:
@@ -1456,8 +1456,8 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
 
     out_path = str(bundle_output_path(job_id, report_name))
     # The baseline's trusted objects were validated at intake: Stage 5 does not check them again.
-    validation = validate_bundle(baseline_stix.validation_json(
-        bundle_json, baseline_build.trusted if baseline_build is not None else frozenset()))
+    validation = validate_without_trusted(
+        bundle_json, baseline_build.trusted if baseline_build is not None else frozenset())
     invalid = validation.status == INVALID
     verdict = (validation.status, _validation_errors_json(validation.errors))
 

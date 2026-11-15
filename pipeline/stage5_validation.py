@@ -169,8 +169,9 @@ def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResul
             )
         return ValidationResult(UNVERIFIED)
 
-    # "objects" must be a list (#785).  An empty list is accepted: validation_json()
-    # drops the trusted objects, so an empty list is a legitimate subset.
+    # "objects" must be a list (#785).  An empty list is accepted here: validation_json()
+    # drops the trusted objects, so it is a legitimate subset; an empty whole
+    # bundle is refused by validate_without_trusted().
     if _objects_not_a_list(bundle_json):
         message = 'Bundle "objects" must be a list of STIX objects.'
         if not quiet:
@@ -215,6 +216,25 @@ def validate_bundle(bundle_json: str, *, quiet: bool = False) -> ValidationResul
     return ValidationResult(VALIDATED, errors, warnings)
 
 
+def validate_without_trusted(bundle_json: str, trusted: AbstractSet[str]) -> ValidationResult:
+    """`validate_bundle` on `bundle_json` without the objects of `trusted`
+    (`validation_json`).  A bundle with no object at all is INVALID (#785); the
+    empty list `validate_bundle` accepts is the subset left once every object
+    was trusted, which is why the whole bundle is checked here, before the
+    filter."""
+    from pipeline.baseline_stix import validation_json
+
+    try:
+        whole = json.loads(bundle_json)
+    except (ValueError, RecursionError):
+        whole = None   # validate_bundle gives the verdict on the text
+    if isinstance(whole, dict) and not whole.get("objects"):   # stix2 omits an empty list
+        message = "Bundle has no object: the schema requires at least one."
+        logger.error(f"[Stage 5] {message}")
+        return ValidationResult(INVALID, [message])
+    return validate_bundle(validation_json(bundle_json, trusted))
+
+
 def export_path(output_path: str, result: ValidationResult) -> str:
     """Where a bundle with this verdict is written: `output_path`, or the same
     path with an _invalid suffix when the schemas refused it."""
@@ -254,10 +274,10 @@ def validate_and_export(bundle: stix2.Bundle, output_path: str, *,
         invalid    — file written with _invalid suffix.
     """
     # Imported here: pipeline.baseline_stix imports this module.
-    from pipeline.baseline_stix import serialize_bundle, validation_json
+    from pipeline.baseline_stix import serialize_bundle
 
     bundle_json = serialize_bundle(bundle, verbatim)
-    result = validate_bundle(validation_json(bundle_json, trusted))
+    result = validate_without_trusted(bundle_json, trusted)
     export_bundle(bundle_json, output_path, result)
     return result
 
