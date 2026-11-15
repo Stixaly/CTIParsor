@@ -88,6 +88,14 @@ interface WriteFailure {
   retry?: () => void
 }
 
+/** Polls while `busy()` holds, up to `capMs`, then returns anyway.  Never throws. */
+async function waitWhile(busy: () => boolean, capMs = 10_000, stepMs = 50): Promise<void> {
+  const deadline = Date.now() + capMs
+  while (busy() && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, stepMs))
+  }
+}
+
 /** The server's copy of an entity, as the page shows it when nothing is pending. */
 const toClientEntity = (e: Entity): ClientEntity => ({
   ...e,
@@ -304,6 +312,9 @@ export default function Review() {
   /** Counts every edit (markDirty).  A rebuild that started before an edit does not
    *  describe the page any more, so its answer must not clear bundleStale (#809). */
   const editSeqRef = useRef(0)
+  /** Row writes (entityWrite, relWrite) still unanswered.  They run through trackWrite,
+   *  so qc.isMutating() does not count them: finalize waits for both (see handleFinalize). */
+  const writesInFlight = useRef(0)
   /** Writes the server did not save, until the analyst retries or dismisses them (#706). */
   const [writeFailures, setWriteFailures] = useState<WriteFailure[]>([])
   const failureKey = useRef(0)
@@ -373,21 +384,27 @@ export default function Review() {
     const server = serverEntitiesRef.current.find(e => e.id === id)
     if (server) setLocalEntities(es => es.map(e => e.id === id ? toClientEntity(server) : e))
   }
-  const entityWrite = (ids: string[], send: () => Promise<unknown>) =>
-    trackWrite(entityWrites.current, ids, send, revertEntity, ok => {
+  const entityWrite = (ids: string[], send: () => Promise<unknown>) => {
+    writesInFlight.current += 1
+    return trackWrite(entityWrites.current, ids, send, revertEntity, ok => {
       qc.invalidateQueries({ queryKey: ['entities', jobId] })
       if (ok) markDirty()
+      writesInFlight.current -= 1
     })
+  }
 
   const revertRel = (id: string) => {
     const server = serverRelsRef.current.find(r => r.id === id)
     if (server) setLocalRels(rs => rs.map(r => r.id === id ? server : r))
   }
-  const relWrite = (ids: string[], send: () => Promise<unknown>) =>
-    trackWrite(relWrites.current, ids, send, revertRel, ok => {
+  const relWrite = (ids: string[], send: () => Promise<unknown>) => {
+    writesInFlight.current += 1
+    return trackWrite(relWrites.current, ids, send, revertRel, ok => {
       qc.invalidateQueries({ queryKey: ['relationships', jobId] })
       if (ok) markDirty()
+      writesInFlight.current -= 1
     })
+  }
 
   /** A relationship write the server refused: the page's alert, then the banner. */
   const reportRelWrite = (res: WriteResult, alertPrefix: string, retry: () => void) => {
@@ -737,8 +754,16 @@ export default function Review() {
     if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
     autoFinalizeTimer.current = null
     setFinalizing(true)
-    const seq = editSeqRef.current
     try {
+      // An edit already sent is part of this bundle: its answer marks the page dirty
+      // (markDirty), so wait for it before taking the edit count below.  Nothing
+      // pending: no await, so the finalize goes out in the same tick as the press.
+      const writing = () => qc.isMutating() > 0 || writesInFlight.current > 0
+      if (writing()) await waitWhile(writing)
+      // An answer received in that wait re-armed the auto-finalize timer; this full finalize covers it.
+      if (autoFinalizeTimer.current) clearTimeout(autoFinalizeTimer.current)
+      autoFinalizeTimer.current = null
+      const seq = editSeqRef.current
       await finalizeJob(jobId)   // full finalize: rebuilds the bundle and completes the report
       qc.invalidateQueries({ queryKey: ['jobs'] })
       // The server marks the report completed; the breadcrumb follows without

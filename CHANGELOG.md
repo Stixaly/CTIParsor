@@ -9,6 +9,12 @@ theme.
 
 ## [Unreleased]
 
+- **Complete Review waits for the edits already sent.** An edit whose answer arrived while the report was
+  being completed made the page ignore the completion: the report was completed on the server, but the
+  button stayed "Complete Review" instead of "Download STIX" (a race in the #809 fix, seen as a flaky
+  keyboard journey). The page now waits, up to 10 s, for the row writes in flight before it counts the
+  edits; an edit made during the finalize itself still leaves the bundle outdated.
+
 - **The targets product needs one threat actor** (ADR-0101). Stage 4 no longer links every threat actor of a
   report to every country and sector it targets: the product is built only if the report names one actor,
   counted by object after Stage 4b's alias merge. With two or more, each pair no bundle edge covers is listed
