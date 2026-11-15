@@ -312,6 +312,10 @@ With no API key the pipeline still produces valid STIX.
   published on 2026-11-13 from the tag `v0.8.0` on commit 5b6b5c3, is
   immutable too; on 2026-11-14 GHCR served its digest for `0.8.0`, `0.8`
   and the commit's `sha-` name.
+  [v1.0.0](https://github.com/Stixaly/CTIParsor/releases/tag/v1.0.0),
+  published on 2026-11-15 from the tag `v1.0.0` on commit ee7847f, is
+  immutable too; on 2026-11-15 GHCR served its digest for `1.0.0`, `1.0`
+  and the commit's `sha-` name.
 
 ### Not shipped
 **diskcache** (PYSEC-2026-2447 / CVE-2025-69872 / GHSA-w8v5-vhqr-4h9v,
@@ -349,7 +353,7 @@ added together.
 ## Supported versions
 Fixes land on `main` and ship in the next release. Only the latest release is
 supported: [the Releases page](https://github.com/Stixaly/CTIParsor/releases/latest)
-names it (0.8.0 since 2026-11-13).
+names it (1.0.0 since 2026-11-15).
 
 ## Reporting a vulnerability
 Report it privately:
