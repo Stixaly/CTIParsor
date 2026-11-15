@@ -302,6 +302,32 @@ describe('Review — an edit made while the bundle is being finalized (#809)', (
   }, 20_000)
 })
 
+describe('Review — Complete Review pressed while an edit is still being saved', () => {
+  it('finalizes only once the edit is saved, then offers the download', async () => {
+    const events: string[] = []
+    let answerPatch!: () => void
+    api.updateEntity.mockImplementation((_j: string, id: string, patch: Partial<Entity>) => {
+      applyEntity(id, patch)
+      return new Promise(resolve => { answerPatch = () => { events.push('patch saved'); resolve({}) } })
+    })
+    api.finalizeJob.mockImplementation(() => { events.push('finalize'); return Promise.resolve({}) })
+    renderReview()
+    await opened()
+
+    fireEvent.click(within(card('e-high')).getByTitle('Accept (A)'))
+    await waitFor(() => expect(api.updateEntity).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: /^Complete Review/ }))
+
+    await act(async () => { await new Promise(r => setTimeout(r, 100)) })
+    expect(api.finalizeJob).not.toHaveBeenCalled()
+
+    await act(async () => { answerPatch() })
+    await screen.findByRole('button', { name: 'Download STIX' })
+    expect(events).toEqual(['patch saved', 'finalize'])
+    expect(screen.queryByText(/Bundle outdated/)).not.toBeInTheDocument()
+  }, 20_000)
+})
+
 describe('Review — a relationship the server refused on creation (#813)', () => {
   it('says so, in an alert and in the failure banner, when createRelationship is rejected', async () => {
     const alert = vi.spyOn(window, 'alert').mockImplementation(() => {})
