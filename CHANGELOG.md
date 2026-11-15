@@ -73,6 +73,18 @@ theme.
   so a route module imports before `api.main` (#863); a bundle with no object at all is INVALID while a
   baseline emptied by its trusted objects stays VALIDATED (#785, ADR-0102).
 
+- **The worker warns when its container cannot hold its concurrency.** At start-up, `queue_loop` reads
+  the container's memory limit (cgroup v2 `memory.max`, then v1) and logs a warning if it is below
+  `WORKER_MAX_CONCURRENT` × 4.4 GB (ADR-0037). It only informs: the default stays 1, an explicit value is
+  never changed, and an unreadable limit says nothing (#675).
+
+- **The contracts have a page, and the support scope is aligned.** `docs/contracts.md` says what each of
+  the five contracts guarantees, how a consumer reads the `x_` properties, how a fork changes a contract,
+  and that only the Compose image is supported (#681). `docs/support-policy.md`, `ROADMAP.md`,
+  `SECURITY.md`, `README.md`, ADR-0094 and the readiness record say the same thing about who 1.0 is for;
+  what the evidence does not show yet is written "not qualified" (#713, which stays open for #707, #709,
+  #710 and #711).
+
 - **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
   qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's
   PDF ran past the default 1,800 s. The default is unchanged.

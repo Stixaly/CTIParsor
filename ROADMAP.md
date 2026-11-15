@@ -35,12 +35,15 @@ Three things, and only these
 3. **Measured, published limits:** each release publishes the extraction
    measured on the bundle it exports, with its denominators and limits.
 
-It is for one analyst, on a self-hosted Docker Compose install, who reviews the
-extractions before exporting them
-([who 1.0 is for](docs/support-policy.md#who-10-is-for)). That changes if
-[ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md) is accepted
-(accepted on 2026-11-08): 1.0 is one install shared by one team, behind
-authentication, with roles. It certifies no level
+It is for one team sharing one self-hosted Docker Compose install, behind
+authentication, with roles, whose analysts review the extractions before
+exporting them
+([who 1.0 is for](docs/support-policy.md#who-10-is-for);
+[ADR-0097](docs/adr/0097-1-0-is-a-shared-service-for-one-team.md), accepted on
+2026-11-08). That is the target, not a qualified state: the authentication is
+opt-in (`AUTH_MODE=off` by default, one analyst), and the qualification of
+several users is open (#707). Isolation between teams, SAML, an import into MISP
+and GPU are not provided. It certifies no level
 of precision ([what it does not promise](docs/support-policy.md#what-10-does-not-promise)).
 The [capability matrix](docs/support-policy.md#capability-matrix) marks each
 capability supported, experimental or not supported, with its limits and its
