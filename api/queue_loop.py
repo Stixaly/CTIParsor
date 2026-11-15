@@ -26,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
+from api.cgroup_memory import warn_if_memory_short
 from api.db import EVENT_DONE, EVENT_STAGE, emit_progress, get_conn, now_iso, set_job_status
 from api.logging_config import get_logger, setup_logging
 from pipeline import __version__
@@ -637,6 +638,8 @@ def main(argv: list[str] | None = None) -> int:
         f"[queue] worker {WORKER_ID} starting: max_concurrent={args.max_concurrent}, "
         f"poll={POLL_S}s, heartbeat={HEARTBEAT_S}s, lease={LEASE_TIMEOUT_S}s"
     )
+    # A warning only: the concurrency stays the operator's (ADR-0037).
+    warn_if_memory_short(args.max_concurrent)
 
     loop = WorkerLoop(max_concurrent=args.max_concurrent)
 
