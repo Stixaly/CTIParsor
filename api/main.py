@@ -13,9 +13,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
@@ -41,10 +39,9 @@ from api.body_limit import DEFAULT_BUDGET_BYTES, BodyLimitMiddleware
 from api.db import get_conn, init_db
 from api.paths import output_dir, uploads_dir
 
-# Rate limiter must be defined before routes are imported because
-# api/routes/upload.py does `from api.main import limiter` at module level.
-limiter = Limiter(key_func=get_remote_address)
-
+# The rate limiter lives in api/rate_limit.py, so the route modules can import it without
+# importing this module (issue #863).  Re-exported here: `api.main.limiter` is the same object.
+from api.rate_limit import limiter
 from api.routes import (
     admin,
     attack,

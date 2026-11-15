@@ -12,12 +12,19 @@ from __future__ import annotations
 from dataclasses import replace
 
 import pytest
+import stix2
 
 import pipeline.stage3_llm as s3
 from pipeline import stage5_validation
 from pipeline.orchestrator import Document, run_document
 from pipeline.stage3_llm import LLMEnrichmentResult
-from pipeline.stage5_validation import INVALID, VALIDATED, validate_bundle
+from pipeline.stage5_validation import (
+    INVALID,
+    VALIDATED,
+    validate_and_export,
+    validate_bundle,
+    validate_without_trusted,
+)
 from tests.test_orchestrator import _opts
 
 BUNDLE_ID = "bundle--00000000-0000-4000-8000-000000000000"
@@ -59,6 +66,36 @@ def test_785_an_empty_objects_list_stays_validated(schemas):
     result = validate_bundle(_bundle("[]"), quiet=True)
 
     assert result.status == VALIDATED
+
+
+def test_785_a_bundle_with_no_object_is_invalid(schemas, tmp_path):
+    out = tmp_path / "bundle.json"
+    bundle = stix2.Bundle(allow_custom=True)
+
+    result = validate_and_export(bundle, str(out))
+
+    assert result.status == INVALID
+    assert any("no object" in e for e in result.errors)
+    assert (tmp_path / "bundle_invalid.json").exists() and not out.exists()
+
+
+def test_785_a_bundle_whose_objects_are_all_trusted_stays_validated(schemas, tmp_path):
+    """The subset Stage 5 sees is empty, the bundle is not."""
+    out = tmp_path / "bundle.json"
+    malware = stix2.v21.Malware(name="Known", is_family=False)
+    bundle = stix2.Bundle(malware, allow_custom=True)
+
+    result = validate_and_export(bundle, str(out), trusted=frozenset({malware.id}))
+
+    assert result.status == VALIDATED
+    assert out.exists() and not (tmp_path / "bundle_invalid.json").exists()
+    assert malware.id in out.read_text(encoding="utf-8")
+
+
+def test_785_the_worker_gives_the_same_verdicts(schemas):
+    whole = _bundle("[]")
+    assert validate_without_trusted(whole, frozenset()).status == INVALID
+    assert validate_without_trusted(whole, frozenset({"malware--x"})).status == INVALID
 
 
 # ── #787 ─────────────────────────────────────────────────────────────────────

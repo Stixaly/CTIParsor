@@ -238,6 +238,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "udp/53=>1.2.3.4) is read: an entity whose text holds one now yields a network-traffic object "
      "(#860)",
      "mapping"),
+    ("4e96de6", "2026-11-15",
+     "The title of a network rule embedded in a report is read up to the rule's own closing "
+     "parenthesis: options written in a trailing comment no longer set it (#797 follow-up)",
+     "mapping"),
 )
 
 

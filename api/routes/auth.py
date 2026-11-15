@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from api.auth import config, oidc, store
 from api.auth.deps import SESSION_COOKIE, authenticate, cookie_secure, current_user, set_session_cookie
 from api.logging_config import get_logger, one_line
-from api.main import limiter
+from api.rate_limit import limiter
 from api.response_models.auth import Me, SignedOut, SignInMethods
 from api.routes._common import storable_text
 

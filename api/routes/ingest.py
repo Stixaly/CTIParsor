@@ -23,8 +23,8 @@ from api.auth.deps import importing_user_id
 from api.body_limit import ENVELOPE_BYTES
 from api.disk_space import refuse_if_disk_is_short
 from api.logging_config import get_logger
-from api.main import limiter
 from api.paths import uploads_dir
+from api.rate_limit import limiter
 from api.response_models.ingest import IngestJob, IngestUrlJob
 from api.routes._common import (
     BASELINE_REFUSED,
