@@ -38,8 +38,8 @@ theme.
   - **STIX mapping and validation**: one id, one object in the bundle (#777, #778, #779, #780, #782,
     #784); a network-traffic takes a host of the right type (#781); a baseline URL with capitals in its
     path is found in the text (#786); an LLM conflict on a role the analyst set no longer withholds both
-    native relationship dates (#802); a bundle whose `objects` is null or not a list is INVALID (#783,
-    #785); Stage 3doc is skipped after a failed Stage 3 (#787).
+    native relationship dates (#802); a bundle whose `objects` is null or not a list is INVALID, and so
+    is a bundle with no object at all (#783, #785); Stage 3doc is skipped after a failed Stage 3 (#787).
   - **Detection**: bracketed Suricata header lists, trailing comments and noise after normalization
     (#796, #797, #799); YARA dedup keys ignore comments and a module named in a string or comment is not
     an import (#798, #800); a download cut mid-stream is a failed sync and a PAX member name with a NUL
@@ -66,6 +66,12 @@ theme.
   spaces (`tcp/443->evil.com`) is read, so its entity yields a `network-traffic` object (#860, a
   `BUNDLE_AFFECTING` entry scoped "mapping"); the Review relationship creator takes a source or target
   the parent sets after it opened, so a second Shift+click fills the target (#861).
+
+- **Three follow-ups of the bug triage.** The title of a network rule embedded in a report is read up to
+  the rule's own closing parenthesis, so options in a trailing comment no longer set it (a
+  `BUNDLE_AFFECTING` entry scoped "mapping"; #797 follow-up); the rate limiter lives in `api/rate_limit.py`,
+  so a route module imports before `api.main` (#863); a bundle with no object at all is INVALID while a
+  baseline emptied by its trusted objects stays VALIDATED (#785, ADR-0102).
 
 - **The qualified LLM configuration gives a report an hour.** `WORKER_JOB_TIMEOUT=3600` joins the
   qualified configuration of ADR-0100: with figures read by the same vLLM server, the model journey's

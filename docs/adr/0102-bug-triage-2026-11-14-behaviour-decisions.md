@@ -19,12 +19,17 @@ way, the issues closed without a fix, and the ones left open upstream.
 
 ### Verdict and ledger
 
-1. **#785: a bundle whose `objects` is not a list is INVALID; `objects: []`
-   stays VALIDATED.** A trusted baseline can leave an empty subset, so an empty
-   list is a legitimate result and refusing it would fail a correct run.
-   `null` or an object in place of the list cannot be a bundle. (#783 makes the
-   same function answer INVALID instead of raising `TypeError`; #787 skips the
-   Stage 3doc pass after Stage 3 failed: verdict and journal only.)
+1. **#785: a bundle with no object is INVALID; a bundle whose `objects` is not
+   a list is INVALID; an empty subset is VALIDATED.** `validate_bundle()` itself
+   accepts `objects: []`, because Stage 5 checks the bundle without the trusted
+   baseline objects (`validation_json`) and that subset can legitimately be
+   empty. The whole bundle is checked before the filter, by
+   `validate_without_trusted()` (used by `validate_and_export` and the worker's
+   finalize): no object at all is INVALID with a message, and the file is
+   written with the `_invalid` suffix. `null` or an object in place of the list
+   cannot be a bundle. (#783 makes the same function answer INVALID instead of
+   raising `TypeError`; #787 skips the Stage 3doc pass after Stage 3 failed:
+   verdict and journal only.)
 
 ### Worker and database
 
