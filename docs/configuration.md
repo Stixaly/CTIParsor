@@ -672,6 +672,10 @@ feature** (it was 50 MB). Behind another proxy, allow as much: 72 MiB, that is
 # Reports processed at the same time, per worker container.  Each holds ~4.4 GB
 # (mostly GLiNER): size it from RAM, floor((RAM_GB - 4) / 4.4), and raise
 # CTI_WORKER_MEMORY with it.  Default 1, host install and compose alike.
+# At start the worker reads the memory limit of its container (cgroup v2
+# memory.max, or v1 memory.limit_in_bytes) and logs a warning when
+# WORKER_MAX_CONCURRENT x 4.4 GB is above it (ADR-0037).  The value is never
+# changed, and an unreadable limit is silence; nothing is set automatically.
 # WORKER_MAX_CONCURRENT=1
 # Seconds one report may run (figures and LLM included) before it is cancelled.
 # A local LLM needs more: ~100 s for one short chunk with 3d and 3f on was

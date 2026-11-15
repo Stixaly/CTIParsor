@@ -651,7 +651,7 @@ input validation, the transform's correctness on a known fixture, idempotency
 (running twice = same result), and the empty/malformed-input path.
 
 ### Stage 4 reference bundles (ADR-0090)
-`tests/test_stage4_reference.py` builds six scenarios
+`tests/test_stage4_reference.py` builds seven scenarios
 (`tests/fixtures/stage4_reference/scenarios/`) through `build_bundle` and
 compares the result, bundle and ledger, to a frozen canonical form in
 `expected/`. The canonical form (`tests/stage4_reference.py`) replaces the
@@ -760,8 +760,9 @@ runs `main()` for each row of the policy's table. `check` takes about 90 s on
 `X-Bundle-Validation` values, the SSE event names and the export archive's
 layout (strings in the code, checked by route tests), a variable the code
 stops reading or a code default that no longer matches `.env.example` (only
-the file is read), and `x_ctiparsor_enrichment` (no enriched reference
-bundle). A new alias of an option, or a `case` label that names two
+the file is read), and the inner keys of `x_ctiparsor_enrichment` (the
+`opencti_enriched` reference bundle carries the property, the contract does
+not describe its keys). A new alias of an option, or a `case` label that names two
 commands, reads as breaking: record it with `ACCEPT_BREAKING=1`.
 
 ### Migration from a release (ADR-0094 item 2)

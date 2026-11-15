@@ -25,8 +25,19 @@ was checked against the code at commit 1c11b87 on 2026-10-31.
 
 ## Who 1.0 is for
 
-One analyst, on a self-hosted install on their own machine, who reviews the
-extractions before they are exported. The journey 1.0 covers:
+A team sharing one self-hosted install, behind authentication, with roles:
+[ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md) (accepted on
+2026-11-08) amends ADR-0094, which aimed 1.0 at one analyst. This is the target,
+not a qualified state. The authentication is in the code and opt-in; with
+`AUTH_MODE=off`, the default, there is no authentication, the install is one
+analyst's, and the API refuses to start on a bind address beyond loopback
+([deployment.md](deployment.md)). The qualification of several users is open
+(#707, [1.0-readiness.md](releases/1.0-readiness.md), and the
+[capabilities table](#capabilities-implemented-qualified-limits)). Every user
+sees every report: isolation between teams is after 1.0.
+
+The journey 1.0 covers, for an analyst who reviews the extractions before they
+are exported:
 
 1. import a report (a file, pasted text or a captured URL), alone or with a
    STIX 2.1 bundle to enrich;
@@ -35,16 +46,7 @@ extractions before they are exported. The journey 1.0 covers:
 4. upgrade to the next release;
 5. restore a backup.
 
-One person maintains the project. No promise on this page assumes a team.
-
-**This will change.** [ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md)
-(accepted on 2026-11-08) makes 1.0 a shared service for one
-team: one install shared by several users, behind authentication, with roles.
-The authentication it asks for is in the code, opt-in. With `AUTH_MODE=off`, the
-default, the text above is the current state: no authentication, one analyst, and
-an API that refuses to start on a bind address beyond loopback
-([deployment.md](deployment.md)). The 1.0 qualification of the shared service is
-not complete ([1.0-readiness.md](releases/1.0-readiness.md)).
+One person maintains the project.
 
 ## What 1.0 promises
 
@@ -67,9 +69,14 @@ Three things, and only these.
   extract different objects from one report. With the provider's default
   sampling, two runs of one configuration differed by 0.028 F1 on the AnnoCTR
   dev split ([eval/README.md](eval/README.md), *Run-to-run spread*).
-- **Several users.** With `AUTH_MODE=off` (the default) there is no authentication
-  and no access control ([SECURITY.md](../SECURITY.md)). Authentication is opt-in
-  (ADR-0097).
+- **A qualified shared service.** With `AUTH_MODE=off` (the default) there is no
+  authentication and no access control ([SECURITY.md](../SECURITY.md)).
+  Authentication is opt-in (ADR-0097) and the qualification of several users is
+  open (#707).
+- **Isolation between teams (multi-tenancy), SAML, high availability, an import
+  into MISP, GPU.** Not provided
+  ([ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md), *Not covered*;
+  ADR-0094, decision 14).
 - **An install other than Docker Compose**
   ([ADR-0054](adr/0054-full-docker-installation.md)).
 - **Fixes on an older version line, or a support duration**
@@ -81,7 +88,8 @@ Three things, and only these.
 ## Stable surfaces
 
 What a 1.0 user can build on. Anything not listed here can change in a minor
-release.
+release. [contracts.md](contracts.md) shows how to read the recorded contracts
+and how a fork changes them.
 
 ### HTTP API
 
@@ -477,7 +485,7 @@ evidence.
 | ATT&CK techniques | supported | ATT&CK 19.2 by default, 20.0 selectable (`ATTACK_RELEASE`); without an LLM, Stage 2c's detector replaces the selection ([configuration.md](configuration.md)) | `tests/test_ttp_select.py`, `tests/test_ttp_retrieval.py`; F1 0.690 on AnnoCTR test ([baseline-2026-10.md](eval/baseline-2026-10.md)) |
 | Relationships | supported | needs an LLM (Stage 3) | `tests/test_stage3d_verify.py`, `tests/test_relationships_api.py`. Against a gold set: not yet, items 5 and 6 |
 | Review and finalize | supported | with `AUTH_MODE=off` (the default), no authentication; with authentication on, the role of each operation (`api/auth/permissions.py`), and an analyst deletes only the reports they imported | `tests/test_jobs_routes.py`, `tests/test_entities_api.py`, `tests/test_relationships_api.py`, `tests/test_decisions.py`, `tests/test_held_for_review.py`, `tests/test_bundle_builds.py`. The browser journey (`scripts/check_browser_e2e.sh`, job `browser-e2e`, ADR-0094 item 4): in Chromium against the built interface, the API, its worker and PostgreSQL, offline, a report imported, its progress followed from the run's events, the page reloaded, rows accepted, rejected and retyped, the review completed and the bundle downloaded and checked; the same with the keyboard alone; an enrichment and its ledger, a failed report and its reason, a refused bundle (409); axe on each page (TESTING.md) |
-| STIX 2.1 export | supported | a bundle Stage 5 refuses is not served (409); `unverified` when the JSON schemas are missing | `tests/test_stage5.py`, `tests/test_stage4_reference.py` (six reference scenarios), `tests/test_stix_ids.py` |
+| STIX 2.1 export | supported | a bundle Stage 5 refuses is not served (409); `unverified` when the JSON schemas are missing | `tests/test_stage5.py`, `tests/test_stage4_reference.py` (seven reference scenarios), `tests/test_stix_ids.py` |
 | Enrich an existing STIX 2.1 bundle ([ADR-0090](adr/0090-enriching-an-existing-stix-bundle.md)) | supported, on by default | STIX 2.1 only (2.0 is refused with 400); 20 MB; `STIX_ENRICHMENT_ENABLED=false` turns it off; OpenCTI- and MISP-shaped baselines checked on repository fixtures, not on live exports | `tests/test_baseline_*.py`; round trip and ablation on 7 real reports, 2026-10-25: 0 duplicate rows, 175 of 179 removed entries recovered ([TESTING.md](../TESTING.md)) |
 | Detection rules quoted in a report (YARA, Sigma, Suricata, Snort) | supported | a rule ships only if the parser OpenCTI uses accepts it; without that parser it ships `unverified` | `tests/test_yara_check.py`, `tests/test_pattern_check.py` |
 | Detection coverage from rule corpora (Sigma, Suricata, YARA): matrix, proposals, ZIP export | supported | corpora downloaded by `bootstrap` from third-party repositories, each under its own licence; no Snort corpus | `tests/test_detection_coverage.py`, `tests/test_sigma_adapter.py`, `tests/test_suricata_yara_adapters.py` |
@@ -545,7 +553,7 @@ matrix names the missing evidence in each row, with its gate.
 | Review and finalize, web interface and API | **yes**: the review routes of `api/routes/` and the review page (`frontend/src/pages/Review.tsx`) | **partly**: the browser journey, in Chromium, offline and with `AUTH_MODE=off` (job `browser-e2e`, read on 2026-11-08, [readiness](releases/1.0-readiness.md), gate `browser`). It covers neither several users nor the reader role | A reader who opens a report for review sends a status change the server refuses with 403 (#707). The review page does not yet reconcile the server's decisions with its failed writes (#706) | #706, #707 |
 | Command line (`main.py`, the `cli` command of the image) | **yes**: `main.py`, `docker/entrypoint.sh` | **yes**: CI, the [`contract/cli.json`](../contract/cli.json) snapshot and `tests/test_cli_exit_codes.py` on every pull request (job `fast-tests`) | Its messages are in French and are not a stable output. Two outputs of a batch can collide (#722) | #722 |
 | Enrichment of an existing STIX 2.1 bundle (ADR-0090, `STIX_ENRICHMENT_ENABLED`) | **yes**: `pipeline/baseline_stix.py`, on by default | **yes**: 7 real reports on 2026-10-25: 179 of 601 candidate entries removed, 175 recovered, 0 duplicate rows on the ablation ([TESTING.md](../TESTING.md)) | STIX 2.1 only (2.0 is refused). OpenCTI- and MISP-shaped baselines are checked on repository fixtures, not on live exports | #708 |
-| STIX 2.1 export and identity rules (Stage 5) | **yes**: `pipeline/stage5_validation.py` | **yes**: six reference bundles in CI (`tests/test_stage4_reference.py`, [`contract/stix.json`](../contract/stix.json)); the two bundles of the [model journey of 2026-11-09](releases/1.0-model-journey.md#runs) validated | `unverified` when the JSON schemas are missing. `x_ctiparsor_enrichment` is not in the contract yet | #657 |
+| STIX 2.1 export and identity rules (Stage 5) | **yes**: `pipeline/stage5_validation.py` | **yes**: seven reference bundles in CI (`tests/test_stage4_reference.py`, [`contract/stix.json`](../contract/stix.json)); the two bundles of the [model journey of 2026-11-09](releases/1.0-model-journey.md#runs) validated | `unverified` when the JSON schemas are missing. The contract records `x_ctiparsor_enrichment` by its JSON type (`object`), from the `opencti_enriched` scenario; the keys inside it, and the ids of the objects an enriched bundle keeps from its baseline, are not recorded ([contracts.md](contracts.md)) | #657 |
 | Import into OpenCTI 7.260930.0 | **yes**: `scripts/opencti_import_bundle.py`, `scripts/check_opencti_candidate.sh` | **partly**: 83 of 83 expectations and one WARN on 2026-11-01, on main's image at 4df5cbd ([readiness](releases/1.0-readiness.md), gate `opencti`). Not run on the 1.0 candidate. The re-import and the attributes are not checked yet | Other OpenCTI versions are not tested. OpenCTI drops the bundle's `x_` properties | #708 |
 | Import into MISP | **no**: no connector | **no**: no import test | A target after 1.0 (ADR-0094, decision 14). A MISP-shaped STIX 2.1 bundle is accepted as an enrichment baseline | — |
 | Install with Docker Compose | **yes**: `compose.yaml`, `setup.sh` | **partly**: a clean install from the 0.2.0 archive, upgraded, with a restore, on 2026-11-01 ([readiness](releases/1.0-readiness.md), gate `clean_install`). Not run on the 1.0 candidate | Linux x86-64 or WSL2, CPU only. The only supported install | #711 |
@@ -555,6 +563,8 @@ matrix names the missing evidence in each row, with its gate.
 | Queue, worker status and safe defaults (`WORKER_MAX_CONCURRENT=1`, ADR-0094 item 7) | **yes**: the `worker_heartbeats` table and `GET /api/queue/status` ([#229](https://github.com/Stixaly/CTIParsor/pull/229), [#243](https://github.com/Stixaly/CTIParsor/pull/243)) | **yes**: CI, `tests/test_queue_status_api.py` and `tests/test_job_queue.py`; the worker-killed case of the [failure recipe](releases/1.0-failure-recipe.md#run-of-2026-11-13-on-3c4fd6c-ops-qualification-710) (2026-11-13); the two-worker burst of 2026-11-13 had two reports processing at once (peak processing 2) | A crashed worker is listed as it was until its lease expires (180 s). A worker older than the heartbeat table is listed only while it holds a report | #710 |
 | Detection rules quoted in a report (YARA, Sigma, Suricata, Snort) | **yes**: `pipeline/detection/` | **partly**: CI tests (`tests/test_yara_check.py`, `tests/test_pattern_check.py`). No run on a candidate | A rule ships `unverified` when its parser is missing | — |
 | Detection coverage from rule corpora (matrix, proposals, ZIP export) | **yes**: `pipeline/detection/`, `tests/test_detection_coverage.py` | **partly**: CI tests. The store of 85,639 rules in 12 corpora was built and sized on 2026-11-08 ([readiness](releases/1.0-readiness.md)) | No Snort corpus. The corpora come from third-party repositories, each under its own licence | — |
+| Shared service for one team: several analysts on one install (ADR-0097) | **yes**, opt-in: `api/auth/`, `api/audit.py`, `pipeline/egress.py`, and the rows for accounts, OIDC, audit, egress, metrics and backups above | **partly** (2026-11-13): each piece is tested, and the browser journeys ran with a reader, an analyst and an admin account. **no** run has several analysts working at once on one install ([readiness](releases/1.0-readiness.md)); the final status stays *not qualified* until it does | Off by default. One host, one database, no failover. Every user sees every report | #707 |
+| Isolation between teams (multi-tenancy), SAML | **no** | **no** | Not supported in 1.0. After 1.0, and not scheduled ([ADR-0097](adr/0097-1-0-is-a-shared-service-for-one-team.md), *Not covered*; [ROADMAP](../ROADMAP.md#after-10)) | — |
 | GPU, host install, a Python package | **no** | **no** | Not supported in 1.0 ([support policy](#capability-matrix)) | — |
 
 ## Quality: what is measured and published

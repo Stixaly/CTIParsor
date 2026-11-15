@@ -4,8 +4,8 @@
 **Date:** 2026-10-31
 **Deciders:** maintainer
 **Extends:** ADR-0085 (its decision 8 covers the versions before 1.0 only)
-**Amended by:** the amendments of 2026-11-07 (item 5 done, with limits) and
-2026-11-08 (item 13) below; ADR-0097 (accepted) amends who 1.0 is for
+**Amended by:** the amendments of 2026-11-07 (item 5 done, with limits),
+2026-11-08 (item 13) and 2026-11-15 (the support scope reconciled) below; ADR-0097 (accepted) amends who 1.0 is for
 **Relates to:** ADR-0054 (Docker is the only supported install), ADR-0060 (the
 evaluation protocol), ADR-0066 (STIX ids), ADR-0077 (versioned migrations),
 ADR-0084 (a bundle Stage 5 refuses is not served), ADR-0090 (enriching a STIX
@@ -407,3 +407,32 @@ shared service for one team, behind authentication, instead of one analyst on
 a local install. Decision 0's last sentence and the last item of *Options
 rejected* no longer hold. The other decisions stay. The action plan continues
 in ADR-0097's work items (14 to 24).
+
+## Amendment (2026-11-15): the support scope, reconciled with what is implemented and qualified
+
+The decisions above stand. This amendment records where the documents that
+state the scope now agree with the code, and what the first version of this ADR
+says that is no longer true.
+
+- **Who 1.0 is for.** The amendment of 2026-11-08 gives the audience as one team
+  on a shared install (ADR-0097). [ROADMAP.md](../../ROADMAP.md) and the
+  [support policy](../support-policy.md#who-10-is-for) now say it too. It is a
+  target: the authentication is opt-in and the qualification of several users is
+  open (#707).
+- **Implemented is not qualified.** The
+  [capabilities table](../support-policy.md#capabilities-implemented-qualified-limits)
+  gives each capability its implementation status, its qualification status, its
+  limits and its open issue. A capability whose evidence is missing there stays
+  *not qualified*: the shared service (#707), figure reading with the default
+  provider and the qualified vLLM configuration (#709), the operations recipe
+  (#710), the clean install and the other release-step runs (#711).
+- **Item 1.** The list of what the contract snapshot does not cover, in the
+  action plan above, names `x_ctiparsor_enrichment` ("no enriched reference
+  bundle"). That no longer holds: the `opencti_enriched` scenario of
+  `tests/fixtures/stage4_reference/` emits it, and `contract/stix.json` records
+  it with the JSON type `object`. The keys inside it are not recorded.
+  [contracts.md](../contracts.md) says how to read the recorded contracts.
+- **Not provided in 1.0:** an import into MISP (decision 14), GPU,
+  isolation between teams and SAML (ADR-0097, *Not covered*), and the
+  air-gapped install, which stays experimental. None of them is a condition of
+  1.0, and none is promised.
