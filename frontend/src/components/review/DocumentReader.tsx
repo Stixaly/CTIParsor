@@ -33,6 +33,9 @@ interface Props {
   onEntityNotInText?: (entityId: string) => void
 }
 
+// A mention must not sit inside a word: "Win" is not mentioned in "Windows".
+const _isWordChar = (c: string | undefined): boolean => c !== undefined && /[\p{L}\p{N}]/u.test(c)
+
 export default function DocumentReader({
   text, title, byline, entities, highlightStyle,
   focusedId, setFocusedId, setHoverEntity,
@@ -104,16 +107,33 @@ export default function DocumentReader({
     setTimeout(() => { lastSelRef.current = false }, 250)
 
     const lowerSel = t.toLowerCase()
+    // Every whole-word occurrence of an entity's value in the selection.
+    // A value that starts or ends with punctuation ("evil[.]com") is bounded by nothing.
+    const spans: Array<{ en: Entity; start: number; end: number }> = []
+    for (const en of entities) {
+      const v = en.value.toLowerCase()
+      if (en.accepted === false || !v) continue
+      for (let idx = lowerSel.indexOf(v); idx !== -1; idx = lowerSel.indexOf(v, idx + 1)) {
+        const end = idx + v.length
+        const left = _isWordChar(v[0]) && _isWordChar(lowerSel[idx - 1])
+        const right = _isWordChar(v[v.length - 1]) && _isWordChar(lowerSel[end])
+        if (!left && !right) spans.push({ en, start: idx, end })
+      }
+    }
+    // A mention inside a longer one ("cmd" in "cmd.exe") is not a mention of its
+    // own: keep the longest spans, drop any span that a kept one contains.
+    const outer = spans
+      .sort((a, b) => (b.end - b.start) - (a.end - a.start))
+      .filter((s, i, all) => !all.slice(0, i).some(k => s.start >= k.start && s.end <= k.end))
     // Sort by position in the selected text so the entity that appears first
     // in the selection becomes the source.  The entity array is sorted by
     // type/confidence, which does not match text order and would silently
     // flip relationship direction (e.g. "MalwareX targets Server_Y" could
     // create Server_Y → MalwareX if Server_Y has a lower array index).
-    const mentioned = entities
-      .filter(en => en.accepted !== false && lowerSel.includes(en.value.toLowerCase()))
-      .sort((a, b) =>
-        lowerSel.indexOf(a.value.toLowerCase()) - lowerSel.indexOf(b.value.toLowerCase())
-      )
+    const mentioned = outer
+      .sort((a, b) => a.start - b.start)
+      .map(s => s.en)
+      .filter((en, i, all) => all.indexOf(en) === i)
     if (mentioned.length >= 2 && onSelectionRelate) {
       onSelectionRelate({
         srcId: mentioned[0].id,

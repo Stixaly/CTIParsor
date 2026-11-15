@@ -1,12 +1,14 @@
 import { Loader2, AlertTriangle, X } from 'lucide-react'
 import { useSSE } from '../../hooks/useSSE'
 import type { Job } from '../../types'
+import { stageOrder } from '../../types'
 
 const MONO = "'JetBrains Mono', ui-monospace, monospace"
 
 function ProgressRail({ jobId }: { jobId: string }) {
   const { latestStage } = useSSE(jobId)
-  const stage = latestStage?.stage ?? 0
+  // "1f" is placed after Ingestion, not NaN (#882).
+  const stage = stageOrder(latestStage?.stage ?? 0)
   const pct = Math.min(100, Math.max(6, (stage / 5) * 100))
 
   return (
@@ -28,7 +30,8 @@ interface Props {
   job: Job
   relTime: (iso: string) => string
   onViewProgress: () => void
-  onDelete: () => void
+  /** Without it the card has no remove button (a reader cannot delete). */
+  onDelete?: () => void
 }
 
 export default function ActivityCard({ job, relTime, onViewProgress, onDelete }: Props) {
@@ -65,22 +68,24 @@ export default function ActivityCard({ job, relTime, onViewProgress, onDelete }:
         >
           {job.original_filename}
         </span>
-        <button
-          title="Remove job"
-          aria-label="Remove job"
-          onClick={onDelete}
-          style={{
-            background: 'none',
-            border: 'none',
-            padding: 3,
-            cursor: 'pointer',
-            color: 'var(--ink-4)',
-            display: 'flex',
-            flexShrink: 0,
-          }}
-        >
-          <X size={12} />
-        </button>
+        {onDelete && (
+          <button
+            title="Remove job"
+            aria-label="Remove job"
+            onClick={onDelete}
+            style={{
+              background: 'none',
+              border: 'none',
+              padding: 3,
+              cursor: 'pointer',
+              color: 'var(--ink-4)',
+              display: 'flex',
+              flexShrink: 0,
+            }}
+          >
+            <X size={12} />
+          </button>
+        )}
       </div>
 
       {!isFailed && <ProgressRail jobId={job.id} />}

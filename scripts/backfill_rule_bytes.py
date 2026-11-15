@@ -46,6 +46,8 @@ def main() -> int:
         help="Do not write, only count and display",
     )
     args = parser.parse_args()
+    if args.batch < 1:
+        parser.error("--batch must be >= 1")
 
     try:
         init_db()

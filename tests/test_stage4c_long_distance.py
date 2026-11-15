@@ -229,3 +229,22 @@ def test_default_inferer_builds_when_enabled_and_ready(monkeypatch):
     b = stix2.Malware(name="B", is_family=True)
     edge = infer(a, b, "a uses b")
     assert edge is not None and edge.verb == "uses"
+
+
+def test_the_long_distance_prompt_fits_the_llm_limit_and_keeps_its_question_issue_910(monkeypatch):
+    # _call_llm cuts the user prompt at LLM_MAX_PROMPT_LENGTH, from its end: the
+    # report is shortened to make room, so the question after it is sent whole (#910).
+    import pipeline.stage3_llm as s3
+    monkeypatch.setattr(s3, "_provider_ready", lambda *a, **k: True)
+    monkeypatch.setattr(s3, "_MAX_PROMPT_LENGTH", 3_000)
+    seen = []
+    monkeypatch.setattr(s3, "_call_llm", lambda system, user, provider=None, **k: seen.append(user) or "")
+    infer = default_long_distance_inferer({"completion": {"long_distance": True}})
+    # Short enough to be sent whole (the excerpt budget is 12 000), too long for the limit.
+    infer(stix2.IntrusionSet(name="APT-X"), stix2.Malware(name="MW", is_family=True),
+          _filler(6_000) + "APT-X deployed MW.")
+    [user] = seen
+    assert len(user) <= 3_000
+    assert 'Entity A: "APT-X" (type: intrusion-set)' in user
+    assert user.endswith('"quote": "exact sentence from text"}\nor\n{"related": false, "source": null, '
+                         '"verb": null, "quote": null}')

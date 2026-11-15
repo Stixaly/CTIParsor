@@ -38,14 +38,22 @@ _MAX_NET_RULE = 16384
 _warned: set[str] = set()
 
 
+#: Raised for a text that parses without error but holds no rule (#898).  The
+#: parsers return an empty result for it, and OpenCTI would take it as an Indicator
+#: for no rule at all.
+_NO_RULE = "no rule in the text"
+
+
 def _sigma(pattern: str) -> None:
     from sigma.collection import SigmaCollection
-    SigmaCollection.from_yaml(pattern)
+    if not SigmaCollection.from_yaml(pattern).rules:
+        raise ValueError(_NO_RULE)
 
 
 def _suricata(pattern: str) -> None:
     from parsuricata import parse_rules
-    parse_rules(pattern)
+    if not parse_rules(pattern):
+        raise ValueError(_NO_RULE)
 
 
 def _snort(pattern: str) -> None:

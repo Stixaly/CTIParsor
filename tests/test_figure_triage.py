@@ -80,6 +80,27 @@ def test_normal_page_keeps_a_real_figure(monkeypatch):
     assert len(find_figures("x.pdf")) == 1
 
 
+def test_size_tests_judge_the_part_of_an_image_on_the_page_issue_913(monkeypatch):
+    """A 200 x 200 image hanging 180 pt off the left edge has 20 pt on the page:
+    the side floor must see that, not the 200 pt it was drawn at."""
+    page = _Page(A4_W, A4_H, [_img(200, 200, x0=-180.0)])
+    monkeypatch.setattr("pipeline.stage1f_figures.pdfplumber", _fake_pdfplumber([page]))
+    assert find_figures("x.pdf") == []
+
+
+def test_an_image_wholly_off_the_page_is_dropped_issue_913(monkeypatch):
+    page = _Page(A4_W, A4_H, [_img(200, 200, x0=A4_W + 50.0), _img(200, 200, top=-400.0, x0=50.0)])
+    monkeypatch.setattr("pipeline.stage1f_figures.pdfplumber", _fake_pdfplumber([page]))
+    assert find_figures("x.pdf") == []
+
+
+def test_a_figure_partly_off_the_page_is_kept_at_its_visible_size_issue_913(monkeypatch):
+    page = _Page(A4_W, A4_H, [_img(400, 300, x0=-100.0)])
+    monkeypatch.setattr("pipeline.stage1f_figures.pdfplumber", _fake_pdfplumber([page]))
+    [cand] = find_figures("x.pdf")
+    assert cand.bbox == (0.0, 100.0, 300.0, 400.0)
+
+
 def test_area_floor_matches_the_documented_value():
     """The floor separates the icon population from the real-diagram population."""
     assert 112 * 150 < MIN_FIGURE_AREA_PT2 < 450 * 253

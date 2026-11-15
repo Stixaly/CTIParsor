@@ -261,3 +261,28 @@ def test_case_insensitive_filter_values(temp_db_client: TestClient, temp_db):
         files1 = [f for f in zf1.namelist() if f.startswith("rules/")]
         files2 = [f for f in zf2.namelist() if f.startswith("rules/")]
         assert len(files1) == len(files2) == 3
+
+
+@pytest.mark.parametrize("report_name, ascii_stem, encoded_stem", [
+    ("отчет.pdf", "report", "%D0%BE%D1%82%D1%87%D0%B5%D1%82"),
+    ("Rapport été.pdf", "Rapport_ete", "Rapport_%C3%A9t%C3%A9"),
+])
+@pytest.mark.parametrize("method", ["GET", "POST"])
+def test_a_unicode_report_name_gives_a_latin1_filename_and_an_rfc5987_one(
+        temp_db_client: TestClient, temp_db, method, report_name, ascii_stem, encoded_stem):
+    """The header is latin-1: `filename=` is the ASCII form, `filename*` the real name (#922)."""
+    job_id = f"job_unicode_{method.lower()}_{ascii_stem}"
+    _seed(temp_db, job_id)
+    conn = temp_db.get_conn()
+    conn.execute("UPDATE jobs SET original_filename=? WHERE id=?", (report_name, job_id))
+    conn.commit()
+
+    if method == "GET":
+        resp = temp_db_client.get(f"/api/jobs/{job_id}/detections/export")
+    else:
+        resp = temp_db_client.post(f"/api/jobs/{job_id}/detections/export", json={"rule_ids": ["r1", "r2"]})
+
+    assert resp.status_code == 200
+    cd = resp.headers["Content-Disposition"]
+    assert cd.startswith(f'attachment; filename="{ascii_stem}_detection_rules.zip"; ')
+    assert f"filename*=UTF-8''{encoded_stem}_detection_rules.zip" in cd

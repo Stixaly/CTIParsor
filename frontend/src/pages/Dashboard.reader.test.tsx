@@ -28,6 +28,9 @@ vi.mock('../api/client', async importOriginal => ({
   fetchBaselineStatus: api.fetchBaselineStatus,
 }))
 
+// A running job shows an activity card, whose rail follows the progress stream.
+vi.mock('../hooks/useSSE', () => ({ useSSE: () => ({ latestStage: undefined }) }))
+
 const signedIn = (role: 'reader' | 'analyst'): AuthState => ({
   status: 'signed-in',
   me: { auth_mode: 'local', username: 'u', display_name: 'U', role, auth_source: 'local', csrf_token: 'c' },
@@ -75,5 +78,24 @@ describe('Dashboard — a reader opens a report (#707)', () => {
 
     expect(await screen.findByText('review page')).toBeInTheDocument()
     expect(api.updateJobStatus).toHaveBeenCalledWith('job-1', 'reviewing')
+  })
+})
+
+describe('Dashboard — the remove button of an activity card (#875)', () => {
+  const RUNNING: Job = { ...JOB, id: 'job-2', original_filename: 'lazarus.pdf', status: 'processing' }
+
+  it('a reader has no Remove job button on a running report', async () => {
+    api.fetchJobs.mockResolvedValue([RUNNING])
+    renderAs('reader')
+
+    expect(await screen.findByText('lazarus.pdf')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Remove job' })).not.toBeInTheDocument()
+  })
+
+  it('an analyst has it', async () => {
+    api.fetchJobs.mockResolvedValue([RUNNING])
+    renderAs('analyst')
+
+    expect(await screen.findByRole('button', { name: 'Remove job' })).toBeInTheDocument()
   })
 })

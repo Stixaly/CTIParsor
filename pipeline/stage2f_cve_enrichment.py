@@ -13,6 +13,7 @@ from __future__ import annotations
 import http.client
 import json
 import logging
+import math
 import time
 import urllib.error
 import urllib.request
@@ -57,16 +58,21 @@ def enrichment_enabled() -> bool:
 def _cvss_v3(metrics: list) -> tuple[float | None, str | None]:
     """The first CVSS v3 baseScore in a list of CIRCL metrics, with its vector.
 
-    A metric whose baseScore is None is passed over, not taken as the answer:
-    the metrics after it, and cvssV3_0 in the same one, are still looked at.
+    A metric whose baseScore is not a number from 0 to 10 is passed over, not taken
+    as the answer: the metrics after it, and cvssV3_0 in the same one, are still
+    looked at.  A bool is not a number here, and NaN or infinity is not a score.
     """
     for m in metrics:
         if not isinstance(m, dict):
             continue
         for version in ("cvssV3_1", "cvssV3_0"):
             cvss = m.get(version)
-            if isinstance(cvss, dict) and cvss.get("baseScore") is not None:
-                return cvss["baseScore"], cvss.get("vectorString")
+            if not isinstance(cvss, dict):
+                continue
+            score = cvss.get("baseScore")
+            if (isinstance(score, (int, float)) and not isinstance(score, bool)
+                    and math.isfinite(score) and 0 <= score <= 10):
+                return float(score), cvss.get("vectorString")
     return None, None
 
 
@@ -106,8 +112,11 @@ def _fetch_from_circl(cve_id: str) -> dict | None:
             descriptions = cna.get("descriptions")
             if isinstance(descriptions, list):
                 for d in descriptions:
-                    if isinstance(d, dict) and d.get("lang") == "en":
-                        description = d.get("value")
+                    if not isinstance(d, dict) or d.get("lang") != "en":
+                        continue
+                    val = d.get("value")
+                    if isinstance(val, str) and val.strip():
+                        description = val
                         break
 
     score = None

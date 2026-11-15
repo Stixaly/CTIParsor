@@ -386,13 +386,23 @@ offline_wait_postgres_healthy() {
     return 1
 }
 
+# Appends a KEY=VALUE line to a file. A file that is not empty and does not end
+# with a newline (a hand-written .env) gets one first, so the line starts on its own.
+_offline_append_key() {
+    local file="$1" key="$2" value="$3"
+    if [ -s "$file" ] && [ -n "$(tail -c1 "$file")" ]; then
+        printf '\n' >> "$file"
+    fi
+    printf '%s=%s\n' "$key" "$value" >> "$file"
+}
+
 # Sets or appends a KEY=VALUE line in a file, in place.
 _offline_set_key() {
     local file="$1" key="$2" value="$3"
     if grep -qE "^${key}=" "$file" 2>/dev/null; then
         sed -i "s#^${key}=.*#${key}=${value}#" "$file"
     else
-        printf '%s=%s\n' "$key" "$value" >> "$file"
+        _offline_append_key "$file" "$key" "$value"
     fi
 }
 
@@ -404,7 +414,7 @@ _offline_set_key_if_absent() {
     if grep -qE "^${key}=" "$file" 2>/dev/null; then
         return 1
     fi
-    printf '%s=%s\n' "$key" "$value" >> "$file"
+    _offline_append_key "$file" "$key" "$value"
 }
 
 # The host's CPU count, for the Ollama container's cpu limit: nproc, else getconf.

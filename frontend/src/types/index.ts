@@ -462,8 +462,19 @@ export interface CorpusRebuildSummary {
   file_errors: Record<string, CorpusFileError[]>
 }
 
+/** Place of a pipeline stage on the 1..5 scale. A sub-stage id sorts between its
+ *  stage and the next one: "1f" (figures, after Ingestion) is 1.5. An id it does
+ *  not know is 0. */
+export function stageOrder(stage: number | string): number {
+  if (typeof stage === 'number') return stage
+  const m = /^(\d+)([a-z]?)$/.exec(stage.trim())
+  if (!m) return 0
+  return Number(m[1]) + (m[2] ? 0.5 : 0)
+}
+
 export interface ProgressEvent {
-  stage?: number
+  /** A stage number, or a sub-stage id such as "1f" (see stageOrder). */
+  stage?: number | string
   label?: string
   chunk?: number
   total?: number

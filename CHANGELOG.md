@@ -18,6 +18,29 @@ theme.
   gate `pass`; the maintainer's approval and the decision stay `pending`. The qualified column of
   the capabilities table in `docs/support-policy.md` now cites that evidence; the `anthropic`
   provider stays not qualified, and several analysts working at once are still not qualified.
+- **Bug triage of #875-#923 (ADR-0103).** 41 confirmed defects fixed, each with a regression test; six
+  issues closed as not reproducible and two left open for a decision (#897, #914). Frontend: a `reader` no
+  longer sees "Remove job" (#875); a dropped file that cannot be read shows a message (#876); Coverage shows
+  an error with Retry instead of "0 rule", looks rules up by batches of 500 and resets when the job changes
+  (#877-#879); a removed baseline object shows its name (#880); the download name never starts with `_`
+  (#881); the `1f` stage no longer unticks Ingestion or shows `NaN%` (#882); entity ranges survive `İ`
+  (#883), selections skip nested names (#884), a value named `constructor` no longer breaks the overlay
+  (#885). Extraction: chunks respect `max_chars` (#912); a figure cut by the page edge is judged on what is
+  visible (#913); `h[tt]ps[://]`, `fxp[:]//`, `{dot}` and `{at}` are refanged (#915); a URL with a final dot no
+  longer yields a second domain (#916) and its user-info is no longer an email (#917); multicast and
+  IPv4-mapped addresses are read as such (#920); `NO_PROXY` accepts `[::1]`, `host:port` and `*.domain`
+  (#921); a malformed `attack_revoked.json` or CIRCL score is ignored (#911, #919); the manifest thresholds
+  apply only to their own model (#918). Stage 3f/4c: a reply with an empty `selected` followed by a real answer
+  is read (#905); the long-distance prompt is bounded (#910); the evidence span has no double space (#909);
+  the TTP retriever loads its model before its corpus (#906). Detection: an empty Sigma or Suricata rule is
+  refused (#898); Unicode line separators no longer break the synthesized Sigma (#899); `www.` is dropped from
+  Sigma domain atoms (#900); refang and `CVE_` underscores (#901, #902); registry hive names and a final dot
+  (#903); a scalar `tags:` (#904). API and tooling: a Unicode report name no longer makes the ZIP export
+  answer 500 (#922); a malformed JWKS or a `NaN` claim is refused as a sign-in error (#923); auto-accept runs
+  in one transaction (#887); `NaN` control-sample rates are refused (#886); a blank `display` no longer
+  erases a promoted term (#890); `backfill_rule_bytes.py --batch 0`, a bad ATT&CK download that overwrote the
+  bundle, a CRLF or spaced `CTI_DB_PASSWORD`, and a `.env` with no final newline are fixed (#892-#895).
+  Re-ingest the Sigma corpora to apply #900 and #904 to stored rules.
 
 - **The OpenCTI check no longer takes two ATT&CK techniques of one name for a duplicate.**
   `scripts/opencti_expectations.py` matched objects by name, value or alias, so two distinct

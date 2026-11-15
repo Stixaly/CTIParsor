@@ -132,6 +132,15 @@ UBIQUITOUS_REGISTRY_PREFIXES: tuple[str, ...] = (
     "hkcu/software/microsoft/windows/currentversion/explorer/run",
 )
 
+#: The long hive names a report writes out, and the short forms the prefixes above
+#: use: a key is matched under the short name whichever one it was written with (#903).
+_HIVE_SHORT_NAMES: tuple[tuple[str, str], ...] = (
+    ("hkey_local_machine/", "hklm/"),
+    ("hkey_current_user/", "hkcu/"),
+    ("hkey_classes_root/", "hkcr/"),
+    ("hkey_users/", "hku/"),
+)
+
 #: Free-mail, cloud and developer hosts. A report naming an attacker's Gmail
 #: address is describing something specific -- but the observable pipeline
 #: reduces that address to `gmail.com`, which is not. Abused-service endpoints
@@ -235,7 +244,8 @@ def _host(value: str) -> str:
     # Remove port
     if ":" in v:
         v = v.split(":", 1)[0]
-    return v
+    # The fully qualified form, `gmail.com.`, is the same host (#903).
+    return v.rstrip(".")
 
 
 def _registrable(host: str) -> str:
@@ -292,6 +302,11 @@ def discrimination(obs_class: str, value: str) -> str:
     elif obs_class == "user":
         return UBIQUITOUS if v in UBIQUITOUS_USERS else DISCRIMINATING
     elif obs_class == "registry":
+        # The long hive names are the short ones written out (#903).
+        for long_name, short_name in _HIVE_SHORT_NAMES:
+            if v.startswith(long_name):
+                v = short_name + v[len(long_name):]
+                break
         for prefix in UBIQUITOUS_REGISTRY_PREFIXES:
             if v.startswith(prefix):
                 return UBIQUITOUS

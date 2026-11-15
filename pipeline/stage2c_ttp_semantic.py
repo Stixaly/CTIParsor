@@ -112,7 +112,10 @@ def _thresholds() -> tuple[float, float]:
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
             t = manifest.get("thresholds")
-            if isinstance(t, dict) and "high" in t and "medium" in t:
+            # Thresholds calibrated for another model's cosine distribution do not
+            # apply to the model in use: only the default table's do.
+            if (manifest.get("model", _LEGACY_MODEL) == _active_model_name()
+                    and isinstance(t, dict) and "high" in t and "medium" in t):
                 high, medium = float(t["high"]), float(t["medium"])
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             logger.warning(f"[Stage 2c] {manifest_path.name} unreadable ({exc}); "

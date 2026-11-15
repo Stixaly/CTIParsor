@@ -168,13 +168,16 @@ def build_long_distance_inferer(
     *,
     max_chars: int = 12_000,
     confidence: float = 0.6,
+    max_prompt_chars: int | None = None,
 ) -> Callable[[object, object, str], Optional[InferredEdge]]:
     """Build the ``(central, topic, report_text) -> InferredEdge | None`` callable
     that Stage 4b's long-distance step invokes, bound to ``llm_fn``.
 
     ``max_chars`` bounds the report text of each call (see ``_excerpt``): one
     call per disconnected sub-graph, so sending a whole long report every time
-    would multiply its cost by the number of islands."""
+    would multiply its cost by the number of islands.  ``max_prompt_chars`` is
+    the length the whole prompt must fit in: the report text is shortened to
+    make room, so the question after it is never the part the LLM cut drops."""
     system = _SYSTEM.format(verbs=", ".join(sorted(STIX_RELATIONSHIP_TYPES)))
 
     def infer(central, topic, report_text) -> Optional[InferredEdge]:
@@ -187,7 +190,7 @@ def build_long_distance_inferer(
         prompt, spotlight = fit_report(
             _USER_TEMPLATE,
             _excerpt(report_text or "", _surface_forms(central), _surface_forms(topic), max_chars),
-            None,
+            max_prompt_chars,
             a_name=a_name, a_type=_type(central),
             b_name=b_name, b_type=_type(topic),
         )
@@ -238,7 +241,7 @@ def default_long_distance_inferer(
     if not comp.get("long_distance"):
         return None
     # Lazy import: keep the network layer out of module import graph.
-    from pipeline.stage3_llm import _call_llm, _provider_ready
+    from pipeline.stage3_llm import _MAX_PROMPT_LENGTH, _call_llm, _provider_ready
 
     if not _provider_ready():
         logger.info(
@@ -246,4 +249,6 @@ def default_long_distance_inferer(
             "ready — long-distance prediction skipped."
         )
         return None
-    return build_long_distance_inferer(lambda s, u: _call_llm(s, u))
+    # _call_llm cuts the user prompt at this length, from its end: the prompt is
+    # fitted to it here instead (#910).
+    return build_long_distance_inferer(lambda s, u: _call_llm(s, u), max_prompt_chars=_MAX_PROMPT_LENGTH)

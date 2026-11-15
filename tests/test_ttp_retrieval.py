@@ -288,3 +288,33 @@ def test_retrieval_is_unavailable_with_a_bad_setting(monkeypatch):
     monkeypatch.setenv("TTP_RETRIEVAL_METHOD", "dense")
     monkeypatch.setenv("SKIP_HEAVY_MODELS", "1")
     assert tr.retrieval_available() is False
+
+
+def test_the_production_retriever_loads_the_model_before_it_reads_the_corpus_issue_906(monkeypatch):
+    # The corpus is stamped with the model in use, which is only known once
+    # _load_model() has run (#389): a fallback must be seen by _load_corpus.
+    from pipeline import mitre_db
+
+    seen = []
+
+    def load_model():
+        monkeypatch.setattr(s2c, "_active_model", "legacy-test-model")
+        return object()
+
+    def load_corpus():
+        seen.append(s2c._active_model_name())
+        meta = [{"id": "T1105", "name": "Ingress Tool Transfer", "domain": "enterprise-attack"}]
+        return np.zeros((1, 4), dtype=np.float32), meta
+
+    monkeypatch.setattr(s2c, "_active_model", None)
+    monkeypatch.setattr(s2c, "_load_model", load_model)
+    monkeypatch.setattr(s2c, "_load_corpus", load_corpus)
+    monkeypatch.setattr(s2c, "_enabled_domains", lambda: None)
+    monkeypatch.setattr(mitre_db, "get_techniques", lambda: [])
+    tr._production_retriever.cache_clear()
+    try:
+        r = tr._production_retriever("short", "dense", "")
+    finally:
+        tr._production_retriever.cache_clear()
+    assert seen == ["legacy-test-model"]
+    assert r is not None and r.corpus.model == "legacy-test-model"

@@ -263,8 +263,11 @@ def parse_selection(raw: str) -> list[dict] | None:
             # would be another slow decode.  Unparsable (#617).
             return None
         if isinstance(obj, dict) and isinstance(obj.get("selected"), list):
-            return [x for x in obj["selected"] if isinstance(x, dict)]
-        if isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
+            choices = [x for x in obj["selected"] if isinstance(x, dict)]
+            if choices:
+                return choices
+            abstention = []     # an empty `selected` is read like a bare [] (#905)
+        elif isinstance(obj, list) and all(isinstance(x, dict) for x in obj):
             if obj:
                 return list(obj)
             abstention = []     # kept only if nothing after it answers
@@ -300,32 +303,60 @@ def salvage_selection(raw: str) -> list[dict] | None:
     # Lazy, like TTPExtracted below: stage3_llm imports this module.
     from pipeline.stage3_llm import _extract_complete_array_items, _unclosed_stack
 
-    m = _SELECTED_RE.search(raw)
-    start = raw.rfind("{", 0, m.start()) if m else -1
-    if m is None or start < 0:
-        return None
-    try:
-        # The answer closed: what follows it is not read.  On a Kaseya chunk
-        # the model wrote a complete answer, then copies of it until the cut.
-        json.JSONDecoder().raw_decode(raw, start)
-        return None
-    except RecursionError:
-        # Too deep to read: not a salvageable answer (#617).
-        return None
-    except ValueError:
-        pass
-    stack, _ = _unclosed_stack(raw[start:])
-    if stack[:2] != ["{", "["]:
-        return None
-    out: list[dict] = []
-    for item in _extract_complete_array_items(raw, m.end()):
-        try:
-            obj = json.loads(item)
-        except (ValueError, RecursionError):   # too deep: skip this item (#617)
+    for m in _SELECTED_RE.finditer(raw):
+        # The object that holds the key is the innermost `{` still open there.
+        # The nearest `{` before the key can be a closed sub-object
+        # ({"meta": {"k": 1}, "selected": [...), which decodes whole (#905).
+        start = _innermost_open_brace(raw, m.start())
+        if start < 0:
             continue
-        if isinstance(obj, dict):
-            out.append(obj)
-    return out
+        try:
+            # The answer closed: what follows it is not read.  On a Kaseya chunk
+            # the model wrote a complete answer, then copies of it until the cut.
+            json.JSONDecoder().raw_decode(raw, start)
+            return None
+        except RecursionError:
+            # Too deep to read: not a salvageable answer (#617).
+            return None
+        except ValueError:
+            pass
+        stack, _ = _unclosed_stack(raw[start:])
+        if stack[:2] != ["{", "["]:
+            return None
+        out: list[dict] = []
+        for item in _extract_complete_array_items(raw, m.end()):
+            try:
+                obj = json.loads(item)
+            except (ValueError, RecursionError):   # too deep: skip this item (#617)
+                continue
+            if isinstance(obj, dict):
+                out.append(obj)
+        return out
+    return None
+
+
+def _innermost_open_brace(text: str, pos: int) -> int:
+    """Where the innermost `{` still open at `pos` opens, or -1 when none is.
+
+    Strings are skipped as `_unclosed_stack` skips them: a brace inside a quote
+    neither opens nor closes anything."""
+    opened: list[int] = []
+    in_string = False
+    escaped = False
+    for i, ch in enumerate(text[:pos]):
+        if escaped:
+            escaped = False
+        elif ch == "\\" and in_string:
+            escaped = True
+        elif ch == '"':
+            in_string = not in_string
+        elif in_string:
+            continue
+        elif ch in "{[":
+            opened.append(i)
+        elif ch in "}]" and opened:
+            opened.pop()
+    return next((i for i in reversed(opened) if text[i] == "{"), -1)
 
 
 def select_ttps(

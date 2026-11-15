@@ -114,24 +114,32 @@ _REVOKED_PATH = Path(__file__).parent / "data" / "attack_revoked.json"
 def _revoked() -> dict:
     path = attack_data.resolve(_REVOKED_PATH)
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         logger.warning(f"[mitre_db] {path.name} unreadable, revoked ids are not "
                        f"replaced: {type(exc).__name__}: {exc}")
         return {}
+    if not isinstance(data, dict):
+        logger.warning(f"[mitre_db] {path.name} is not a JSON object, revoked ids are not replaced")
+        return {}
+    return data
 
 
 def replacement_for(mitre_id: str) -> str | None:
     """The active technique a revoked ATT&CK id was replaced by, or None
     (`scripts/build_indexes.py --only revoked`)."""
-    table = {k.upper(): v for k, v in (_revoked().get("revoked_by") or {}).items()}
+    by = _revoked().get("revoked_by")
+    if not isinstance(by, dict):
+        return None
+    table = {k.upper(): v for k, v in by.items()}
     return table.get((mitre_id or "").strip().upper())
 
 
 def revoked_names() -> dict[str, str]:
     """Lower-cased name of a revoked Enterprise technique, no active one bearing
     it any more → its replacement's id ("impair defenses" → T1685)."""
-    return dict(_revoked().get("names") or {})
+    names = _revoked().get("names")
+    return dict(names) if isinstance(names, dict) else {}
 
 
 def available() -> bool:

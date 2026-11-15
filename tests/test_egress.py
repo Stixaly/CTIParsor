@@ -149,6 +149,19 @@ def test_a_proxy_makes_a_private_host_external_unless_no_proxy_covers_it(monkeyp
     assert not egress.decide("AMBER", "vllm").allowed
 
 
+@pytest.mark.parametrize("no_proxy, host", [
+    ("[::1]", "::1"),                       # a bracketed IPv6 address
+    ("[::1]:8080", "::1"),                  # the same, with a port
+    ("localhost:8080", "localhost"),        # a host with a port
+    ("10.0.0.7:8000", "10.0.0.7"),          # an address with a port
+    ("*.corp", "gpu.corp"),                 # a wildcard domain
+])
+def test_no_proxy_entries_with_brackets_ports_or_stars_cover_the_host_issue_921(monkeypatch, no_proxy, host):
+    monkeypatch.setenv("https_proxy", "http://proxy.corp:3128")
+    monkeypatch.setenv("NO_PROXY", no_proxy)
+    assert not egress.proxied(host)
+
+
 def test_a_proxy_does_not_matter_to_an_open_level(monkeypatch):
     monkeypatch.setenv("ALL_PROXY", "http://proxy.corp:3128")
     assert egress.decide("GREEN", "anthropic").allowed

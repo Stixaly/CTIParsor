@@ -111,3 +111,12 @@ def test_cli_reads_logging_settings_from_dotenv(tmp_path):
                           capture_output=True, text=True, timeout=300)
     assert proc.returncode == 0, proc.stderr[-2000:]
     assert _result_line(proc) == ["9"]
+
+
+@pytest.mark.parametrize("raw", ["nan", "NaN", "inf", "-inf"])
+def test_env_float_rejects_nan_and_infinity_issue_886(monkeypatch, caplog, raw):
+    # float() reads these; a NaN passes every clamp that follows the read (#886).
+    monkeypatch.setenv("CTI_TEST_FLOAT", raw)
+    with caplog.at_level("WARNING"):
+        assert env_float("CTI_TEST_FLOAT", default=0.4) == 0.4
+    assert "CTI_TEST_FLOAT" in caplog.text

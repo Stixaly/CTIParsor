@@ -1,4 +1,39 @@
-import { ShieldCheck } from 'lucide-react'
+import { AlertTriangle, ShieldCheck } from 'lucide-react'
+import { errorDetail } from '../../api/client'
+
+/**
+ * Shown in place of the banner when the report's rules did not load (#877). No
+ * figure is drawn: "no rule" would be a claim the server never made.
+ */
+export function EvidenceGateError({ error, onRetry }: {
+  error: unknown
+  onRetry: () => void
+}) {
+  return (
+    <div
+      role="alert"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        border: '1px solid var(--rule)',
+        borderRadius: 8,
+        padding: '9px 12px',
+        fontSize: 13,
+        background: 'var(--bg-soft)',
+        color: 'var(--ink-2)',
+      }}
+    >
+      <AlertTriangle size={15} style={{ color: 'var(--no)', flexShrink: 0 }} />
+      <span style={{ flex: 1 }}>
+        Could not load the rules of this report ({errorDetail(error)}).
+      </span>
+      <button className="btn-ghost" style={{ padding: '4px 10px', fontSize: 11.5 }} onClick={onRetry}>
+        Retry
+      </button>
+    </div>
+  )
+}
 
 /**
  * ADR-0030: The coverage panel now serves only rules backed by report evidence.

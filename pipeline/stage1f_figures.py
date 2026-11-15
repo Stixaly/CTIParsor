@@ -152,25 +152,8 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
                     except (TypeError, ValueError, AttributeError):
                         continue
 
-                    w = abs(x1 - x0)
-                    h = abs(bottom - top)
-
-                    if w < MIN_SIDE_PT or h < MIN_SIDE_PT:
-                        continue
-                    if (w * h) / page_area < MIN_AREA_RATIO and (w * h) < MIN_FIGURE_AREA_PT2:
-                        continue
-                    if h > 0 and w / h > MAX_ASPECT:
-                        continue
-                    if w > 0 and h / w > MAX_ASPECT:
-                        continue
-
-                    key = (round(w), round(h), round(x0))
-                    page_count = len(key_pages.get(key, set()))
-                    if page_count >= REPEAT_PAGE_LIMIT:
-                        logger.debug("Skipping repeated figure key %s (count %d)", key, page_count)
-                        continue
-
-                    # Clamp bbox to page
+                    # Clamp bbox to page before any size test: the tests judge the part of
+                    # the image that is on the page, not the part that hangs off it (#913).
                     cx0 = max(0.0, x0)
                     ctop = max(0.0, top)
                     cx1 = min(page.width, x1)
@@ -188,10 +171,26 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
                     min_y = min(ctop, cbottom)
                     max_y = max(ctop, cbottom)
 
-                    clamped_w = max_x - min_x
-                    clamped_h = max_y - min_y
+                    w = max_x - min_x
+                    h = max_y - min_y
 
-                    area_ratio = min((clamped_w * clamped_h) / page_area, 1.0)
+                    if w < MIN_SIDE_PT or h < MIN_SIDE_PT:
+                        continue
+                    if (w * h) / page_area < MIN_AREA_RATIO and (w * h) < MIN_FIGURE_AREA_PT2:
+                        continue
+                    if h > 0 and w / h > MAX_ASPECT:
+                        continue
+                    if w > 0 and h / w > MAX_ASPECT:
+                        continue
+
+                    # The repeat key is the untrimmed geometry, as in the first pass.
+                    key = (round(abs(x1 - x0)), round(abs(bottom - top)), round(x0))
+                    page_count = len(key_pages.get(key, set()))
+                    if page_count >= REPEAT_PAGE_LIMIT:
+                        logger.debug("Skipping repeated figure key %s (count %d)", key, page_count)
+                        continue
+
+                    area_ratio = min((w * h) / page_area, 1.0)
 
                     candidates.append(FigureCandidate(
                         page=page_idx,

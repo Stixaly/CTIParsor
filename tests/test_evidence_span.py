@@ -230,3 +230,13 @@ def test_a_markdown_link_in_the_text_does_not_hide_the_quote():
     span = locate("attributed to REvil ransomware operators", doc)
     assert span is not None and span.exact
     assert doc[span.start:span.end] == "attributed to [REvil](/threat-actors/revil) ransomware operators"
+
+
+def test_a_link_left_out_between_two_blanks_leaves_one_space_issue_909():
+    # The link is skipped whole: the blank before it is the only space, and the
+    # blank after it must not add a second one (#909).
+    normalised, index_map = _normalise("foo [](url) bar")
+    assert normalised == "foo bar"
+    assert len(normalised) == len(index_map)
+    span = locate("alpha beta foo bar gamma", "alpha beta foo [](url) bar gamma")
+    assert span is not None and span.exact

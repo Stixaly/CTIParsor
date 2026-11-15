@@ -27,6 +27,12 @@ function ReviewForJob() {
   return <Review key={jobId} />
 }
 
+// Keyed by job too: the drill-in of one report must not carry over to the next (#879).
+function CoverageForJob() {
+  const { jobId } = useParams<{ jobId: string }>()
+  return <Coverage key={jobId} />
+}
+
 export default function App() {
   return (
     <ThemeProvider>
@@ -55,7 +61,7 @@ export default function App() {
             {/* ── Full-screen — Review + Graph (no sidebar) ── */}
             <Route path="/review/:jobId" element={<ReviewForJob />} />
             <Route path="/graph/:jobId"  element={<Graph />} />
-            <Route path="/coverage/:jobId" element={<Coverage />} />
+            <Route path="/coverage/:jobId" element={<CoverageForJob />} />
           </Route>
         </Routes>
       </AuthProvider>

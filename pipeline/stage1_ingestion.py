@@ -923,14 +923,16 @@ def chunk_text(text: str, max_chars: int = 3000, overlap: int = 400) -> list[str
             current_len = 0
             continue
 
-        if current_len + len(unit) > max_chars and current:
+        # The separator that joins this unit to the ones before it is part of the chunk.
+        sep_len = len(separator) if current else 0
+        if current_len + sep_len + len(unit) > max_chars and current:
             chunks.append(separator.join(current))
             joins.append(separator)
             current = [unit]
             current_len = len(unit)
         else:
             current.append(unit)
-            current_len += len(unit)
+            current_len += sep_len + len(unit)
 
     if current:
         chunks.append(separator.join(current))
