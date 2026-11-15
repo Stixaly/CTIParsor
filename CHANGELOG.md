@@ -9,6 +9,16 @@ theme.
 
 ## [Unreleased]
 
+- **A client can no longer choose its own address behind the `proxy` profile.** nginx appended the
+  peer's address to the `X-Forwarded-For` a client had sent, and with `FORWARDED_ALLOW_IPS=*` the app
+  takes the first address listed: a client sending `X-Forwarded-For: 9.9.9.9` was seen as `9.9.9.9`,
+  and the per-IP limits (the upload quota, the sign-in limits) could be dodged by changing the header.
+  `docker/nginx/default.conf` now replaces the header with the peer's address. `.env.example`,
+  `docs/docker.md` and `docs/deployment.md` say when `*` is safe: the app is reachable through that
+  nginx alone, and nginx replaces the header; another load balancer in front of nginx is not covered.
+  The effect on a running install is only the address the app sees, so no migration (#697, found while
+  reading its text).
+
 - **Complete Review waits for the edits already sent.** An edit whose answer arrived while the report was
   being completed made the page ignore the completion: the report was completed on the server, but the
   button stayed "Complete Review" instead of "Download STIX" (a race in the #809 fix, seen as a flaky
