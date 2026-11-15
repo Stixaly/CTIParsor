@@ -7,7 +7,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 
 from api.baseline_store import scrubbed
 from api.body_limit import ENVELOPE_BYTES
-from api.main import limiter
+from api.rate_limit import limiter
 from api.response_models.baselines import BaselineStatus
 from api.routes._common import (
     BASELINE_REFUSED,
