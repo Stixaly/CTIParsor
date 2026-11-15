@@ -88,9 +88,14 @@ class Observable:
 def _refang(text: str) -> str:
     """Undo the usual IoC defanging so a report value matches a rule literal."""
     text = re.sub(r"hxxp", "http", text, flags=re.IGNORECASE)   # hxxps → https too
+    # h[tt]ps and [://] are the spellings stage 2 also refangs (_DEFANG_PATTERN in
+    # pipeline/stage2_extraction.py).  Copied, not imported: that module is the whole
+    # extraction stack, and this one is stdlib-only (#901).
+    text = re.sub(r"h\[tt\]ps", "https", text, flags=re.IGNORECASE)
     text = _DOT_RE.sub(".", text)
-    text = text.replace("[:]", ":").replace("[//]", "//")
-    return _AT_RE.sub("@", text).strip()
+    text = text.replace("[:]", ":").replace("[//]", "//").replace("[://]", "://")
+    # The dot of a defanged domain after the `@` is left behind: "me@[.]evil[.]com" (#901).
+    return re.sub(r"@\.", "@", _AT_RE.sub("@", text)).strip()
 
 
 def _non_indicator_ip(value: str) -> bool:
@@ -293,7 +298,8 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
                     add("port", val, etype, display)
 
             elif etype == "cve":
-                val = raw_value.strip().lower()
+                # `CVE_2024_3400` is the same id, written as a title writes it (#902).
+                val = raw_value.strip().lower().replace("_", "-")
                 if _CVE_RE.match(val):
                     add("cve", val, etype, display)
 

@@ -7,9 +7,11 @@ decisions and the current rule corpora, with no per-job staleness.
 import io
 import json
 import re
+import unicodedata
 import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import Response
@@ -153,6 +155,14 @@ def _safe_slug(text: str, fallback: str) -> str:
     return slug or fallback
 
 
+def _ascii_slug(text: str, fallback: str) -> str:
+    """The ASCII form of `_safe_slug`, for the `filename=` of Content-Disposition: a header
+    is latin-1, so a Unicode report name cannot go there as it is (#922)."""
+    folded = unicodedata.normalize("NFKD", text or "").encode("ascii", "ignore").decode("ascii")
+    slug = re.sub(r"[^A-Za-z0-9_\-]+", "_", folded.strip()).strip("_")[:80]
+    return slug or fallback
+
+
 def _load_rules(conn, jobs_conn, job_id: str, body_ids: set[str] | None = None) -> list[dict]:
     """Technique-selected rules for a job, enriched with `format` and `severity`.
 
@@ -290,6 +300,7 @@ def _zip_export(
     README.
     """
     report_stem = _safe_slug(Path(report_name).stem, "report")
+    ascii_stem = _ascii_slug(Path(report_name).stem, "report")
 
     manifest: list[dict] = []
     used_paths: set[str] = set()
@@ -392,12 +403,15 @@ def _zip_export(
             f"{license_lines}\n"
         ))
 
+    # `filename=` is ASCII (the header is latin-1); `filename*` (RFC 5987) carries the
+    # report's own name, percent-encoded, for clients that read it (#922).
+    disposition = f'attachment; filename="{ascii_stem}_detection_rules.zip"'
+    if report_stem != ascii_stem:
+        disposition += f"; filename*=UTF-8''{quote(report_stem + '_detection_rules.zip', safe='')}"
     return Response(
         content=buf.getvalue(),
         media_type="application/zip",
-        headers={
-            "Content-Disposition": f'attachment; filename="{report_stem}_detection_rules.zip"'
-        },
+        headers={"Content-Disposition": disposition},
     )
 
 

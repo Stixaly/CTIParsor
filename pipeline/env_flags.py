@@ -9,6 +9,7 @@ bundle's provenance block.
 from __future__ import annotations
 
 import logging
+import math
 import os
 from collections.abc import Callable
 from typing import TypeVar
@@ -59,7 +60,11 @@ def _env_number(name: str, default: _N, parse: Callable[[str], _N], expected: st
     if raw is None or not raw.strip():
         return default
     try:
-        return parse(raw.strip())
+        value = parse(raw.strip())
+        # float() reads "nan" and "inf": a NaN rate would pass every clamp (#886).
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError(raw)
     except ValueError:
         logger.warning("%s=%r is not %s — using the default %r", name, raw, expected, default)
         return default
+    return value

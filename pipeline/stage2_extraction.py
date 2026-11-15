@@ -278,6 +278,11 @@ _EMAIL_PATTERN = _compile_pattern(
     r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b", re.ASCII
 )
 
+# The "user:pass@" of a URL, from its "://" to the last "@" before the authority
+# ends: that "@" is not an email's (#917).  "/", "?" and "#" end the authority, so
+# an address in a query ("?email=a@b.com") is still an email.
+_URL_USERINFO_PATTERN = _compile_pattern(r"://[^/?#" + _WS + r"]*@")
+
 # MAC addresses — colon or hyphen separated (00:1A:2B:3C:4D:5E / 00-1A-2B-3C-4D-5E)
 # Cisco dot notation (001A.2B3C.4D5E) included as a second alternative.
 _MAC_COLON_HYPHEN = _compile_pattern(
@@ -363,13 +368,13 @@ _SENTENCE_STOP = _compile_pattern(r"\.[" + _WS + r"]")
 # The blanks are `_WS`, which a no-break space from an HTML page is.
 # ---------------------------------------------------------------------------
 _DEFANG_PATTERN = _compile_pattern(
-    r"hxxps?(?:://|\[:]//|\[://\]|\[\.\]//)|h\[tt\]ps?(?:://|\[:]//)|"
-    r"https?\[s\]://|https?\[:]://|meow://|fxx?ps?://|"
+    r"hxxps?(?:://|\[:]//|\[://\]|\[\.\]//)|h\[tt\]ps?(?:://|\[:]//|\[://\])|"
+    r"https?\[s\]://|https?\[:]://|meow://|fxx?ps?(?:://|\[:]//)|"
     r"[" + _WS + r"]{1,16}\[\.\][" + _WS + r"]+|[" + _WS + r"]{1,16}\(\.\)[" + _WS + r"]+|"
-    r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|"
+    r"\[\.\]|\(\.\)|\{\.\}|\[dot\]|\(dot\)|\{dot\}|"
     r"\[:\]|\(:\)|"
     r"\[//\]|\[/\]|"
-    r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)",
+    r"\[@\]|\(@\)|\{@\}|\[at\]|\(at\)|\{at\}",
     re.IGNORECASE
 )
 
@@ -391,7 +396,7 @@ def _half_bracket_repl(m: re.Match) -> str:
     return m.group()
 
 # The spellings of "@" that a defanged dot can sit beside in an address.
-_AT_SPELLINGS = ("@", "[@]", "(@)", "{@}", "[at]", "(at)")
+_AT_SPELLINGS = ("@", "[@]", "(@)", "{@}", "[at]", "(at)", "{at}")
 
 
 def _beside_at(match: re.Match) -> bool:
@@ -670,7 +675,10 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
         results.append(RawEntity(value=url, entity_type=EntityType.URL))
 
     # Emails
+    userinfo_at = {m.end() - 1 for m in _URL_USERINFO_PATTERN.finditer(text)}
     for m in _EMAIL_PATTERN.finditer(text):
+        if text.index("@", m.start(), m.end()) in userinfo_at:
+            continue
         start = m.start()
         while start and text[start - 1] in "._%+-":    # "josé.perez@": the cut is before the dot
             start -= 1
@@ -747,13 +755,15 @@ def _url_host(url: str) -> str:
         rest = url.split("://", 1)[-1]
         netloc = rest.split("/", 1)[0].split("?", 1)[0].split("#", 1)[0]
     netloc = netloc.rsplit("@", 1)[-1].strip()   # strip userinfo
+    # A trailing dot names the same host ("evil.com." is "evil.com"): the domain
+    # matcher reports "evil.com", and it must count as the URL's own host (#916).
     if netloc.startswith("["):
         # Bracketed host: everything to the closing bracket IS the host. Splitting
         # on ":" first would cut a valid IPv6 literal at its own separator and
         # turn "[2001:db8::1]:8080" into "2001".
         end = netloc.find("]")
-        return netloc[1:end].lower() if end != -1 else netloc[1:].lower()
-    return netloc.lower().split(":")[0]          # host:port
+        return (netloc[1:end] if end != -1 else netloc[1:]).lower().rstrip(".")
+    return netloc.lower().split(":")[0].rstrip(".")          # host:port
 
 
 def _extract_mac_addresses(text: str) -> list[RawEntity]:

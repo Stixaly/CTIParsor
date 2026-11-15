@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from uuid import uuid4
 
+import pytest
+
 from pipeline import promotion as pm
 from pipeline.promotion import compute_candidates
 
@@ -193,3 +195,14 @@ def test_gazetteer_terms_are_the_index_surface_forms():
     terms = pm.gazetteer_terms()
     assert len(terms) > 1000
     assert all(t == t.lower() for t in terms)
+
+
+def test_a_manual_rule_needs_a_term_and_its_display_falls_back_to_it_issue_890(temp_db):
+    conn = temp_db.get_conn()
+    for blank in ("", "   "):
+        with pytest.raises(ValueError):
+            pm.add_manual(conn, blank, "malware", "deny", temp_db.now_iso())
+    assert pm.list_overrides(conn) == []
+
+    row = pm.add_manual(conn, "WellMess", "malware", "deny", temp_db.now_iso(), display="   ")
+    assert row["display"] == "WellMess"

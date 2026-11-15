@@ -688,3 +688,40 @@ def test_the_settings_are_read_when_used_so_a_bad_value_does_not_crash_a_request
     monkeypatch.setenv("OIDC_ROLE_MAP", "x=root")
     refused(client.get("/api/auth/oidc/login", follow_redirects=False), "config")
     assert isinstance(config.AuthConfigError("x"), RuntimeError)
+
+
+# ── Numbers that are not JSON numbers, and a JWKS of the wrong shape (#923) ──
+
+@pytest.mark.parametrize("keys", [123, True, 1.5])
+def test_a_jwks_whose_keys_are_not_a_list_is_refused_not_a_type_error(client, idp, monkeypatch, keys):
+    def broken_jwks(request: httpx.Request) -> httpx.Response:
+        if str(request.url) == ISSUER + "/protocol/certs":
+            return httpx.Response(200, json={"keys": keys})
+        return idp.handle(request)
+
+    monkeypatch.setattr(oidc, "_TRANSPORT", httpx.MockTransport(broken_jwks))
+    query = start(client)
+    idp.id_token = idp.sign(idp.claims(query["nonce"]))
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "idp")
+    assert users() == []
+
+
+@pytest.mark.parametrize("claim, value", [
+    ("exp", float("nan")), ("exp", float("inf")), ("iat", float("nan")), ("nbf", float("-inf")),
+])
+def test_a_nan_or_infinite_claim_is_refused(client, idp, claim, value):
+    refused(sign_in(client, idp, token_claims={claim: value}), "token")
+    assert users() == []
+
+
+@pytest.mark.parametrize("claim", ["exp", "iat", "nbf"])
+@pytest.mark.parametrize("literal", ["1e400", "-1e400"])
+def test_a_time_claim_written_too_large_for_a_float_is_refused(client, idp, claim, literal):
+    # json.dumps cannot write 1e400, so the payload text is built by hand: the literal reads as inf.
+    query = start(client)
+    body = json.dumps(idp.claims(query["nonce"], **{claim: 0})).replace(f'"{claim}": 0', f'"{claim}": {literal}')
+    idp.id_token = jws.serialize_compact({"alg": "RS256", "kid": idp.key.kid}, body.encode(), idp.key)
+    refused(client.get("/api/auth/oidc/callback", params={"code": "c", "state": query["state"]},
+                       follow_redirects=False), "token")
+    assert users() == []

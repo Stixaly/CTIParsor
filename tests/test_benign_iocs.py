@@ -25,6 +25,14 @@ T = EntityType
     (T.IPV6, "fe80::1", "non_routable_address"),
     (T.IPV4, "8.8.8.8", "public_dns_resolver"),
     (T.IPV4, "45.77.12.9", None),
+    # Multicast is not global on py3.14, though the module says so: not a host.
+    (T.IPV4, "224.0.0.1", "non_routable_address"),
+    (T.IPV4, "239.255.255.250", "non_routable_address"),
+    (T.IPV6, "ff02::1", "non_routable_address"),
+    # An IPv4-mapped address is the IPv4 address it wraps.
+    (T.IPV6, "::ffff:10.0.0.5", "non_routable_address"),
+    (T.IPV6, "::ffff:8.8.8.8", "public_dns_resolver"),
+    (T.IPV6, "2001:4860:4860::8888", "public_dns_resolver"),
     (T.DOMAIN, "www.google.com", "popular_domain:tranco10k"),
     (T.DOMAIN, "google.com", "popular_domain:tranco10k"),
     (T.DOMAIN, "evil.duckdns.org", None),          # a popular parent does not make it popular

@@ -22,6 +22,7 @@ import binascii
 import hashlib
 import hmac
 import json
+import math
 import re
 import secrets
 import time
@@ -127,8 +128,11 @@ def _key_set(settings: config.OidcSettings, *, refresh: bool = False) -> KeySet:
 
     def load() -> KeySet:
         document = _get_json(discovery(settings)["jwks_uri"], "jwks")
+        listed = document.get("keys")
+        if listed is not None and not isinstance(listed, list):
+            raise OidcError("idp", "jwks: the keys are not a list")
         keys = []
-        for item in document.get("keys") or []:
+        for item in listed or []:
             if not isinstance(item, dict) or item.get("use") == "enc":
                 continue
             try:
@@ -211,6 +215,18 @@ def _header_kid(token: str) -> str | None:
     return kid if isinstance(kid, str) else None
 
 
+def _refuse_constant(name: str) -> float:
+    """json.loads calls this for NaN, Infinity and -Infinity: they are not JSON, so the token is refused (#923)."""
+    raise ValueError(f"{name} is not a JSON number")
+
+
+def _is_number(value: object) -> bool:
+    """An int, or a finite float: a JSON `1e400` reads as inf, which would pass every time check."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return not isinstance(value, float) or math.isfinite(value)
+
+
 def _verify(settings: config.OidcSettings, token: str) -> dict:
     """The claims of an ID token whose signature, issuer, audience, authorized party and
     times hold.  (The nonce is the caller's.)  An unknown `kid` fetches the JWKS once more."""
@@ -220,7 +236,7 @@ def _verify(settings: config.OidcSettings, token: str) -> dict:
         keys = _key_set(settings, refresh=True)
     try:
         signed = jws.deserialize_compact(token, keys, algorithms=ALGORITHMS)
-        claims = json.loads(signed.payload)
+        claims = json.loads(signed.payload, parse_constant=_refuse_constant)
     except (JoseError, ValueError, TypeError, KeyError, binascii.Error) as exc:
         raise OidcError("token", f"id_token: not verified ({type(exc).__name__})") from None
     if not isinstance(claims, dict):
@@ -236,16 +252,14 @@ def _verify(settings: config.OidcSettings, token: str) -> dict:
         raise OidcError("token", "id_token: wrong authorized party")
     now = time.time()
     for name in ("exp", "iat"):
-        value = claims.get(name)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise OidcError("token", f"id_token: {name} is missing")
+        if not _is_number(claims.get(name)):
+            raise OidcError("token", f"id_token: {name} is missing or not a finite number")
     if now > claims["exp"] + LEEWAY_SECONDS:
         raise OidcError("token", "id_token: expired")
     if claims["iat"] > now + LEEWAY_SECONDS:
         raise OidcError("token", "id_token: issued in the future")
     nbf = claims.get("nbf")
-    if nbf is not None and (isinstance(nbf, bool) or not isinstance(nbf, (int, float))
-                            or nbf > now + LEEWAY_SECONDS):
+    if nbf is not None and (not _is_number(nbf) or nbf > now + LEEWAY_SECONDS):
         raise OidcError("token", "id_token: not yet valid")
     if not isinstance(claims.get("sub"), str) or not claims["sub"]:
         raise OidcError("token", "id_token: no subject")

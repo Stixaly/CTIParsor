@@ -214,10 +214,14 @@ def _exact_evidence(
 
 
 def _contains(obs_class: str, needle: str, text: str) -> bool:
-    """Substring test; a CVE id must match as a whole id (same rule as relevance)."""
+    """Substring test; a CVE id must match as a whole id (same rule as relevance).
+
+    Its separators may also be underscores, as a title writes `CVE_2024_3400` (#902).
+    """
     if obs_class != "cve":
         return needle in text
-    return re.search(r"(?<![a-z0-9-])" + re.escape(needle) + r"(?![0-9])", text) is not None
+    return re.search(r"(?<![a-z0-9-])" + re.escape(needle).replace(r"\-", "[-_]")
+                     + r"(?![0-9])", text) is not None
 
 
 def _title_evidence(

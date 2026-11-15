@@ -144,13 +144,20 @@ def _no_proxy_covers(host: str) -> bool:
             continue
         if entry == "*":
             return True
+        # "[::1]" and "[::1]:8080" name the address ::1; "host:8080" names the host.
+        # A bare IPv6 address has several colons, so one colon means a port.
+        if entry.startswith("["):
+            entry = entry[1:].split("]", 1)[0]
+        elif entry.count(":") == 1:
+            entry = entry.split(":", 1)[0]
         if addr is not None:
             try:
                 if addr in ipaddress.ip_network(entry, strict=False):
                     return True
             except ValueError:
                 pass
-        entry = entry.lstrip(".")
+        # "*.corp" and ".corp" both name the domain suffix "corp".
+        entry = entry.lstrip("*.")
         if host == entry or host.endswith("." + entry):
             return True
     return False

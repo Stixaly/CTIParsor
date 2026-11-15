@@ -28,6 +28,7 @@ const api = vi.hoisted(() => ({
   updateJobStatus: vi.fn(),
   fetchBaselineStatus: vi.fn(),
   inspectBaseline: vi.fn(),
+  fetchBundle: vi.fn(),
 }))
 
 vi.mock('../api/client', async importOriginal => ({
@@ -36,6 +37,7 @@ vi.mock('../api/client', async importOriginal => ({
   updateJobStatus: api.updateJobStatus,
   fetchBaselineStatus: api.fetchBaselineStatus,
   inspectBaseline: api.inspectBaseline,
+  fetchBundle: api.fetchBundle,
 }))
 
 function renderDashboard() {
@@ -187,5 +189,46 @@ describe('Dashboard — what a reader cannot do', () => {
   it('an analyst has it', async () => {
     renderAs('analyst')
     expect(await screen.findByRole('button', { name: /New report/ })).toBeInTheDocument()
+  })
+})
+
+describe('Dashboard — a drop that cannot be read (#876)', () => {
+  it('says the drop failed in the banner, and can be dismissed', async () => {
+    api.fetchJobs.mockResolvedValue([JOB])
+    renderDashboard()
+    await screen.findByText('apt29.pdf')
+    // A file whose bytes cannot be read: the sniff of splitDrop rejects.
+    const broken = new File(['{}'], 'broken.json', { type: 'application/json' })
+    Object.defineProperty(broken, 'slice', { value: () => { throw new Error('disk gone') } })
+
+    fireEvent.drop(screen.getByText('Dashboard', { selector: 'span' }), { dataTransfer: { files: [broken] } })
+
+    expect(await screen.findByText(/Could not read the dropped files/)).toHaveTextContent('disk gone')
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }))
+    expect(screen.queryByText(/Could not read the dropped files/)).not.toBeInTheDocument()
+  })
+})
+
+describe('Dashboard — the bundle download (#881)', () => {
+  it.each([
+    ['apt29.pdf', 'apt29_stix.json'],
+    ['', 'bundle_stix.json'],
+    ['.pdf', 'bundle_stix.json'],
+  ])('names the download of "%s" %s', async (filename, expected) => {
+    const COMPLETED: Job = { ...JOB, original_filename: filename, status: 'completed' }
+    api.fetchJobs.mockResolvedValue([COMPLETED])
+    api.fetchBundle.mockResolvedValue({ type: 'bundle', id: 'bundle--1', objects: [] })
+    URL.createObjectURL = vi.fn(() => 'blob:bundle')
+    URL.revokeObjectURL = vi.fn()
+    const names: string[] = []
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download)
+    })
+    renderDashboard()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Download bundle' }))
+
+    await waitFor(() => expect(names).toEqual([expected]))
+    click.mockRestore()
   })
 })

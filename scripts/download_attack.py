@@ -300,21 +300,24 @@ def main() -> None:
     # download never leaves a partially-written file that looks valid.
     tmp = _OUT.with_suffix('.tmp')
     tmp.write_bytes(data)
-    tmp.replace(_OUT)
 
-    # Validate it parsed correctly
+    # Validate the download before it replaces the bundle: a file that does not
+    # parse must never take the place of a good one (#893).
     try:
-        total, subs = _count_techniques(_OUT)
-        size_mb = len(data) / 1e6
-        print(f"✔ Downloaded {size_mb:.1f} MB")
-        print(f"  Techniques     : {total - subs}")
-        print(f"  Sub-techniques : {subs}")
-        print(f"  Total patterns : {total}")
-        print()
-        print(f"  Saved to: {_OUT}")
+        total, subs = _count_techniques(tmp)
     except Exception as e:
+        tmp.unlink(missing_ok=True)
         print(f"✖ File downloaded but validation failed: {e}")
         sys.exit(1)
+    tmp.replace(_OUT)
+
+    size_mb = len(data) / 1e6
+    print(f"✔ Downloaded {size_mb:.1f} MB")
+    print(f"  Techniques     : {total - subs}")
+    print(f"  Sub-techniques : {subs}")
+    print(f"  Total patterns : {total}")
+    print()
+    print(f"  Saved to: {_OUT}")
 
     # mitre/cti master is the latest ATT&CK release, which is not necessarily
     # the track the pipeline reads by default (ADR-0087).

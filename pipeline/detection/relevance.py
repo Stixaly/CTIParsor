@@ -340,8 +340,10 @@ def _text_matches(
             # A CVE id must match as a WHOLE id: cve-2024-1234 is not evidence
             # for a rule about cve-2024-12345, which a plain substring test
             # would claim.  A following digit extends the id; a preceding
-            # letter/digit/hyphen glues it to another token.
-            pat = re.compile(r"(?<![a-z0-9-])" + re.escape(obs.value) + r"(?![0-9])")
+            # letter/digit/hyphen glues it to another token.  Its separators may
+            # also be underscores, as a title writes it (#902).
+            pat = re.compile(r"(?<![a-z0-9-])" + re.escape(obs.value).replace(r"\-", "[-_]")
+                             + r"(?![0-9])")
             matched = [rid for rid, text in texts.items() if pat.search(text)]
         else:
             matched = [rid for rid, text in texts.items() if obs.value in text]
@@ -369,13 +371,16 @@ def _text_rule_ids(conn: DBConnection, observables: list[Observable]) -> set[str
     out: set[str] = set()
     for i in range(0, len(needles), 100):
         batch = needles[i:i + 100]
+        # A CVE id is also written with underscores in a title (#902): search both spellings.
+        terms = [o.value for o in batch]
+        terms += [o.value.replace("-", "_") for o in batch if o.obs_class == "cve"]
         clauses = " OR ".join(
             "(lower(title) LIKE ? ESCAPE '\\' OR lower(description) LIKE ? ESCAPE '\\')"
-            for _ in batch
+            for _ in terms
         )
         params: list[str] = []
-        for o in batch:
-            esc = o.value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        for term in terms:
+            esc = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params += [f"%{esc}%", f"%{esc}%"]
         rows = conn.execute(
             f"SELECT id FROM detection_rules WHERE is_canonical=1 AND ({clauses})",

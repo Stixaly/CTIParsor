@@ -200,13 +200,15 @@ docker-build:
 # instead, so another local account cannot list or traverse it; the Docker
 # daemon bind-mounts the file itself, so the containers still read it. It stays
 # out of the image (.dockerignore) and out of git (.gitignore); the same host
-# access that could read this file could already read .env itself.
+# access that could read this file could already read .env itself. The value is
+# read as text, as setup.sh's env_value reads it: .env is never sourced, so a
+# space, a `#` or a `$` in the password is kept as written (#894).
 .secrets/db_password: $(CTI_ENV_FILE)
 	mkdir -p .secrets
 	chmod 700 .secrets
-	set -a; case "$(CTI_ENV_FILE)" in /*) . "$(CTI_ENV_FILE)" ;; *) . "./$(CTI_ENV_FILE)" ;; esac; set +a; \
-	: "$${CTI_DB_PASSWORD:?Set CTI_DB_PASSWORD in $(CTI_ENV_FILE) (e.g. openssl rand -hex 24, or just run: bash setup.sh)}"; \
-	printf '%s' "$$CTI_DB_PASSWORD" > .secrets/db_password
+	CTI_DB_PASSWORD_VALUE=$$(grep -E '^CTI_DB_PASSWORD=' "$(CTI_ENV_FILE)" | tail -1 | cut -d'=' -f2- | tr -d '\r'); \
+	: "$${CTI_DB_PASSWORD_VALUE:?Set CTI_DB_PASSWORD in $(CTI_ENV_FILE) (e.g. openssl rand -hex 24, or just run: bash setup.sh)}"; \
+	printf '%s' "$$CTI_DB_PASSWORD_VALUE" > .secrets/db_password
 	chmod 644 .secrets/db_password
 
 ## Start the full stack -- API, worker, and Postgres -- in the background

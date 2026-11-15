@@ -28,6 +28,7 @@ Readers that learn from decisions ask for `HUMAN_ORIGINS` (or only `human`).
 from __future__ import annotations
 
 import hashlib
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -85,6 +86,8 @@ def control_sample_rate() -> float:
     so they measure what auto-accept actually lets through.  0 disables.
     """
     rate = env_float("REVIEW_CONTROL_SAMPLE_RATE", default=0.10)
+    if not math.isfinite(rate):   # NaN passes min/max unchanged (#886)
+        return 0.10
     return min(max(rate, 0.0), 1.0)
 
 

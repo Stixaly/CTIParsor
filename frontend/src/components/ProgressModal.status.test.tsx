@@ -49,3 +49,17 @@ describe('ProgressModal — the outcome', () => {
       .toBe(3)
   })
 })
+
+describe('ProgressModal — a sub-stage id (#882)', () => {
+  it('keeps Ingestion ticked while the figures stage "1f" runs', () => {
+    sse.value = {
+      events: [{ stage: 1, chars: 10, chunks: 1 }, { stage: '1f' }],
+      done: false, lost: false, partialGraphEvents: [],
+    }
+    const { container } = render(<ProgressModal jobId="j" filename="a.txt" onClose={() => {}} />)
+    // Stage 1 is ticked; the running stage is not, and no stage is left as "NaN".
+    expect(container.querySelectorAll('.lucide-circle-check-big, .lucide-check-circle-2, .lucide-circle-check').length)
+      .toBe(1)
+    expect(container.innerHTML).not.toContain('NaN')
+  })
+})
