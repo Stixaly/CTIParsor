@@ -9,6 +9,16 @@ theme.
 
 ## [Unreleased]
 
+- **The 1.0 candidate `ee7847f` is qualified: every blocking gate passes.** The evidence, run on the
+  candidate's image by digest between 2026-11-14 and 2026-11-15, is in
+  `docs/releases/1.0-qualification.md`: the release dossier, a clean install of 0.8.0 upgraded and
+  restored, the OpenCTI check, the failure recipe, the model journey, the qualified vLLM
+  configuration measured with figures on (two runs, spread 0), figure reading with the default
+  provider, and real use on five reports. `docs/releases/1.0-readiness.md` is filled, with every
+  gate `pass`; the maintainer's approval and the decision stay `pending`. The qualified column of
+  the capabilities table in `docs/support-policy.md` now cites that evidence; the `anthropic`
+  provider stays not qualified, and several analysts working at once are still not qualified.
+
 - **The OpenCTI check no longer takes two ATT&CK techniques of one name for a duplicate.**
   `scripts/opencti_expectations.py` matched objects by name, value or alias, so two distinct
   techniques sharing a name failed "no second object of the same type and name, value or alias":
