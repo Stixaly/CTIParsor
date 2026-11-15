@@ -247,3 +247,21 @@ describe('confPct', () => {
     expect(confPct(150)).toBe(100)
   })
 })
+
+describe('buildRanges — offsets past a character whose lowercase is longer (#883)', () => {
+  it('locates an entity after "İ" at its real offset in the text', () => {
+    // 'İ'.toLowerCase() is two code units: the offsets of the lower-cased text
+    // drift by one for everything after it.
+    const text = 'İ APT29 ran.'
+    const ranges = buildRanges(text, [ent('1', 'APT29', 'threat_actor')])
+    expect(ranges).toHaveLength(1)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe('APT29')
+  })
+
+  it('locates an entity whose value holds "İ" at its real offset', () => {
+    const text = 'Actor: İstanbul-group ran.'
+    const ranges = buildRanges(text, [ent('1', 'İstanbul-group', 'intrusion_set')])
+    expect(ranges).toHaveLength(1)
+    expect(text.slice(ranges[0].start, ranges[0].end)).toBe('İstanbul-group')
+  })
+})

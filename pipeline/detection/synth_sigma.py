@@ -287,11 +287,33 @@ def _rule_uuid(job_id: str, kind: str) -> str:
     return str(uuid.uuid5(NAMESPACE_UUID, f"{job_id}:{kind}"))
 
 
+#: Line breaks that YAML reads as breaks (U+0085, U+2028, U+2029) as well as CR and
+#: LF: each becomes a space, since a break in the middle of a rule's text splits its lines.
+_YAML_LINE_BREAKS = str.maketrans({"\r": " ", "\n": " ", "\x85": " ", "\u2028": " ", "\u2029": " "})
+
+
+def _yaml_printable(ch: str) -> bool:
+    """Is this character one a YAML 1.2 document may contain (tab included)?"""
+    code = ord(ch)
+    return (ch == "\t" or 0x20 <= code <= 0x7E or 0xA0 <= code <= 0xD7FF
+            or 0xE000 <= code <= 0xFFFD or 0x10000 <= code <= 0x10FFFF)
+
+
+def _yaml_text(value: str) -> str:
+    """A free-text value as one YAML-safe line (#899).
+
+    A document holding a form feed or a NUL does not load at all, and a line break
+    inside a `description: |` block ends it early.  Line breaks become spaces; the
+    characters YAML refuses are dropped.
+    """
+    return "".join(ch for ch in value.translate(_YAML_LINE_BREAKS) if _yaml_printable(ch))
+
+
 def _yaml_scalar(value: str) -> str:
     """Serialize a string as a single-quoted YAML scalar."""
     # A line break in a single-quoted scalar is folded by YAML into a space
     # anyway; writing it would only split the rule's lines (#335).
-    escaped = value.replace("\r", " ").replace("\n", " ").replace("'", "''")
+    escaped = _yaml_text(value).replace("'", "''")
     return f"'{escaped}'"
 
 
@@ -319,8 +341,8 @@ def _render_yaml(
     lines.append("description: |")
     for line in description_lines:
         # A literal block keeps ':' and '#' safe, but an embedded newline would
-        # break the indentation and end the block early.
-        lines.append(f"    {line.replace(chr(10), ' ').replace(chr(13), ' ')}")
+        # break the indentation and end the block early (#899: or any other break).
+        lines.append(f"    {_yaml_text(line)}")
     if references:
         lines.append("references:")
         for ref in references:

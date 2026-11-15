@@ -136,7 +136,11 @@ def benign_reason(entity_type: EntityType, value: str) -> str | None:
             address = ipaddress.ip_address(v)
         except ValueError:
             return None
-        if not address.is_global:
+        # ::ffff:8.8.8.8 is the IPv4 address it wraps, and private as an IPv6 one.
+        if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+            address = address.ipv4_mapped
+        # Multicast (224.0.0.1, ff02::1) is not a host, though is_global calls it one.
+        if address.is_multicast or not address.is_global:
             return "non_routable_address"
         return "public_dns_resolver" if str(address) in _PUBLIC_RESOLVERS else None
     if entity_type == EntityType.DOMAIN:

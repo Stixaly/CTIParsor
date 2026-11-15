@@ -34,20 +34,22 @@ export default function RelationshipOverlay({ rels, entities, show, focusedRelId
       // never matches the relationship's source_value/target_value (#629).
       const idToValue = new Map(entities.map(e => [e.id, e.value]))
       const marks = document.querySelectorAll<HTMLElement>('.doc mark[data-eid]')
-      const valueRect: Record<string, DOMRect> = {}
+      // A Map, not an object: a value such as "constructor" or "__proto__" would
+      // find Object.prototype's property instead of a mark.
+      const valueRect = new Map<string, DOMRect>()
       marks.forEach(m => {
         const eid = m.dataset.eid ?? ''
         const val = idToValue.get(eid) ?? m.textContent ?? ''
         const key = val.toLowerCase()
-        if (!valueRect[key]) valueRect[key] = m.getBoundingClientRect()
+        if (!valueRect.has(key)) valueRect.set(key, m.getBoundingClientRect())
       })
 
       const relevant = rels.filter(r => r.accepted !== false)
       const newPaths: PathInfo[] = []
 
       for (const r of relevant) {
-        const srcRect = valueRect[r.source_value.toLowerCase()]
-        const tgtRect = valueRect[r.target_value.toLowerCase()]
+        const srcRect = valueRect.get(r.source_value.toLowerCase())
+        const tgtRect = valueRect.get(r.target_value.toLowerCase())
         if (!srcRect || !tgtRect) continue
 
         const x1 = srcRect.left + srcRect.width / 2 - docRect.left

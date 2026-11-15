@@ -25,14 +25,14 @@ import { useAttackIndex } from '../hooks/useAttackIndex'
 import { useCoverage } from '../hooks/useCoverage'
 import { useRuleSelection } from '../hooks/useRuleSelection'
 import type { SelectableRule } from '../hooks/useRuleSelection'
-import type { ProposalMatch } from '../types'
+import type { ProposalMatch, RuleLookupEntry } from '../types'
 import { DETECTION_FORMATS } from '../types'
 import DrillInStrip from '../components/coverage/DrillInStrip'
 import FormatBoard from '../components/coverage/FormatBoard'
 import TriCheckbox from '../components/coverage/TriCheckbox'
 import CoverageExportPanel from '../components/coverage/CoverageExportPanel'
 import { usePromotedRules } from '../hooks/usePromotedRules'
-import EvidenceGateBanner from '../components/coverage/EvidenceGateBanner'
+import EvidenceGateBanner, { EvidenceGateError } from '../components/coverage/EvidenceGateBanner'
 import type { TechEntry } from '../components/coverage/model'
 import { TACTIC_LABEL, TACTIC_ORDER, techniqueColumns } from '../components/coverage/tactics'
 import type { TechMeta } from '../components/coverage/tactics'
@@ -41,6 +41,9 @@ import type { TechMeta } from '../components/coverage/tactics'
  *  carry none of the report's techniques — that is why the coverage set missed
  *  them — so they need a bucket of their own rather than a real technique id. */
 const PROMOTED_GROUP = '(promoted)'
+
+/** The server answers 413 to a /rules/lookup of more ids than this (#878). */
+const LOOKUP_BATCH = 500
 
 export default function Coverage() {
   const { jobId } = useParams<{ jobId: string }>()
@@ -63,7 +66,10 @@ export default function Coverage() {
     return m
   }, [attack])
 
-  const { data: reportRules, isLoading: rulesLoading } = useQuery({
+  // A failed load says so, with a Retry, and draws no figure (#877).
+  const {
+    data: reportRules, isError: rulesFailed, error: rulesError, refetch: refetchRules,
+  } = useQuery({
     queryKey: ['coverage-report-rules', jobId],
     queryFn: () => fetchCoverageReportRules(jobId!),
     enabled: !!jobId,
@@ -111,10 +117,19 @@ export default function Coverage() {
     () => [...promoted.promoted].filter(id => !rulesById.has(id)),
     [promoted.promoted, rulesById],
   )
+  // Batched: one lookup answers at most LOOKUP_BATCH ids (#878). Not before the
+  // report's rules are in: until then every promoted id counts as outside the set.
   const { data: promotedMeta, isSuccess: promotedLoaded, isError: promotedFailed } = useQuery({
     queryKey: ['promoted-rules', jobId, promotedIds.join(',')],
-    queryFn: () => lookupRules(promotedIds),
-    enabled: promotedIds.length > 0,
+    queryFn: async () => {
+      const rules: RuleLookupEntry[] = []
+      for (let i = 0; i < promotedIds.length; i += LOOKUP_BATCH) {
+        const part = await lookupRules(promotedIds.slice(i, i + LOOKUP_BATCH))
+        rules.push(...part.rules)
+      }
+      return { rules }
+    },
+    enabled: !!reportRules && promotedIds.length > 0,
   })
 
   // One selection set over coverage rules AND promoted ones, so the export and
@@ -253,13 +268,17 @@ export default function Coverage() {
       </div>
 
       <div style={{ marginBottom: 14 }}>
-        <EvidenceGateBanner
-          ruleTotal={gate.ruleTotal}
-          tagTotal={gate.tagTotal}
-          untaggedCount={gate.untagged}
-          corroboratedCount={gate.corroborated}
-          brandCount={gate.brand}
-        />
+        {reportRules ? (
+          <EvidenceGateBanner
+            ruleTotal={gate.ruleTotal}
+            tagTotal={gate.tagTotal}
+            untaggedCount={gate.untagged}
+            corroboratedCount={gate.corroborated}
+            brandCount={gate.brand}
+          />
+        ) : rulesFailed && (
+          <EvidenceGateError error={rulesError} onRetry={() => refetchRules()} />
+        )}
       </div>
 
       {techs.length > 0 && (
@@ -381,8 +400,9 @@ export default function Coverage() {
         </div>
       )}
 
-      {rulesLoading
-        ? <p style={{ color: 'var(--ink-3)' }}>Loading rules…</p>
+      {/* Neither the drill-in nor the export is drawn without the report's rules (#877). */}
+      {!reportRules
+        ? (rulesFailed ? null : <p style={{ color: 'var(--ink-3)' }}>Loading rules…</p>)
         : (
           <>
             <DrillInStrip

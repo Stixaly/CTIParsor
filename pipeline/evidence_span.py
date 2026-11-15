@@ -113,8 +113,11 @@ Normalise for comparison, keeping a map back to original offsets.
             # included: mapped one by one, "of  plain" became "of  plain"
             # and a quote written "of plain" was not found, in the worker (whose
             # technique then lost a grade) as in the evaluation.
-            normalised_chars.append(" ")
-            index_map.append(i)
+            # No second one after a space already emitted: a Markdown link
+            # left out between two blanks ("foo [](url) bar") is no gap (#909).
+            if not normalised_chars or normalised_chars[-1] != " ":
+                normalised_chars.append(" ")
+                index_map.append(i)
             while i < n and _is_blank(text[i]) and i not in skip:
                 i += 1
         elif char in _CHAR_MAP:

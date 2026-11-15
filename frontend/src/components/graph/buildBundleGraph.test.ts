@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { buildBundleGraph, stixLabel } from './buildBundleGraph'
 import { buildGraphData } from './buildGraphData'
+import { typeLabel } from '../review/tokens'
 import type {
   BundleLedger, Entity, LedgerEntity, LedgerRelationship, Relationship, StixBundle,
   StixObject,
@@ -410,6 +411,28 @@ describe('buildBundleGraph — rows imported from the analyst’s bundle (ADR-00
       ['object', 'IPv4 01234567'],
       ['relationship', 'relationship ffeeddcc'],
     ])
+  })
+
+  it('titles a removed object of a baseline match from the ledger entity that replaced it (#880)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const merged: BundleLedger = {
+      ...ledger,
+      entities: [...ledger.entities,
+        lent('Lazarus', 'malware', { stix_id: 'malware--baseline', reason: 'baseline_match' })],
+      removed: [{ stix_id: 'malware--ctip', kind: 'object', reason: 'baseline_match', replaced_by: 'malware--baseline' }],
+    }
+    const g = buildBundleGraph(bundle, merged, entities, relations)
+    expect(g.diff.filter(d => d.kind === 'removed').map(d => d.title)).toEqual(['Lazarus'])
+  })
+
+  it('titles a removed object with no name and no row by its type and id, not its raw id (#880)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const removedLedger: BundleLedger = { ...ledger, removed: [
+      { stix_id: 'malware--0123456789abcdef', kind: 'object', reason: 'rule_does_not_compile' },
+    ] }
+    const g = buildBundleGraph(bundle, removedLedger, entities, relations)
+    expect(g.diff.filter(d => d.kind === 'removed').map(d => d.title))
+      .toEqual([`${typeLabel('malware')} 01234567`])
   })
 })
 

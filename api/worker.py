@@ -543,7 +543,10 @@ def _apply_auto_accept(job_id: str) -> None:
     try:
         with _lock:
             with get_conn() as conn:
-                counts = apply_auto_accept(conn, job_id, now_iso())
+                # One transaction: the control sample is marked before record()
+                # runs, and autocommit would keep those marks if record() failed (#887).
+                with transaction(conn):
+                    counts = apply_auto_accept(conn, job_id, now_iso())
         logger.info(
             f"[Worker] auto-accept: {counts['accepted']} entities accepted, "
             f"{counts['control_sample']} left pending as control sample"

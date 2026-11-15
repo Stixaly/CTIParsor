@@ -6,12 +6,13 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Loader2, AlertTriangle, RotateCw } from 'lucide-react'
-import { fetchJobs, updateJobStatus, deleteJob, fetchBundle, errorDetail, BundleRefusedError } from '../api/client'
+import { fetchJobs, updateJobStatus, deleteJob, errorDetail, BundleRefusedError } from '../api/client'
 import type { Job, JobStatus } from '../types'
 import { JOB_STATUS_LABEL } from '../components/jobStatus'
 import ProgressModal from '../components/ProgressModal'
 import NewReportModal from '../components/NewReportModal'
 import { useCanWrite } from '../context/AuthContext'
+import { downloadBundle } from '../stix/downloadBundle'
 import { splitDrop } from '../components/dropFiles'
 import type { IgnoredFile } from '../components/dropFiles'
 import KanbanCard from '../components/dashboard/KanbanCard'
@@ -138,6 +139,8 @@ export default function Dashboard() {
   // The report being moved to Reviewing before it opens, and the last failure.
   const [openingId, setOpeningId]           = useState<string | null>(null)
   const [openError, setOpenError]           = useState<{ job: Job; message: string } | null>(null)
+  // A dropped file that could not be read (#876).
+  const [dropError, setDropError]           = useState<string | null>(null)
   // Where the progress dialog sends the focus back when what opened it is gone.
   const newReportRef = useRef<HTMLButtonElement>(null)
 
@@ -219,7 +222,7 @@ export default function Dashboard() {
     const files = Array.from(e.dataTransfer.files ?? [])
     splitDrop(files).then(({ report, bundle, ignored }) => {
       if (report || bundle || ignored.length > 0) openModal(report, bundle, ignored)
-    })
+    }).catch(err => setDropError(errorDetail(err)))
   }
 
   // A report "for review" is moved to Reviewing before it opens.  That update
@@ -246,20 +249,10 @@ export default function Dashboard() {
     navigate(`/review/${job.id}`)
   }
 
+  // The same download as the Review and Graph pages: the file is named <report>_stix.json (#881).
   const handleDownload = async (job: Job) => {
     try {
-      const bundle = await fetchBundle(job.id)
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `${job.original_filename.replace(/\.[^.]+$/, '')}_bundle.json`
-      document.body.appendChild(a)
-      a.click()
-      document.body.removeChild(a)
-      // Defer revocation so the browser has time to start the download before
-      // the blob URL is invalidated (revoking synchronously breaks Firefox).
-      setTimeout(() => URL.revokeObjectURL(url), 100)
+      await downloadBundle(job.id, job.original_filename)
     } catch (err) {
       alert(err instanceof BundleRefusedError ? err.summary() : 'Bundle not yet available')
     }
@@ -471,11 +464,24 @@ export default function Dashboard() {
                     setActiveJobId(job.id)
                     setActiveFilename(job.original_filename)
                   }}
-                  onDelete={() => deleteMutation.mutate(job.id)}
+                  onDelete={canImport ? () => deleteMutation.mutate(job.id) : undefined}
                 />
               ))}
             </div>
           </div>
+        )}
+
+        {dropError && (
+          <Notice
+            tone="var(--no)"
+            actions={
+              <button className="btn-ghost" style={noticeBtn} onClick={() => setDropError(null)}>
+                Dismiss
+              </button>
+            }
+          >
+            Could not read the dropped files ({dropError}).
+          </Notice>
         )}
 
         {openError && (

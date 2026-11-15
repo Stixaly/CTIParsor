@@ -501,8 +501,24 @@ function _wholeToken(text: string, cand: string, idx: number, end: number): bool
   return true
 }
 
+/**
+ * Lower-case `s` without changing its length, so an index into the result is an
+ * index into `s`.  A character whose lower case is longer ('İ' becomes two code
+ * units) keeps its own form.
+ */
+function _lowerSameLength(s: string): string {
+  const low = s.toLowerCase()
+  if (low.length === s.length) return low
+  let out = ''
+  for (const ch of s) {
+    const c = ch.toLowerCase()
+    out += c.length === ch.length ? c : ch
+  }
+  return out
+}
+
 export function buildRanges(text: string, entities: Array<{ id: string; value: string; entity_type: string; accepted: boolean | null }>): Range[] {
-  const lower = text.toLowerCase()
+  const lower = _lowerSameLength(text)
   const used = new Uint8Array(text.length)
   const ranges: Range[] = []
   const sorted = [...entities]
@@ -510,7 +526,7 @@ export function buildRanges(text: string, entities: Array<{ id: string; value: s
     .sort((a, b) => b.value.length - a.value.length)
 
   for (const e of sorted) {
-    const v = e.value.toLowerCase()
+    const v = _lowerSameLength(e.value)
 
     // Hashes wrap across lines in PDF/table cells, so the contiguous stored
     // value won't be found by indexOf.  Match the characters with optional

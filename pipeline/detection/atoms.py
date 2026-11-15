@@ -366,6 +366,8 @@ def _normalize(cls: str, raw: object) -> list[str]:
     if cls == "domain":
         s = s[2:] if s.startswith("*.") else s.removeprefix(".")
         s = s.removesuffix(".")
+        # `www.` is the same host as the bare domain (#900, as in observables.py).
+        s = s.removeprefix("www.")
         return [s] if len(s) >= 4 else []
 
     if cls == "registry":

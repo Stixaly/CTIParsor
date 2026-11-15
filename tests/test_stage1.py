@@ -49,6 +49,17 @@ def test_chunk_text_fallback_monolithic():
         assert len(chunk) <= 500
 
 
+def test_chunk_text_never_exceeds_max_chars_with_separators_issue_912():
+    # The separator between two paragraphs is part of the chunk: the capacity
+    # test left it out, so three 99-char paragraphs made a 301-char chunk.
+    units = [f"{i:02d}" + "x" * 97 for i in range(10)]
+    text = "\n\n".join(units)
+    chunks = chunk_text(text, max_chars=300, overlap=0)
+    assert len(chunks) > 1
+    assert all(len(chunk) <= 300 for chunk in chunks)
+    assert "\n\n".join(chunks) == text
+
+
 def test_chunk_text_overlap_prepends_tail():
     # Overlap must prepend the tail of chunk[i] to chunk[i+1]
     long_text = "word " * 1000   # 5000 chars, no newlines

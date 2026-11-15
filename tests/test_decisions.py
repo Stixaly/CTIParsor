@@ -407,3 +407,25 @@ def test_the_llms_names_wait_for_an_analyst(temp_db):
     shipped = {r["value"] for r in conn.execute(
         f"SELECT value FROM entities WHERE job_id=? AND {decisions.SHIPS}", (job,))}
     assert {"BlackLoader", "APT29", "Rclone", "Operation Example", "WellMess"} <= shipped
+
+
+def test_a_non_finite_control_sample_rate_is_the_default_issue_886(monkeypatch):
+    for raw in ("nan", "inf"):
+        monkeypatch.setenv("REVIEW_CONTROL_SAMPLE_RATE", raw)
+        assert decisions.control_sample_rate() == 0.10
+
+
+def test_a_failed_record_rolls_back_the_control_marks_issue_887(temp_db, monkeypatch):
+    # The control sample is marked before record() runs: when record() fails,
+    # the marks go too, so no row stays flagged as a sample it never was (#887).
+    from api import worker
+    monkeypatch.setenv("REVIEW_CONTROL_SAMPLE_RATE", "1.0")
+    job = _job(temp_db, "job-887")
+    eid = _entity(temp_db, job, value="m1", conf=0.95, source="cyner")
+
+    def boom(*a, **k):
+        raise RuntimeError("journal down")
+
+    monkeypatch.setattr(decisions, "record", boom)
+    worker._apply_auto_accept(job)   # logs, does not raise
+    assert _row(temp_db, eid)["control_sample"] == 0

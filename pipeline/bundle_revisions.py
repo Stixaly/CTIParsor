@@ -242,6 +242,13 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "The title of a network rule embedded in a report is read up to the rule's own closing "
      "parenthesis: options written in a trailing comment no longer set it (#797 follow-up)",
      "mapping"),
+    ("684d36d", "2026-11-15",
+     "Extraction: chunks keep to max_chars with their separator; a figure cut by the page edge is "
+     "judged on what is visible; h[tt]ps[://], fxp[:]//, {dot} and {at} are refanged; a URL's final "
+     "dot and user-info no longer make a domain or an email; multicast and IPv4-mapped addresses; "
+     "an empty Stage 3f selection followed by an answer; the Stage 4c prompt bound; evidence-span "
+     "spacing; Sigma tags, domain atoms and CVE underscores (ADR-0103; #898-#906, #909-#921)",
+     "extraction"),
 )
 
 

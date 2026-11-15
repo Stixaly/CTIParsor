@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, fireEvent } from '@testing-library/react'
 import DocumentReader from './DocumentReader'
 import type { Entity } from '../../types'
 
@@ -232,5 +232,108 @@ describe('DocumentReader — wrapped hash highlighting', () => {
     const marks = [...container.querySelectorAll('mark')]
     expect(marks.map(m => m.textContent)).toEqual([a, b])
     expect(marks.map(m => m.getAttribute('data-eid'))).toEqual(['a', 'b'])
+  })
+})
+
+describe('DocumentReader — a selection proposes whole, outermost mentions (#884)', () => {
+  // jsdom has no selection: fake the one the reader reads on mouse up.
+  const select = (selected: string) => {
+    vi.spyOn(window, 'getSelection').mockReturnValue({
+      toString: () => selected,
+      rangeCount: 1,
+      getRangeAt: () => ({ getBoundingClientRect: () => ({ left: 0, width: 0, bottom: 0 }) }),
+      removeAllRanges: () => {},
+    } as unknown as Selection)
+  }
+  const tool = (id: string, value: string): Entity => ({
+    id, value, entity_type: 'tool', context: '', confidence: 1,
+    mitre_id: null, accepted: null, source: 'test',
+  } as Entity)
+
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('does not propose a name nested in a longer one it sits in', () => {
+    const onCreate = vi.fn()
+    const onSelectionRelate = vi.fn()
+    const text = 'The loader cmd.exe ran.'
+    select('cmd.exe')
+    const { container } = render(<DocumentReader
+      text={text}
+      entities={[tool('e1', 'cmd.exe'), tool('e2', 'cmd')]}
+      highlightStyle="underline"
+      focusedId={null}
+      setFocusedId={noop}
+      setHoverEntity={noop}
+      onAccept={noop}
+      onReject={noop}
+      onReset={noop}
+      onChangeType={noop}
+      onCreate={onCreate}
+      onMarkShiftClick={noop}
+      onMarkDragStart={noop}
+      onSelectionRelate={onSelectionRelate}
+      relEvidence={[]}
+      relsForOverlay={[]}
+      showRelArrows={false}
+    />)
+    fireEvent.mouseUp(container.querySelector('article.doc')!)
+    expect(onSelectionRelate).not.toHaveBeenCalled()
+    expect(onCreate).toHaveBeenCalledWith('cmd.exe', expect.any(Number), expect.any(Number))
+  })
+
+  it('relates the outermost mentions of a selection, not the nested one', () => {
+    const onSelectionRelate = vi.fn()
+    const text = 'cmd.exe and APT29 ran.'
+    select('cmd.exe and APT29')
+    const { container } = render(<DocumentReader
+      text={text}
+      entities={[tool('e2', 'cmd'), tool('e1', 'cmd.exe'), tool('e3', 'APT29')]}
+      highlightStyle="underline"
+      focusedId={null}
+      setFocusedId={noop}
+      setHoverEntity={noop}
+      onAccept={noop}
+      onReject={noop}
+      onReset={noop}
+      onChangeType={noop}
+      onCreate={noop}
+      onMarkShiftClick={noop}
+      onMarkDragStart={noop}
+      onSelectionRelate={onSelectionRelate}
+      relEvidence={[]}
+      relsForOverlay={[]}
+      showRelArrows={false}
+    />)
+    fireEvent.mouseUp(container.querySelector('article.doc')!)
+    expect(onSelectionRelate).toHaveBeenCalledWith(
+      expect.objectContaining({ srcId: 'e1', tgtId: 'e3' }))
+  })
+
+  it('does not propose a name found inside a word of the selection', () => {
+    const onCreate = vi.fn()
+    const onSelectionRelate = vi.fn()
+    select('APT29 and Windows')
+    const { container } = render(<DocumentReader
+      text="APT29 and Windows ran."
+      entities={[tool('e3', 'APT29'), tool('e4', 'Win')]}
+      highlightStyle="underline"
+      focusedId={null}
+      setFocusedId={noop}
+      setHoverEntity={noop}
+      onAccept={noop}
+      onReject={noop}
+      onReset={noop}
+      onChangeType={noop}
+      onCreate={onCreate}
+      onMarkShiftClick={noop}
+      onMarkDragStart={noop}
+      onSelectionRelate={onSelectionRelate}
+      relEvidence={[]}
+      relsForOverlay={[]}
+      showRelArrows={false}
+    />)
+    fireEvent.mouseUp(container.querySelector('article.doc')!)
+    expect(onSelectionRelate).not.toHaveBeenCalled()
+    expect(onCreate).toHaveBeenCalledWith('APT29 and Windows', expect.any(Number), expect.any(Number))
   })
 })

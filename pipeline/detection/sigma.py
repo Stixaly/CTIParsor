@@ -286,7 +286,13 @@ class SigmaAdapter(RuleCorpusAdapter):
         return result
 
     @staticmethod
-    def _split_tags(tags: list) -> tuple[list[str], list[str]]:
+    def _split_tags(tags: object) -> tuple[list[str], list[str]]:
+        # A single string is one tag, not a sequence of characters (#904).
+        if isinstance(tags, str):
+            tags = [tags]
+        # Any other shape (a number, a mapping) carries no tag, but the rule is kept.
+        if not isinstance(tags, list):
+            return [], []
         techniques: list[str] = []
         tactics: list[str] = []
         for tag in tags:

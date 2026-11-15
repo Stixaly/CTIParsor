@@ -355,9 +355,14 @@ export function buildBundleGraph(
   for (const r of ledger?.removed ?? []) {
     // 'baseline' removals (ADR-0090) are objects the analyst's bundle held.
     const isRel = r.kind === 'relationship' || (r.kind === 'baseline' && r.stix_id.startsWith('relationship--'))
+    // A CTIParsor object a baseline object absorbed keeps no name: its title is
+    // the ledger entity now pointing at that baseline object (as BaselinePanel).
+    const absorbed = r.reason === 'baseline_match' && r.replaced_by
+      ? ledger?.entities.find(e => e.reason === 'baseline_match' && e.stix_id === r.replaced_by)
+      : undefined
     diff.push({
       kind: 'removed', subject: isRel ? 'relationship' : 'object',
-      title: r.name ?? (r.kind === 'object' ? r.stix_id : removedTitle(r.stix_id)), reason: r.reason,
+      title: r.name ?? (r.kind === 'object' && absorbed ? absorbed.value : removedTitle(r.stix_id)), reason: r.reason,
       nodeId: r.kind === 'object' && inBundle(r.replaced_by ?? undefined) ? r.replaced_by ?? undefined : undefined,
       edgeId: r.kind === 'relationship' && r.replaced_by && edgeInfo.has(r.replaced_by) ? r.replaced_by : undefined,
       error: r.error,

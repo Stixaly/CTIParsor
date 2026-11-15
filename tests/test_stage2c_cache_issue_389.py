@@ -107,3 +107,24 @@ def test_thresholds_follow_the_model_loaded_issue_389(tmp_path, monkeypatch, fal
     assert s2c._thresholds() == s2c._MODEL_THRESHOLDS[PRIMARY]
     s2c._load_model()
     assert s2c._thresholds() == s2c._MODEL_THRESHOLDS[LEGACY]
+
+
+def _manifest_with_thresholds(tmp_path, monkeypatch, model: str) -> None:
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps({"model": model, "thresholds": {"high": 0.91, "medium": 0.81}}),
+                        encoding="utf-8")
+    monkeypatch.setattr(s2c, "_MANIFEST_PATH", manifest)
+
+
+def test_thresholds_of_a_manifest_built_for_another_model_do_not_apply(tmp_path, monkeypatch, clean):
+    """The manifest's thresholds were calibrated on LEGACY's cosine distribution:
+    with PRIMARY in use they must not replace PRIMARY's table entry."""
+    monkeypatch.setattr(s2c, "_TTP_EMBEDDING_MODEL", PRIMARY)
+    _manifest_with_thresholds(tmp_path, monkeypatch, model=LEGACY)
+    assert s2c._thresholds() == s2c._MODEL_THRESHOLDS[PRIMARY]
+
+
+def test_thresholds_of_a_manifest_built_for_the_model_in_use_apply(tmp_path, monkeypatch, clean):
+    monkeypatch.setattr(s2c, "_TTP_EMBEDDING_MODEL", PRIMARY)
+    _manifest_with_thresholds(tmp_path, monkeypatch, model=PRIMARY)
+    assert s2c._thresholds() == (0.91, 0.81)

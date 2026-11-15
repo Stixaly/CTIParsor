@@ -8,6 +8,7 @@ import { useEffect, useId, useMemo, useRef, type RefObject } from 'react'
 import GraphCanvas, { type GraphCanvasHandle } from './graph/GraphCanvas'
 import { buildGraphData } from './graph/buildGraphData'
 import type { Entity, PartialGraphEvent, Relationship } from '../types'
+import { stageOrder } from '../types'
 
 type PartialGraphNode = NonNullable<PartialGraphEvent['nodes']>[number]
 type PartialGraphLink = NonNullable<PartialGraphEvent['links']>[number]
@@ -120,10 +121,11 @@ export default function ProgressModal({ jobId, filename, onClose, returnFocusTo 
     return () => document.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const completedStages = new Set(events.filter(e => e.stage).map(e => e.stage!))
+  // A sub-stage id ("1f") is placed on the 1..5 scale, so Ingestion stays ticked (#882).
+  const completedStages = new Set(events.filter(e => e.stage).map(e => stageOrder(e.stage!)))
   const latest = events.filter(e => e.stage !== undefined).slice(-1)[0]
   const failed = events.some(e => e.status === 'failed')
-  const currentStageN = latest?.stage ?? 0
+  const currentStageN = stageOrder(latest?.stage ?? 0)
 
   // Latest event for a given stage (used for completed detail lines)
   const latestForStage = (n: number) =>

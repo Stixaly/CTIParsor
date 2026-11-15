@@ -307,22 +307,27 @@ def add_manual(conn, term: str, entity_type: str, action: str, now: str, *,
     """A hand-written rule, active at once.  An existing row of the same key is
     switched to active and marked manual rather than duplicated.
 
-    Raises ValueError for a 'promote' term that fails validate_promote_term --
-    a 'deny' rule carries no equivalent risk (it can only suppress a match,
-    never manufacture one), so the gate applies to 'promote' only.
+    Raises ValueError for an empty term, and for a 'promote' term that fails
+    validate_promote_term -- a 'deny' rule carries no equivalent risk (it can
+    only suppress a match, never manufacture one), so the gate applies to
+    'promote' only.
     """
+    if not term.strip():
+        raise ValueError("'term' must not be empty")
     if action == "promote":
         reason = validate_promote_term(term)
         if reason:
             raise ValueError(reason)
     key = normalise(term)
+    # A blank display would be stored as "": the term stands in for it (#890).
+    display = (display or "").strip() or term.strip()
     conn.execute(
         "INSERT INTO entity_overrides (id, term, entity_type, action, status, display, origin, note, "
         "created_at, updated_at) VALUES (?,?,?,?,'active',?,'manual',?,?,?) "
         "ON CONFLICT (term, entity_type, action) DO UPDATE SET status='active', origin='manual', "
         "display=COALESCE(excluded.display, entity_overrides.display), note=excluded.note, "
         "updated_at=excluded.updated_at",
-        (str(uuid4()), key, entity_type, action, (display or term).strip(), note, now, now),
+        (str(uuid4()), key, entity_type, action, display, note, now, now),
     )
     conn.commit()
     return _row(conn.execute(

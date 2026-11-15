@@ -396,7 +396,7 @@ def _short_corpus() -> Corpus | None:
         texts.append(f"{m['name']}. {desc}" if desc else m["name"])
     return Corpus([m["id"] for m in meta], [m["name"] for m in meta], ["short"] * len(meta),
                   [m.get("domain", "") for m in meta], texts, [[] for _ in meta], emb,
-                  s2c._TTP_EMBEDDING_MODEL, "short")
+                  s2c._active_model_name(), "short")
 
 
 @functools.lru_cache(maxsize=4)
@@ -618,14 +618,15 @@ def _exclusions(path: str) -> list[str]:
 def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retriever | None:
     from pipeline import stage2c_ttp_semantic as s2c
 
+    # The model first: a fallback changes which model the corpus is checked
+    # against (_active_model_name reads what _load_model loaded, #389).
+    model = s2c._load_model() if method != "bm25" else None
     c = load_corpus(corpus, exclude_cited=_exclusions(exclude_cited))
     if c is None:
         logger.warning("Retrieval corpus %r unavailable — build it: "
                        "python scripts/build_indexes.py --only retrieval", corpus)
         return None
-    model = None
     if method != "bm25":
-        model = s2c._load_model()
         if model is None or c.embeddings is None:
             logger.warning("Dense retrieval unavailable (encoder or embeddings missing)")
             return None
