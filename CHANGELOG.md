@@ -15,7 +15,7 @@ theme.
   restored, the OpenCTI check, the failure recipe, the model journey, the qualified vLLM
   configuration measured with figures on (two runs, spread 0), figure reading with the default
   provider, and real use on five reports. `docs/releases/1.0-readiness.md` is filled, with every
-  gate `pass`; the maintainer's approval and the decision stay `pending`. The qualified column of
+  gate `pass`; the maintainer approved it on 2026-11-15 (`decision: release`). The qualified column of
   the capabilities table in `docs/support-policy.md` now cites that evidence; the `anthropic`
   provider stays not qualified, and several analysts working at once are still not qualified.
 - **Bug triage of #875-#923 (ADR-0103).** 41 confirmed defects fixed, each with a regression test; six
