@@ -9,6 +9,18 @@ theme.
 
 ## [Unreleased]
 
+- **The OpenCTI check no longer takes two ATT&CK techniques of one name for a duplicate.**
+  `scripts/opencti_expectations.py` matched objects by name, value or alias, so two distinct
+  techniques sharing a name failed "no second object of the same type and name, value or alias":
+  seen on 2026-11-15 on a real bundle with "Spearphishing Attachment" (T1566.001, T1598.002) and
+  "Code Repositories" (T1213.003, T1593.003), which OpenCTI 7.260930.0 rightly kept apart. A
+  technique is now the same as another when their ATT&CK ids agree (the `mitre-attack` external
+  reference, `x_mitre_id`, or the id of OpenCTI's MITRE extension in its export); the name decides
+  only when neither carries one. Every other type is matched as before. The check still fails on
+  the same ATT&CK id twice, and on two techniques of one name without ids. Used by
+  `scripts/opencti_import_bundle.py` and `scripts/opencti_import_check.py`; a defect of the check
+  script, not of the 1.0.0 candidate.
+
 - **A client can no longer choose its own address behind the `proxy` profile.** nginx appended the
   peer's address to the `X-Forwarded-For` a client had sent, and with `FORWARDED_ALLOW_IPS=*` the app
   takes the first address listed: a client sending `X-Forwarded-For: 9.9.9.9` was seen as `9.9.9.9`,
