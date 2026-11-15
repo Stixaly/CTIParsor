@@ -361,6 +361,41 @@ def test_an_object_merged_into_another_by_alias_fails(tmp_path, install):
     assert merged[0]["detail"] == {MALWARE: sorted([MALWARE, other["id"]])}
 
 
+def techniques_sharing_a_name() -> list[dict]:
+    """Two ATT&CK techniques of one name (seen on 2026-11-15 in a real bundle), told apart by their ids."""
+    return [{"type": "attack-pattern", "id": f"attack-pattern--aaaaaaaa-aaaa-4aaa-8aaa-00000000000{i}",
+             "name": "Code Repositories", "created_by_ref": IDENT, "object_marking_refs": [MARKING],
+             "external_references": [{"source_name": "mitre-attack", "external_id": attack_id}]}
+            for i, attack_id in ((1, "T1213.003"), (2, "T1593.003"))]
+
+
+def test_two_techniques_of_one_name_with_different_attack_ids_pass(tmp_path, install):
+    bundle = write_bundle(tmp_path / "bundle.json", bundle_objects() + techniques_sharing_a_name())
+    token = tmp_path / "token.txt"
+    token.write_text(TOKEN, encoding="utf-8")
+    install(FakeOpenCTI())
+    out = tmp_path / "out"
+    assert script.main(argv(bundle, token, out)) == 0
+    assert status_of(report_of(out), "no second object of the same type and name") == ["pass", "pass"]
+
+
+def test_a_second_technique_with_the_same_attack_id_fails(tmp_path, install):
+    first, other = techniques_sharing_a_name()
+    bundle = write_bundle(tmp_path / "bundle.json", bundle_objects() + [first, other])
+    token = tmp_path / "token.txt"
+    token.write_text(TOKEN, encoding="utf-8")
+
+    def second_copy(item, stored, store):
+        if item["id"] == first["id"] and item["id"] in store:
+            return "attack-pattern--bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", stored   # T1213.003 kept twice
+        return item["id"], stored
+
+    install(FakeOpenCTI(keep=second_copy))
+    out = tmp_path / "out"
+    assert script.main(argv(bundle, token, out)) == 1
+    assert status_of(report_of(out), "no second object of the same type and name") == ["pass", "fail"]
+
+
 def test_a_missing_attachment_fails(files, install):
     tmp_path, bundle, token = files
     install(FakeOpenCTI(attach=False))

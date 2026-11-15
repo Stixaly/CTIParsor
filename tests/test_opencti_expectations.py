@@ -56,9 +56,8 @@ def bundle() -> dict:
 def raw(stix: dict, std: str | None = None, entity_type: str | None = None, files: tuple = ()) -> dict:
     """A node as the check reads it: OpenCTI's export of `stix`, under OpenCTI's standard id."""
     std = std or stix["id"]
-    exported = {**stix, "id": std,
-                "extensions": {OCTI: {"stix_ids": [stix["id"]] if std != stix["id"] else [],
-                                      "files": [dict(f) for f in files]}}}
+    octi = {"stix_ids": [stix["id"]] if std != stix["id"] else [], "files": [dict(f) for f in files]}
+    exported = {**stix, "id": std, "extensions": {**(stix.get("extensions") or {}), OCTI: octi}}
     return {"standard_id": std, "x_opencti_stix_ids": [stix["id"]] if std != stix["id"] else [],
             "entity_type": entity_type or stix["type"], "toStix": json.dumps(exported)}
 
@@ -181,6 +180,89 @@ def raw_of(n: dict) -> dict:
     """A node back to the raw form the Platform reads."""
     return {"standard_id": n["standard_id"], "x_opencti_stix_ids": sorted(n["ids"] - {n["standard_id"]}),
             "entity_type": n["entity_type"], "toStix": n["stix"]}
+
+
+SPEARPHISHING = "attack-pattern--0a1b0c1d-0000-4000-8000-000000000001"     # T1566.001
+SPEARPHISHING_INFO = "attack-pattern--0a1b0c1d-0000-4000-8000-000000000002"  # T1598.002
+
+
+def technique(stix_id: str, attack_id: str | None, name: str = "Spearphishing Attachment") -> dict:
+    """An ATT&CK technique as a bundle carries it; `attack_id` None: no ATT&CK reference."""
+    refs = [{"source_name": "mitre-attack", "external_id": attack_id,
+             "url": f"https://attack.mitre.org/techniques/{attack_id}"}] if attack_id else []
+    return {"type": "attack-pattern", "id": stix_id, "name": name, "external_references": refs}
+
+
+def with_techniques(*techniques: dict, exported: tuple[dict, ...] | None = None) -> tuple[dict, x.Platform]:
+    """bundle() with these techniques, and the platform after a faithful import of it.
+
+    `exported` replaces OpenCTI's export of the techniques (default: as the bundle carries them).
+    """
+    b = bundle()
+    b["objects"].extend(techniques)
+    platform = faithful(b)
+    platform = x.Platform([*(raw_of(n) for n in platform.objects),
+                           *(raw(t) for t in (techniques if exported is None else exported))],
+                          [raw_of(n) for n in platform.relationships], MARKINGS)
+    return b, platform
+
+
+def duplicate_check(b: dict, platform: x.Platform) -> dict:
+    return next(c for c in x.bundle_checks("3", "enriched", b, [b], platform) if "no second object" in c["check"])
+
+
+def test_attack_ids_read_the_bundles_references_and_opencti_s_mitre_extension():
+    assert x.attack_ids(technique(SPEARPHISHING, "t1566.001 ")) == {"T1566.001"}
+    assert x.attack_ids({"type": "attack-pattern", "x_mitre_id": "T1598.002"}) == {"T1598.002"}
+    assert x.attack_ids({"type": "attack-pattern", "external_references": [
+        {"source_name": "capec", "external_id": "CAPEC-163"}],
+        "extensions": {x.MITRE_EXTENSION: {"extension_type": "property-extension", "id": "T1598.002"}}}) == {
+        "T1598.002"}
+    assert x.attack_ids(technique(SPEARPHISHING, None)) == set()
+    # Only a technique has an ATT&CK id: another type citing ATT&CK is still matched by name.
+    assert x.attack_ids({"type": "malware", "x_mitre_id": "S0001"}) == set()
+
+
+def test_two_techniques_sharing_a_name_with_different_attack_ids_are_not_duplicates():
+    # Seen on 2026-11-15: OpenCTI kept T1566.001 and T1598.002 apart, both "Spearphishing Attachment".
+    b, platform = with_techniques(technique(SPEARPHISHING, "T1566.001"), technique(SPEARPHISHING_INFO, "T1598.002"))
+
+    checks = x.bundle_checks("3", "enriched", b, [b], platform)
+
+    assert all(c["pass"] for c in checks), [c for c in checks if not c["pass"]]
+
+
+def test_opencti_s_mitre_extension_alone_identifies_the_technique():
+    mine = (technique(SPEARPHISHING, "T1566.001"), technique(SPEARPHISHING_INFO, "T1598.002"))
+    exported = tuple({**t, "external_references": [],
+                      "extensions": {x.MITRE_EXTENSION: {"id": t["external_references"][0]["external_id"]}}}
+                     for t in mine)
+    b, platform = with_techniques(*mine, exported=exported)
+
+    assert duplicate_check(b, platform)["pass"] is True
+
+
+def test_a_second_technique_with_the_same_attack_id_is_a_duplicate():
+    b, platform = with_techniques(technique(SPEARPHISHING, "T1566.001"))
+    second = raw(technique("attack-pattern--0a1b0c1d-0000-4000-8000-000000000003", "T1566.001",
+                           name="Spearphishing Attachment (copy)"))
+    platform = x.Platform([*(raw_of(n) for n in platform.objects), second],
+                          [raw_of(n) for n in platform.relationships], MARKINGS)
+
+    dup = duplicate_check(b, platform)
+
+    assert dup["pass"] is False and set(dup["detail"]) == {SPEARPHISHING}
+
+
+def test_two_techniques_of_one_name_without_attack_ids_are_duplicates():
+    b, platform = with_techniques(technique(SPEARPHISHING, None))
+    second = raw(technique("attack-pattern--0a1b0c1d-0000-4000-8000-000000000003", None))
+    platform = x.Platform([*(raw_of(n) for n in platform.objects), second],
+                          [raw_of(n) for n in platform.relationships], MARKINGS)
+
+    dup = duplicate_check(b, platform)
+
+    assert dup["pass"] is False and set(dup["detail"]) == {SPEARPHISHING}
 
 
 def test_a_second_relationship_between_the_same_objects_is_a_duplicate():

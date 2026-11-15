@@ -38,6 +38,8 @@ from typing import Any, Callable
 
 #: OpenCTI's property extension: the ids it stored from bundles, the files it holds.
 OPENCTI_EXTENSION = "extension-definition--ea279b3e-5c71-4632-ac08-831c66a786ba"
+#: OpenCTI's MITRE property extension: a technique's ATT&CK id (`x_mitre_id`) under `id`.
+MITRE_EXTENSION = "extension-definition--322b8f77-262a-4cb8-a915-1e441e00329b"
 #: Bundle objects that are neither SDOs nor SCOs.
 NOT_SDO_SCO = ("relationship", "marking-definition")
 #: Compared on their own by the checks, or OpenCTI's bookkeeping: not a transformation.
@@ -75,6 +77,38 @@ def names_of(stix: dict[str, Any]) -> set[str]:
     return out
 
 
+def attack_ids(stix: dict[str, Any]) -> set[str]:
+    """An attack-pattern's ATT&CK ids, upper-cased; empty for any other type.
+
+    From the bundle: its `mitre-attack` external references (`external_id`)
+    and `x_mitre_id`.  From OpenCTI's export: the same references, and the
+    `id` of its MITRE extension, where OpenCTI puts `x_mitre_id`.
+    """
+    if stix.get("type") != "attack-pattern":
+        return set()
+    values = [r.get("external_id") for r in stix.get("external_references") or []
+              if isinstance(r, dict) and r.get("source_name") == "mitre-attack"]
+    values.append(stix.get("x_mitre_id"))
+    values.append(((stix.get("extensions") or {}).get(MITRE_EXTENSION) or {}).get("id"))
+    return {v.strip().upper() for v in values if isinstance(v, str) and v.strip()}
+
+
+def same_object(mine: dict[str, Any], theirs: dict[str, Any]) -> bool:
+    """Whether two objects of one type are the same one: by ATT&CK id for techniques, else by name.
+
+    Two techniques can share a name (Spearphishing Attachment is T1566.001
+    and T1598.002): when both carry an ATT&CK id, the ids decide; when one
+    side only has one, they are two techniques; the name decides only when
+    neither has one.  Every other type is matched by name, value or alias.
+    """
+    if mine.get("type") != theirs.get("type"):
+        return False
+    mine_ids, their_ids = attack_ids(mine), attack_ids(theirs)
+    if mine_ids or their_ids:
+        return bool(mine_ids & their_ids)
+    return bool(names_of(mine) & names_of(theirs))
+
+
 def node(raw: dict[str, Any]) -> dict[str, Any]:
     """An object or relationship as the check reads it: its ids, its STIX export, its files."""
     stix = raw.get("toStix") or {}
@@ -110,16 +144,17 @@ class Platform:
     def by_id(self, stix_id: str) -> list[dict[str, Any]]:
         return list({n["standard_id"]: n for n in self._by_id.get(stix_id, [])}.values())
 
-    def named(self, stix_type: str, names: set[str]) -> list[dict[str, Any]]:
-        """The objects of this STIX type called by one of these names (name, value, alias or hash)."""
-        return [n for n in self.objects if n["stix"].get("type") == stix_type and names_of(n["stix"]) & names]
+    def same_as(self, obj: dict[str, Any]) -> list[dict[str, Any]]:
+        """The objects OpenCTI holds that are the same as this bundle object (`same_object`)."""
+        return [n for n in self.objects if same_object(obj, n["stix"])]
 
     def resolve(self, obj: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
         """The object OpenCTI holds for a bundle object, and how it was found: id, name, absent or ambiguous.
 
         By id first.  OpenCTI renames an object when a later object of the same
         type names it by one of its aliases, and its standard id follows the
-        name: such an object is then found by its name or aliases only.
+        name: such an object is then found by its name or aliases only (a
+        technique by its ATT&CK id, `same_object`).
         """
         hits = self.by_id(obj["id"])
         if len(hits) == 1:
@@ -128,8 +163,7 @@ class Platform:
             return None, "ambiguous"
         if obj.get("type") in NOT_SDO_SCO:
             return None, "absent"
-        names = names_of(obj)
-        same = self.named(obj["type"], names) if names else []
+        same = self.same_as(obj)
         if len(same) == 1:
             return same[0], "name"
         return None, "ambiguous" if same else "absent"
@@ -229,9 +263,10 @@ def bundle_checks(step: str, label: str, bundle: dict[str, Any], imported: list[
                          f"{len(found)} on {len(found)}", f"{len(found)} on {distinct}", not merged, merged))
 
     dups: dict[str, list[str]] = {}
-    named = [o for o in objs if o["type"] not in NOT_SDO_SCO and names_of(o)]
+    # A technique is matched by its ATT&CK id, any other object by name, value or alias (`same_object`).
+    named = [o for o in objs if o["type"] not in NOT_SDO_SCO and (names_of(o) or attack_ids(o))]
     for o in named:
-        same = sorted({n["standard_id"] for n in platform.named(o["type"], names_of(o))})
+        same = sorted({n["standard_id"] for n in platform.same_as(o)})
         n = resolved[o["id"]]
         if len(same) != 1 or (n is not None and n["standard_id"] not in same):
             dups[o["id"]] = same
