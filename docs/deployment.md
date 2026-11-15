@@ -341,6 +341,10 @@ The nginx config, with the SSE-buffering settings it needs (`proxy_buffering off
 `proxy_read_timeout 3600s`), is `docker/nginx/default.conf`, already wired into
 `compose.yaml`. The `FORWARDED_ALLOW_IPS` reasoning is in
 [docs/docker.md §Reaching it from other machines](docker.md#reaching-it-from-other-machines).
+`*` holds only while nginx replaces `X-Forwarded-For` (it does, in
+`docker/nginx/default.conf`) and the app is reachable only through nginx
+(`CTI_BIND=127.0.0.1` above). Behind another load balancer, trust that balancer's
+address instead of `*` (not tested).
 
 The proxy accepts a request body of up to 72 MB (`client_max_body_size`). That covers
 the largest upload with enrichment on: a 50 MB report, a 20 MB STIX baseline and the

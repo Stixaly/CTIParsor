@@ -381,9 +381,13 @@ Also set `FORWARDED_ALLOW_IPS=*` in `.env` when using this profile. `proxy` and
 request looks like it came from the proxy container: the per-IP upload rate
 limit (`api/routes/upload.py`, `slowapi`) becomes one shared 10/minute quota
 for every analyst combined instead of 10 each, and any future per-client
-logic would misattribute the same way. `*` is safe in this specific topology
-because `app`'s own port never leaves loopback/the internal network — nothing
-but `proxy` (or a process already on the host) can ever present that header.
+logic would misattribute the same way. `*` is safe in this topology only if two
+things hold: `app`'s port is reachable only through `proxy` (`CTI_BIND`
+defaults to `127.0.0.1`), and `proxy` replaces `X-Forwarded-For` with the peer
+address (`$remote_addr`, as `docker/nginx/default.conf` does). If `proxy` appended
+to the header instead, a client could send its own first entry and uvicorn would
+believe it. With another load balancer in front of `proxy`, trust only that
+balancer's address rather than `*` (not tested).
 The host-install nginx setup in `docs/deployment.md` Option C does not need
 this: there, nginx and the app share the same loopback interface, so the peer
 already is `127.0.0.1` and the default applies.
