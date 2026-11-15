@@ -116,6 +116,15 @@ def test_the_db_password_is_read_from_a_crlf_env_as_written(tmp_path):
 
 
 @requires_make
+@pytest.mark.parametrize("written", [b'"abc def"', b"'abc def'"])
+def test_a_quoted_db_password_loses_its_quotes_as_compose_reads_it(tmp_path, written):
+    done = _make_secret(tmp_path, b"CTI_DB_PASSWORD=" + written + b"\n")
+
+    assert done.returncode == 0, done.stderr
+    assert (tmp_path / ".secrets" / "db_password").read_bytes() == b"abc def"
+
+
+@requires_make
 def test_an_empty_db_password_is_refused_and_no_secret_is_written(tmp_path):
     done = _make_secret(tmp_path, b"CTI_DB_PASSWORD=\r\n")
 

@@ -207,6 +207,10 @@ docker-build:
 	mkdir -p .secrets
 	chmod 700 .secrets
 	CTI_DB_PASSWORD_VALUE=$$(grep -E '^CTI_DB_PASSWORD=' "$(CTI_ENV_FILE)" | tail -1 | cut -d'=' -f2- | tr -d '\r'); \
+	case "$$CTI_DB_PASSWORD_VALUE" in \
+	  \"*\") CTI_DB_PASSWORD_VALUE=$${CTI_DB_PASSWORD_VALUE#\"}; CTI_DB_PASSWORD_VALUE=$${CTI_DB_PASSWORD_VALUE%\"} ;; \
+	  \'*\') CTI_DB_PASSWORD_VALUE=$${CTI_DB_PASSWORD_VALUE#\'}; CTI_DB_PASSWORD_VALUE=$${CTI_DB_PASSWORD_VALUE%\'} ;; \
+	esac; \
 	: "$${CTI_DB_PASSWORD_VALUE:?Set CTI_DB_PASSWORD in $(CTI_ENV_FILE) (e.g. openssl rand -hex 24, or just run: bash setup.sh)}"; \
 	printf '%s' "$$CTI_DB_PASSWORD_VALUE" > .secrets/db_password
 	chmod 644 .secrets/db_password

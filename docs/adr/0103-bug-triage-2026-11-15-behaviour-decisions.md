@@ -24,9 +24,10 @@ closed without a fix, and the two left open for a decision.
    names the files inside the archive.
 2. **#894: `make .secrets/db_password` reads `.env` as text.** The recipe no
    longer sources the file, so a space, a `#` or a `$` in the password is kept and
-   a CRLF line ending is removed, as `setup.sh` (`env_value`) already does. A value
-   written between quotes now keeps its quotes in the secret file; the passwords
-   `setup.sh` generates are hexadecimal and are not affected.
+   a CRLF line ending is removed, as `setup.sh` (`env_value`) already does. One pair
+   of surrounding quotes is removed, as Docker Compose reads `.env`, so the secret
+   matches `POSTGRES_PASSWORD`. A trailing comment or an `export` prefix is not
+   handled (the old `source` handled neither a comment after a space reliably).
 3. **#917: only the user-info part of a URL is not an email.** `evil.com` in
    `http://user:pass@evil.com/` no longer yields `pass@evil.com`; an address in a
    query (`?email=a@b.com`) is still extracted. The authority also ends at `?` and
