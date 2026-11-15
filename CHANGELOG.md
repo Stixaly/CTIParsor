@@ -9,6 +9,15 @@ theme.
 
 ## [Unreleased]
 
+- **The 1.0 candidate `ee7847f` is qualified: every blocking gate passes.** The evidence, run on the
+  candidate's image by digest between 2026-11-14 and 2026-11-15, is in
+  `docs/releases/1.0-qualification.md`: the release dossier, a clean install of 0.8.0 upgraded and
+  restored, the OpenCTI check, the failure recipe, the model journey, the qualified vLLM
+  configuration measured with figures on (two runs, spread 0), figure reading with the default
+  provider, and real use on five reports. `docs/releases/1.0-readiness.md` is filled, with every
+  gate `pass`; the maintainer's approval and the decision stay `pending`. The qualified column of
+  the capabilities table in `docs/support-policy.md` now cites that evidence; the `anthropic`
+  provider stays not qualified, and several analysts working at once are still not qualified.
 - **Bug triage of #875-#923 (ADR-0103).** 41 confirmed defects fixed, each with a regression test; six
   issues closed as not reproducible and two left open for a decision (#897, #914). Frontend: a `reader` no
   longer sees "Remove job" (#875); a dropped file that cannot be read shows a message (#876); Coverage shows
