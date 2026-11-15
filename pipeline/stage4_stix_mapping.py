@@ -33,7 +33,7 @@ from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
 from pipeline.detection.pattern_check import REFUSED as PATTERN_REFUSED
 from pipeline.detection.pattern_check import check_pattern, net_rule_dialect
 from pipeline.detection.pattern_check import ledger_info as pattern_ledger_info
-from pipeline.detection.suricata_atoms import parse_options, rule_header
+from pipeline.detection.suricata_atoms import parse_options, rule_body, rule_header
 from pipeline.detection.yara_atoms import split_rules
 from pipeline.detection.yara_check import DOES_NOT_COMPILE, prepare_embedded_rule
 from pipeline.edge_justification import justify
@@ -2883,11 +2883,10 @@ def _find_embedded_net_rules(report_text: str) -> list[tuple[str, str, str]]:
             continue
         if not rule_header(stripped):
             continue
-        first_open = stripped.find("(")
-        last_close = stripped.rfind(")")
-        if first_open == -1 or last_close == -1 or last_close <= first_open:
+        body = rule_body(stripped)
+        if body is None:
             continue
-        opts = dict(parse_options(stripped[first_open + 1:last_close]))
+        opts = dict(parse_options(body))
         msg = opts.get("msg", "").strip()
         if len(msg) >= 2 and msg[0] == '"' and msg[-1] == '"':
             msg = msg[1:-1]
