@@ -24,7 +24,7 @@ from tenacity import RetryError, retry, retry_if_exception_type, stop_after_atte
 
 # Initialize logging
 from api.logging_config import get_logger
-from models.schemas import EvidenceLabel, RawEntity
+from models.schemas import EntityType, EvidenceLabel, RawEntity
 from pipeline import attack_data
 from pipeline.env_flags import env_int
 from pipeline.llm_parse import SPOTLIGHT_RULE, JsonScan, ScanExhausted, fit_report, strip_reasoning
@@ -1625,6 +1625,44 @@ def last_chunk_answered() -> bool:
     return bool(getattr(_answer, "parsed", False))
 
 
+def _sample_ioc_candidates(candidates: list[RawEntity], cap: int) -> tuple[list[RawEntity], int]:
+    """Select a stable, type-diverse prefix when a prompt must be capped.
+
+    Types are ordered by their first appearance and each non-empty type bucket
+    contributes one candidate per round.  The original order within each type
+    is preserved, and inputs at or below the cap are returned unchanged.
+    """
+    if len(candidates) <= cap:
+        return candidates, 0
+
+    buckets: dict[EntityType, list[RawEntity]] = {}
+    type_order: list[EntityType] = []
+    for candidate in candidates:
+        entity_type = candidate.entity_type
+        if entity_type not in buckets:
+            buckets[entity_type] = []
+            type_order.append(entity_type)
+        buckets[entity_type].append(candidate)
+
+    positions: dict[EntityType, int] = {entity_type: 0 for entity_type in type_order}
+    shown: list[RawEntity] = []
+    while len(shown) < cap:
+        added = False
+        for entity_type in type_order:
+            position = positions[entity_type]
+            bucket = buckets[entity_type]
+            if position >= len(bucket):
+                continue
+            shown.append(bucket[position])
+            positions[entity_type] = position + 1
+            added = True
+            if len(shown) == cap:
+                break
+        if not added:
+            break
+    return shown, len(candidates) - len(shown)
+
+
 def enrich_chunk(
     text: str,
     detected_entities: list[RawEntity],
@@ -1684,12 +1722,9 @@ def enrich_chunk(
         if e.entity_type.value not in ("malware", "threat_actor", "tool", "campaign")
     ]
     _IOC_CAP = 30
-    if len(_ioc_candidates) > _IOC_CAP:
-        # Keep a representative sample: sort by type so we get type diversity,
-        # then take the first _IOC_CAP entries.
-        _ioc_candidates_sorted = sorted(_ioc_candidates, key=lambda e: e.entity_type.value)
-        _omitted = len(_ioc_candidates) - _IOC_CAP
-        _shown   = _ioc_candidates_sorted[:_IOC_CAP]
+    _shown, _omitted = _sample_ioc_candidates(_ioc_candidates, _IOC_CAP)
+    if _omitted:
+        llm_stats.bump("ioc_candidates_omitted", _omitted)
         ioc_summary = "\n".join(f"- [{e.entity_type.value}] {e.value}" for e in _shown)
         ioc_summary += f"\n  ... and {_omitted} more IoCs (omitted to keep prompt size manageable)"
     else:

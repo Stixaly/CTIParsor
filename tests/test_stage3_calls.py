@@ -630,6 +630,47 @@ def test_the_prompt_summarises_iocs_named_entities_and_semantic_ttps(monkeypatch
     assert "APT29 → SUNBURST" in prompt
 
 
+def test_oversized_ioc_prompt_round_robins_types_and_counts_omissions(monkeypatch):
+    calls = _llm(monkeypatch, _ANSWER)
+    candidates = ([RawEntity(value=f"domain-{i}.example", entity_type=EntityType.DOMAIN)
+                   for i in range(40)]
+                  + [RawEntity(value=f"10.0.0.{i}", entity_type=EntityType.IPV4)
+                     for i in range(20)])
+    before = llm_stats.snapshot()
+
+    s3.enrich_chunk(_TEXT, candidates, verify_rels=False, verify_ttps_on=False)
+
+    prompt = calls[0][1]
+    shown = ("- [domain] domain-0.example"
+             + prompt.split("- [domain] domain-0.example", 1)[1].split("... and 30 more IoCs", 1)[0])
+    lines = shown.splitlines()
+    assert sum(line.startswith("- [domain]") for line in lines) == 15
+    assert sum(line.startswith("- [ipv4]") for line in lines) == 15
+    assert "- [domain] domain-0.example" in shown
+    assert "- [ipv4] 10.0.0.0" in shown
+    assert _delta(before)["ioc_candidates_omitted"] == 30
+
+
+def test_ioc_sampling_preserves_order_at_and_below_cap():
+    candidates = [RawEntity(value=f"10.0.0.{i}", entity_type=EntityType.IPV4) for i in range(30)]
+
+    shown, omitted = s3._sample_ioc_candidates(candidates, 30)
+
+    assert shown == candidates and omitted == 0
+
+
+def test_ioc_sampling_is_stable_and_exhausts_shorter_buckets_first():
+    candidates = ([RawEntity(value=f"domain-{i}", entity_type=EntityType.DOMAIN) for i in range(2)]
+                  + [RawEntity(value=f"10.0.0.{i}", entity_type=EntityType.IPV4) for i in range(5)])
+
+    first, omitted = s3._sample_ioc_candidates(candidates, 5)
+    second, _ = s3._sample_ioc_candidates(candidates, 5)
+
+    assert [item.value for item in first] == ["domain-0", "10.0.0.0", "domain-1", "10.0.0.1", "10.0.0.2"]
+    assert [item.value for item in second] == [item.value for item in first]
+    assert omitted == 2
+
+
 def test_an_oversized_prompt_cuts_the_chunk_not_the_answer_format(monkeypatch):
     calls = _llm(monkeypatch, _ANSWER, _ANSWER)
     s3.enrich_chunk(_TEXT, [], verify_rels=False, verify_ttps_on=False)
