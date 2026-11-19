@@ -553,6 +553,23 @@ def test_a_partly_unusable_stage3_runs_and_says_how_much(mock_llm, mock_llm_resp
     assert (stage3.counts["extraction_ok"], stage3.counts["extraction_invalid"]) == (1, 1)
 
 
+def test_stage3_reports_omitted_ioc_candidates(mock_llm, sample_cti_text, monkeypatch):
+    from pipeline import llm_stats, stage3_llm
+
+    enrich_chunk = stage3_llm.enrich_chunk
+
+    def omit_candidates(*args, **kwargs):
+        llm_stats.bump("ioc_candidates_omitted", 3)
+        return enrich_chunk(*args, **kwargs)
+
+    monkeypatch.setattr(stage3_llm, "enrich_chunk", omit_candidates)
+
+    stage3 = run_document(Document(text=sample_cti_text), _opts()).outcome("3")
+
+    assert stage3.counts["ioc_candidates_omitted"] == 3
+    assert "3 IoCs omitted from prompts to respect the per-chunk cap" in stage3.reason
+
+
 def test_a_timeout_mid_stage3_cancels_the_chunks_still_queued(mock_llm, mock_llm_response, sample_cti_text):
     import time
 

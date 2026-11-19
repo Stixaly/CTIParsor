@@ -1197,6 +1197,7 @@ class _Run:
                       provider_calls=d.get("provider_calls", 0),
                       provider_failures=d.get("provider_failures", 0),
                       provider_at_ceiling=d.get("provider_at_ceiling", 0),
+                      ioc_candidates_omitted=d.get("ioc_candidates_omitted", 0),
                       **{k: d.get(k, 0) for k in kinds},
                       skipped_chunks=skipped,
                       from_checkpoint=total - len(work) - len(select_only) - skipped, **totals)
@@ -1205,6 +1206,14 @@ class _Run:
         detail = (f"{d.get('extraction_provider_failed', 0)} failed requests, "
                   f"{d.get('extraction_empty', 0)} empty answers, "
                   f"{d.get('extraction_invalid', 0)} unparseable answers")
+        omitted = d.get("ioc_candidates_omitted", 0)
+        if omitted:
+            detail += f"; {omitted} IoCs omitted from prompts to respect the per-chunk cap"
+        reason = ""
+        if unusable:
+            reason = f"{unusable} of {attempted} extraction calls unusable: {detail}"
+        elif omitted:
+            reason = detail
         if attempted and unusable == attempted:
             # No usable answer at all (wrong model name, server down, a model
             # that answers nothing or no JSON): the empty result is not
@@ -1214,8 +1223,7 @@ class _Run:
                         f"{detail}{last}", time.monotonic() - t0,
                         details={"egress": self.text_decision.record()}, **counts)
         else:
-            self.record("3", RAN, f"{unusable} of {attempted} extraction calls unusable: {detail}"
-                        if unusable else "", time.monotonic() - t0,
+            self.record("3", RAN, reason, time.monotonic() - t0,
                         details={"egress": self.text_decision.record()}, **counts)
         select = opts.ttp_mode == "select"
         for sid, on, prefix in (("3d", verify_rels, "rel_verification"),
