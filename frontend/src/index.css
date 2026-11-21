@@ -1806,3 +1806,26 @@ html[data-theme="dark"] .rel-ev-hl {
   from { opacity: 0; transform: translateY(8px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ── Sign-in backdrop: the Yggdrasil graph ────────────────────────────────────
+   Every animation uses a `backwards` fill from a `from` state, so with
+   animations off each element simply shows its final state. */
+.ygg { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
+.ygg-line { fill: none; stroke: var(--ink-2); stroke-opacity: 0.4; stroke-linecap: round; }
+.ygg-grow { stroke-dasharray: 1; stroke-dashoffset: 0; animation: ygg-grow 0.9s ease-out backwards; animation-delay: var(--d); }
+.ygg-link { stroke: var(--accent); stroke-opacity: 0.28; stroke-width: 1; stroke-dasharray: 4 5; fill: none; }
+.ygg-fade { animation: ygg-fade 0.6s ease-out backwards; animation-delay: var(--d); }
+.ygg-twig { fill: var(--accent); fill-opacity: 0.5; }
+.ygg-node { animation: ygg-fade 0.4s ease-out backwards, ygg-breathe 12s ease-in-out infinite; animation-delay: var(--d), var(--b); }
+.ygg-realm { fill: var(--bg); stroke: var(--ink-2); stroke-opacity: 0.5; stroke-width: 1.5; }
+.ygg-rune { fill: none; stroke: var(--ink-2); stroke-opacity: 0.8; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ygg-raven { fill: var(--ink); fill-opacity: 0.75; }
+.ygg-raven-fly { animation: ygg-fade 0.6s ease-out 1.8s backwards; }
+@keyframes ygg-grow { from { stroke-dashoffset: 1; } }
+@keyframes ygg-fade { from { opacity: 0; } }
+@keyframes ygg-breathe { 0%, 100% { opacity: 1; } 5% { opacity: 0.45; } 10% { opacity: 1; } }
+.login-card { animation: login-card-in 0.45s ease-out backwards 0.3s; }
+@keyframes login-card-in { from { opacity: 0; transform: translateY(12px); } }
+@media (prefers-reduced-motion: reduce) {
+  .ygg *, .ygg, .login-card { animation: none !important; }
+}

@@ -9,6 +9,10 @@ theme.
 
 ## [Unreleased]
 
+- **The sign-in page has an animated background.** Behind the card, the report's graph grows like
+  the world tree Yggdrasil: branches and roots draw themselves, ten nodes marked with runes light up,
+  and two ravens fly along the branches. It is decorative (hidden from screen readers, no pointer
+  events) and stands still for users who ask for reduced motion.
 - **The 1.0 candidate `ee7847f` is qualified: every blocking gate passes.** The evidence, run on the
   candidate's image by digest between 2026-11-14 and 2026-11-15, is in
   `docs/releases/1.0-qualification.md`: the release dossier, a clean install of 0.8.0 upgraded and

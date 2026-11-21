@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { fetchSignInMethods, signIn, SignInError } from '../api/auth'
 import { safeNext } from '../api/session'
 import { useAuth } from '../context/AuthContext'
+import YggdrasilBackdrop from '../components/YggdrasilBackdrop'
 
 /** What `?error=<code>` says.  The identity-provider callback sends the code; an unknown one is shown as it is. */
 // The codes GET /api/auth/oidc/callback sends back (api/routes/auth.py, api/auth/oidc.py).
@@ -79,8 +80,10 @@ export default function Login() {
   const oidc = methods.data?.oidc ?? false
 
   return (
-    <div className="t-app" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)' }}>
-      <main style={{
+    <div className="t-app" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}>
+      <YggdrasilBackdrop />
+      <main className="login-card" style={{
+        position: 'relative', zIndex: 1,
         width: 340, maxWidth: 'calc(100vw - 32px)', padding: 24, borderRadius: 10,
         border: '1px solid var(--rule)', background: 'var(--bg-elev)', color: 'var(--ink)',
       }}>
