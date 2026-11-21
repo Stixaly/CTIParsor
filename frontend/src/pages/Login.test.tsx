@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import Login from './Login'
+import YggdrasilBackdrop from '../components/YggdrasilBackdrop'
 import { AuthProvider, useAuth } from '../context/AuthContext'
 import { apiFetch } from '../api/client'
 import { resetSession } from '../api/session'
@@ -155,6 +156,75 @@ describe('Login', () => {
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct horse battery' } })
     fireEvent.submit(screen.getByLabelText('Password').closest('form')!)
     await waitFor(() => expect(screen.getByTestId('where')).toHaveTextContent('/dashboard'))
+  })
+})
+
+describe('Login backdrop', () => {
+  function motion(matches: boolean | undefined) {
+    if (matches === undefined) { vi.stubGlobal('matchMedia', undefined); return }
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches, addEventListener: vi.fn(), removeEventListener: vi.fn(),
+    })))
+  }
+
+  it('draws a decorative backdrop behind the form', async () => {
+    serve()
+    renderLogin()
+    const svg = document.querySelector('svg.ygg')
+    expect(svg).not.toBeNull()
+    expect(svg).toHaveAttribute('aria-hidden', 'true')
+    expect(svg!.querySelectorAll('.ygg-node')).toHaveLength(10)
+    expect((await screen.findByLabelText('Username')).closest('main')).not.toBeNull()
+  })
+
+  it('flies the two ravens only when motion is allowed', async () => {
+    serve()
+    motion(false)
+    renderLogin()
+    await screen.findByLabelText('Username')
+    expect(document.querySelectorAll('.ygg-raven-fly')).toHaveLength(2)
+  })
+
+  it('shows no raven when reduced motion is asked for', async () => {
+    serve()
+    motion(true)
+    renderLogin()
+    await screen.findByLabelText('Username')
+    expect(document.querySelectorAll('.ygg-raven-fly')).toHaveLength(0)
+  })
+
+  it('shows no raven when matchMedia is missing', async () => {
+    serve()
+    motion(undefined)
+    renderLogin()
+    await screen.findByLabelText('Username')
+    expect(document.querySelectorAll('.ygg-raven-fly')).toHaveLength(0)
+  })
+
+  it('lands the ravens when reduced motion is turned on, and stops listening on unmount', () => {
+    let handler: (() => void) | undefined
+    const mq = {
+      matches: false,
+      addEventListener: vi.fn((_: string, h: () => void) => { handler = h }),
+      removeEventListener: vi.fn(),
+    }
+    vi.stubGlobal('matchMedia', vi.fn(() => mq))
+    const { container, unmount } = render(<YggdrasilBackdrop />)
+    expect(container.querySelectorAll('.ygg-raven-fly')).toHaveLength(2)
+    mq.matches = true
+    act(() => handler!())
+    expect(container.querySelectorAll('.ygg-raven-fly')).toHaveLength(0)
+    unmount()
+    expect(mq.removeEventListener).toHaveBeenCalledWith('change', handler)
+  })
+
+  it('falls back to addListener where addEventListener is missing (old Safari)', () => {
+    const mq = { matches: false, addListener: vi.fn(), removeListener: vi.fn() }
+    vi.stubGlobal('matchMedia', vi.fn(() => mq))
+    const { unmount } = render(<YggdrasilBackdrop />)
+    expect(mq.addListener).toHaveBeenCalledTimes(1)
+    unmount()
+    expect(mq.removeListener).toHaveBeenCalledWith(mq.addListener.mock.calls[0][0])
   })
 })
 
