@@ -14,7 +14,8 @@ theme.
   CVE-2026-123868, CVE-2026-123871, CVE-2026-123872, CVE-2026-123874, CVE-2026-123875,
   CVE-2026-123877, CVE-2026-123828, CVE-2026-123829 and CVE-2026-123862 (7 high, 6 medium,
   2 low). Only that pin moves in `requirements.lock.txt` (`pyee` leaves it, no longer a dependency).
-  The image's Chromium follows the package: 156.0.8078.4 → 159.0.8154.6.
+  The image's Chromium follows the package: 156.0.8078.4 → 159.0.8154.6. The runtime stage now
+  installs `libatomic1`: Node.js 26 links `libatomic.so.1`, which the slim base image lacks.
 - **The Playwright 1.64.1 limitation is gone.** That driver predated the fix for
   microsoft/playwright#43242, so a URL capture with JavaScript enabled could come back empty when
   the page loaded its content through a redirected, credentialed cross-origin request. The 1.65.2
