@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 3 no longer loses a passage to a passing provider error (#968, #969, #970).** A timeout or a
+  dropped connection from an OpenAI-compatible provider (vLLM, Ollama, LM Studio) is retried, and so are
+  408, 409, 429 and 5xx from both SDKs; other 4xx are not. `Retry-After` is obeyed up to 30 s, and the
+  total time of one call is bounded by `LLM_RETRY_MAX_DELAY` (default: 3 × `LLM_TIMEOUT`). A passage
+  whose answer could not be read is no longer saved to the checkpoint as done: it gets one second try at
+  the end of the stage (not made once the provider is seen down), and the passages still failing are
+  listed in the stage report (`failed_chunks`, with position and reason) and in the stage 3 message.
+  When a passage has more than 30 IoCs, the list offered to the model takes them by turns across types
+  instead of filling it with the first type in alphabetical order. New stage 3 counts:
+  `provider_retries`, `ioc_omitted`, `failed_chunks`, `retried_chunks`, `recovered_chunks`.
+- **Snort parser fixes (#789-#793).** Nested IP lists are split by bracket depth; a `;` or `,` inside a
+  quoted value no longer splits an option, and an escaped `\;` keeps its `;`; an unknown option name is
+  rejected even when its value is a content modifier; a negated or space-led `pcre` keeps its `!`; a port
+  range needs exactly two bounds with the low one first.
 - **The sign-in page explains what CTIParsor does.** Beside the card, a left column shows the path
   from a threat report to entities to STIX 2.1 objects, and an example graph of nine STIX objects
   drawn on the world tree Yggdrasil (one realm per object). On load, each object's ring pulses in

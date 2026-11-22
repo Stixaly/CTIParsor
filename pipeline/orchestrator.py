@@ -1018,7 +1018,7 @@ class _Run:
 
     def _chunks_to_llm(self) -> list[LLMEnrichmentResult]:
         from pipeline import llm_stats
-        from pipeline.stage3_llm import LLMEnrichmentResult, enrich_chunk, stage3_settings
+        from pipeline.stage3_llm import LLMEnrichmentResult, enrich_chunk, last_chunk_answered, stage3_settings
         from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
         from pipeline.stage3e_consensus import consensus_enabled, consensus_provider, reconcile
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
@@ -1100,7 +1100,8 @@ class _Run:
         log_lock = threading.Lock()
         doubled = 0
 
-        def process(idx: int, chunk: str, ents: list) -> tuple[int, LLMEnrichmentResult, bool]:
+        def process(idx: int, chunk: str, ents: list) -> tuple[int, LLMEnrichmentResult, bool, str | None]:
+            # The last element is None when the model's answer was read, else why it was not (#969).
             with log_lock:
                 logger.info(f"[Stage 3] chunk {idx}/{total} — {len(chunk)} chars "
                             f"[elapsed {time.monotonic() - t0:.0f}s]")
@@ -1123,12 +1124,16 @@ class _Run:
                     ttp_candidates=cands,
                 )
 
+            llm_stats.reset_last_call()
             res = call()
+            # Read before the consensus call, which overwrites this thread's state.
+            answered = last_chunk_answered()
+            failure = None if answered else (
+                "provider request failed" if llm_stats.last_call_failed() else "no usable answer")
             # Stage 3e — cross-model consensus, only on chunks that produced
             # relationships (the highest hallucination-risk output).
             second_run = False
-            if res.relationships and consensus:
-                from pipeline.stage3_llm import last_chunk_answered
+            if answered and res.relationships and consensus:
                 second = call(consensus_provider())
                 if last_chunk_answered():
                     res = reconcile(res, second)
@@ -1143,14 +1148,22 @@ class _Run:
                 (len(res.malware_families), "malware"), (len(res.threat_actors), "actors"),
                 (len(res.tools), "tools"), (len(res.relationships), "rels")) if n]
             with log_lock:
-                logger.info(f"[Stage 3] chunk {idx}/{total} ✓ {time.monotonic() - t_chunk:.1f}s — "
-                            f"{', '.join(parts) or 'nothing extracted'}")
-            return idx, res, second_run
+                if failure is None:
+                    logger.info(f"[Stage 3] chunk {idx}/{total} ✓ {time.monotonic() - t_chunk:.1f}s — "
+                                f"{', '.join(parts) or 'nothing extracted'}")
+                else:
+                    logger.warning(f"[Stage 3] chunk {idx}/{total} ✗ {time.monotonic() - t_chunk:.1f}s — "
+                                   f"{failure}")
+            return idx, res, second_run, failure
 
-        def selection_only(idx: int, chunk: str) -> tuple[int, LLMEnrichmentResult, bool]:
+        def selection_only(idx: int, chunk: str) -> tuple[int, LLMEnrichmentResult, bool, str | None]:
             from pipeline.stage3_llm import select_chunk_ttps
-            return idx, select_chunk_ttps(chunk, r.ttp_candidates[idx - 1]), False
+            return idx, select_chunk_ttps(chunk, r.ttp_candidates[idx - 1]), False, None
 
+        # #969: a chunk whose answer was not read is not an empty result: it stays out of
+        # chunk_results (so out of the checkpoint) until its second try, below.
+        chunk_of = {i: (c, e) for i, c, e in work}
+        failed_work: dict[int, tuple[str, list]] = {}
         with ThreadPoolExecutor(max_workers=parallelism) as executor:
             futures = [executor.submit(process, i, c, e) for i, c, e in work]
             futures += [executor.submit(selection_only, i, c) for i, c in select_only]
@@ -1158,15 +1171,18 @@ class _Run:
             try:
                 for future in as_completed(futures):
                     hooks.check_timeout()
-                    idx, res, second_run = future.result()
-                    chunk_results[idx] = res
+                    idx, res, second_run, failure = future.result()
                     doubled += second_run
                     completed += 1
-                    since_ckpt += 1
-                    totals["malware"] += len(res.malware_families)
-                    totals["actors"] += len(res.threat_actors)
-                    totals["tools"] += len(res.tools)
-                    totals["relationships"] += len(res.relationships)
+                    if failure is None:
+                        chunk_results[idx] = res
+                        since_ckpt += 1
+                        totals["malware"] += len(res.malware_families)
+                        totals["actors"] += len(res.threat_actors)
+                        totals["tools"] += len(res.tools)
+                        totals["relationships"] += len(res.relationships)
+                    else:
+                        failed_work[idx] = chunk_of[idx]
 
                     if checkpoint is not None and since_ckpt >= self.opts.checkpoint_every:
                         checkpoint.save(fingerprint, total, chunk_results)
@@ -1182,6 +1198,38 @@ class _Run:
                 # the calls already running still finish (at most llm_parallelism).
                 executor.shutdown(wait=False, cancel_futures=True)
                 raise
+
+        # #969: one second try, one chunk at a time, for each chunk whose answer was not read.
+        failed_chunks: list[dict] = []
+        retried = recovered = 0
+        provider_down = False
+        for idx in sorted(failed_work):
+            chunk, ents = failed_work[idx]
+            if provider_down:
+                # A provider that failed a request on the second try is down:
+                # one-at-a-time replays, each with its own retries, would only
+                # run the job into its timeout.
+                start = r.text.find(chunk[:200])
+                failed_chunks.append({"chunk": idx, "chars": len(chunk),
+                                      "start": start if start >= 0 else None,
+                                      "reason": "provider request failed (second try not made)"})
+                continue
+            hooks.check_timeout()
+            retried += 1
+            _, res, second_run, failure = process(idx, chunk, ents)
+            provider_down = failure == "provider request failed"
+            if failure is None:
+                recovered += 1
+                chunk_results[idx] = res
+                doubled += second_run
+                totals["malware"] += len(res.malware_families)
+                totals["actors"] += len(res.threat_actors)
+                totals["tools"] += len(res.tools)
+                totals["relationships"] += len(res.relationships)
+            else:
+                start = r.text.find(chunk[:200])
+                failed_chunks.append({"chunk": idx, "chars": len(chunk),
+                                      "start": start if start >= 0 else None, "reason": failure})
 
         if checkpoint is not None:
             checkpoint.clear()   # only reached on clean completion
@@ -1199,24 +1247,35 @@ class _Run:
                       provider_at_ceiling=d.get("provider_at_ceiling", 0),
                       **{k: d.get(k, 0) for k in kinds},
                       skipped_chunks=skipped,
-                      from_checkpoint=total - len(work) - len(select_only) - skipped, **totals)
+                      from_checkpoint=total - len(work) - len(select_only) - skipped,
+                      failed_chunks=len(failed_chunks), retried_chunks=retried,
+                      recovered_chunks=recovered,
+                      provider_retries=d.get("provider_retries", 0),   # #968
+                      ioc_omitted=d.get("ioc_omitted", 0),             # #970
+                      **totals)
         attempted = sum(d.get(k, 0) for k in kinds)
         unusable = attempted - d.get("extraction_ok", 0)
         detail = (f"{d.get('extraction_provider_failed', 0)} failed requests, "
                   f"{d.get('extraction_empty', 0)} empty answers, "
                   f"{d.get('extraction_invalid', 0)} unparseable answers")
+        details = {"egress": self.text_decision.record(), "failed_chunks": failed_chunks}
         if attempted and unusable == attempted:
             # No usable answer at all (wrong model name, server down, a model
             # that answers nothing or no JSON): the empty result is not
             # "nothing found", and must not read as such.
             last = f" — last error: {stats_after['last_error']}" if d.get("provider_failures") else ""
             self.record("3", FAILED, f"no usable LLM answer in {attempted} extraction calls: "
-                        f"{detail}{last}", time.monotonic() - t0,
-                        details={"egress": self.text_decision.record()}, **counts)
+                        f"{detail}{last}", time.monotonic() - t0, details=details, **counts)
         else:
-            self.record("3", RAN, f"{unusable} of {attempted} extraction calls unusable: {detail}"
-                        if unusable else "", time.monotonic() - t0,
-                        details={"egress": self.text_decision.record()}, **counts)
+            notes = [f"{unusable} of {attempted} extraction calls unusable: {detail}"] if unusable else []
+            if failed_chunks:
+                numbers = ", ".join(str(c["chunk"]) for c in failed_chunks)
+                notes.append(f"{len(failed_chunks)} passage(s) not analysed by the model (chunks {numbers})")
+            if counts["provider_retries"]:
+                notes.append(f"{counts['provider_retries']} provider call(s) retried")
+            if counts["ioc_omitted"]:
+                notes.append(f"{counts['ioc_omitted']} IoC(s) not offered to the model (30 per passage)")
+            self.record("3", RAN, "; ".join(notes), time.monotonic() - t0, details=details, **counts)
         select = opts.ttp_mode == "select"
         for sid, on, prefix in (("3d", verify_rels, "rel_verification"),
                                 ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):

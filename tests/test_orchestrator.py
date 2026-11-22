@@ -537,20 +537,23 @@ def test_an_empty_or_unparseable_answer_is_not_nothing_found(sample_cti_text, mo
     monkeypatch.setattr(s3, "_call_anthropic_impl", lambda system, user, max_tokens=None: answer)
 
     stage3 = run_document(Document(text=sample_cti_text), _opts()).outcome("3")
-    assert stage3.status == "failed" and f"1 {kind}" in stage3.reason
+    # Two calls: the chunk's first answer and its second try (#969).
+    assert stage3.status == "failed" and f"2 {kind}" in stage3.reason
     assert stage3.counts["provider_failures"] == 0 and stage3.counts["extraction_ok"] == 0
     with pytest.raises(StageRequired):
         run_document(Document(text=sample_cti_text), _opts(required={"3"}))
 
 
 def test_a_partly_unusable_stage3_runs_and_says_how_much(mock_llm, mock_llm_response, sample_cti_text):
-    mock_llm.side_effect = [json.dumps(mock_llm_response), "garbage"]
+    # The second chunk's answer is unreadable twice: its first call and its second try (#969).
+    mock_llm.side_effect = [json.dumps(mock_llm_response), "garbage", "garbage"]
     text = _long_text(sample_cti_text, 2)
     result = run_document(Document(text=text), _opts())
     stage3 = result.outcome("3")
     assert len(result.chunks) == 2
-    assert stage3.status == "ran" and "1 of 2 extraction calls unusable" in stage3.reason
-    assert (stage3.counts["extraction_ok"], stage3.counts["extraction_invalid"]) == (1, 1)
+    assert stage3.status == "ran" and "2 of 3 extraction calls unusable" in stage3.reason
+    assert "1 passage(s) not analysed by the model (chunks 2)" in stage3.reason
+    assert (stage3.counts["extraction_ok"], stage3.counts["extraction_invalid"]) == (1, 2)
 
 
 def test_a_timeout_mid_stage3_cancels_the_chunks_still_queued(mock_llm, mock_llm_response, sample_cti_text):

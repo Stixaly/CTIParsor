@@ -207,7 +207,7 @@ def test_a_transient_anthropic_error_is_retried_then_succeeds(monkeypatch, no_sl
 
     assert s3._call_anthropic("s", "u") == "ok"
     assert len(messages.calls) == 3
-    assert _delta(before) == {"provider_calls": 1}
+    assert _delta(before) == {"provider_calls": 1, "provider_retries": 2}
 
 
 def test_anthropic_timeouts_on_every_attempt_are_one_recorded_failure(monkeypatch, no_sleep, caplog):
@@ -216,7 +216,7 @@ def test_anthropic_timeouts_on_every_attempt_are_one_recorded_failure(monkeypatc
 
     assert s3._call_anthropic("s", "u") == ""
     assert len(messages.calls) == s3._MAX_RETRIES
-    assert _delta(before) == {"provider_calls": 1, "provider_failures": 1}
+    assert _delta(before) == {"provider_calls": 1, "provider_failures": 1, "provider_retries": 2}
     assert llm_stats.last_call_failed() is True
     assert "raise LLM_TIMEOUT" in caplog.text
 
@@ -385,7 +385,7 @@ def test_a_retried_call_reports_the_attempt_that_answered(no_sleep):
 
     assert s3._call_openai_compatible(client, "m", "s", "u", "Ollama") == '{"selected": ['
     assert len(completions.calls) == 2 and llm_stats.last_call_at_ceiling() is True
-    assert _delta(before) == {"provider_calls": 1, "provider_at_ceiling": 1}
+    assert _delta(before) == {"provider_calls": 1, "provider_at_ceiling": 1, "provider_retries": 1}
 
 
 def test_the_ceiling_flag_belongs_to_the_thread_that_made_the_call():
