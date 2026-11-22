@@ -18,6 +18,32 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 from .snort_dicts import Dicts
 
 
+def _split_outside_quotes(text: str, sep: str) -> List[str]:
+    """Split `text` at each `sep` that is outside double quotes and not backslash-escaped.
+
+    A backslash copies the character after it as it is. A `"` opens or closes a quoted
+    string, and an escaped `\\"` does not close it. The pieces keep their text and are not
+    stripped, so n separators give n + 1 pieces."""
+    pieces = []
+    current = ""
+    in_string = False
+    escaped = False
+    for char in text:
+        if escaped:
+            escaped = False
+        elif char == "\\":
+            escaped = True
+        elif char == '"':
+            in_string = not in_string
+        elif char == sep and not in_string:
+            pieces.append(current)
+            current = ""
+            continue
+        current += char
+    pieces.append(current)
+    return pieces
+
+
 class Parser:
     """
     this will take an array of lines and parse it and hand
@@ -93,11 +119,30 @@ class Parser:
             ip = ip.lstrip("!")
         _ip_list = []
         _not_nest = True
+        # CTIParsor patch (#789): an unclosed `[` is refused before the outer brackets go
+        if ip.count("[") != ip.count("]"):
+            raise ValueError(f"Unbalanced brackets in {ip}")
         ip = re.sub(r"^\[|\]$", "", ip)
         ip = re.sub(r'"', "", ip)
-        if re.search(r"(\[.*\])", ip):
+        if "[" in ip or "]" in ip:
             _not_nest = False
-            nest = re.split(r",(!?\[.*\])", ip)
+            # split on the commas outside any bracket, so a nested list stays whole
+            nest = []
+            depth = 0
+            start = 0
+            for pos, char in enumerate(ip):
+                if char == "[":
+                    depth += 1
+                elif char == "]":
+                    depth -= 1
+                    if depth < 0:
+                        raise ValueError(f"Unbalanced brackets in {ip}")
+                elif char == "," and depth == 0:
+                    nest.append(ip[start:pos])
+                    start = pos + 1
+            if depth != 0:
+                raise ValueError(f"Unbalanced brackets in {ip}")
+            nest.append(ip[start:])
             nest = filter(None, nest)
             # unnest from _ip_list
             _return_ips = []
@@ -273,9 +318,12 @@ class Parser:
 
             if re.search(":", port):
                 message = f"Port is out of range {port}"
-                ports = port.split(":")
+                # CTIParsor patch (#793): a range has exactly two bounds, and the `!`
+                # is stripped from each one (the result was never reassigned before).
+                ports = [portl.lstrip("!") for portl in port.split(":")]
+                if len(ports) != 2:
+                    raise ValueError(message)
                 for portl in ports:
-                    portl.lstrip("!")
                     if not portl:
                         continue
                     # CTIParsor patch (#520): `if portl or` was always true.
@@ -288,6 +336,10 @@ class Parser:
                         raise ValueError(message) from e
                     if portl < 0 or portl > 65535:
                         raise ValueError(message)
+
+                # CTIParsor patch (#793): both bounds numeric, the low one must not exceed the high one.
+                if ports[0].isdigit() and ports[1].isdigit() and int(ports[0]) > int(ports[1]):
+                    raise ValueError(message)
 
                 return if_not, port
 
@@ -340,32 +392,17 @@ class Parser:
         """Return the options as a list of strings, in rule order.
 
         The option block is the text between the first `(` and the closing `)`. It is
-        split at each `;` that is not preceded by a backslash. Raises ValueError when the
-        block does not end with `)`."""
+        split at each `;` that is outside double quotes and not preceded by a backslash.
+        Raises ValueError when the block does not end with `)`."""
         options = f"{self.rule.split('(', 1)[-1].lstrip().rstrip()}"
         if not options.endswith(")"):
             raise ValueError(
                 "Snort rule options is not closed properly, " "you have a syntax error"
             )
 
-        op_list = []
-
-        value = ""
-        option = ""
-        last_char = ""
-
-        for char in options.rstrip(")"):
-            if char != ";":
-                value = value + char
-                option = option + char
-
-            if char == ";" and last_char != "\\":
-                op_list.append(option.strip())
-                value = option = ""
-
-            last_char = char
-
-        return op_list
+        # The text after the last `;` is not an option, so the last piece is dropped.
+        pieces = _split_outside_quotes(options.rstrip(")"), ";")
+        return [piece.strip() for piece in pieces[:-1]]
 
     def parse_header(self):  # pylint: disable=too-many-statements
         """Parse the rule header into an ordered dict keyed by field name.
@@ -464,7 +501,7 @@ class Parser:
                 option = option_string.split(":", 1)
                 key, value = option
                 if key != "pcre":
-                    value = value.split(",")
+                    value = _split_outside_quotes(value, ",")
                 options_dict[index] = (key, value)
             else:
                 options_dict[index] = (option_string, "")
@@ -486,7 +523,10 @@ class Parser:
             opt = False
             if len(value) == 1:
                 content_mod = self.dicts.content_modifiers(value[0])
-                if content_mod:
+                # CTIParsor patch (#791): the name is checked before the skip, so an
+                # unknown option with a content-modifier value (`not_a_real_option:nocase`)
+                # is rejected like any other unknown name.
+                if content_mod and self.dicts.options(key):
                     # TODO: implement this feature
                     continue
             gen_option = self.dicts.options(key)
@@ -551,8 +591,15 @@ class Sanitizer:
             if not value:
                 return value
             return [Sanitizer.pcre(value[0]), *value[1:]]
+        # Surrounding spaces and the negation '!' (with the spaces after it) are not part of the regex (#792).
+        value = value.strip()
         if not value:
             return value
+        negated = value.startswith("!")
+        if negated:
+            value = value[1:].lstrip()
+            if not value:
+                return "!"
         body = value[1:] if value.startswith('"') else value
         body = body[:-1] if body.endswith('"') else body
         if not body.startswith("/"):
@@ -560,7 +607,7 @@ class Sanitizer:
         # Only add the closing slash when the regex does not already end with /flags (#624).
         if not re.fullmatch(r"/.*/[ismxAEGRUBPHMCOIDKYS]*", body, re.DOTALL):
             body = f"{body}/"
-        return f'"{body}"'
+        return f'!"{body}"' if negated else f'"{body}"'
 
     @staticmethod
     def depth(options):

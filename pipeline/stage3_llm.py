@@ -20,7 +20,8 @@ from typing import cast
 import anthropic
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, ValidationError
-from tenacity import RetryError, retry, retry_if_exception_type, stop_after_attempt, wait_exponential
+from tenacity import RetryError, retry, retry_if_exception, stop_after_attempt, stop_after_delay, wait_exponential
+from tenacity.wait import wait_base
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -53,15 +54,78 @@ load_dotenv()
 # ---------------------------------------------------------------------------
 _MAX_RETRIES = 3
 _RETRY_WAIT = wait_exponential(multiplier=1, min=2, max=10)
-_RETRY_STOP = stop_after_attempt(_MAX_RETRIES)
+# Total time for one call, retries included (issue #968).  tenacity checks it
+# once an attempt has failed, so a fixed bound below LLM_TIMEOUT would forbid
+# any retry after a timeout: the default scales with LLM_TIMEOUT (whose own
+# default, 120, is read again here because _LLM_TIMEOUT is defined further down).
+_RETRY_MAX_DELAY = env_int("LLM_RETRY_MAX_DELAY",
+                           default=_MAX_RETRIES * env_int("LLM_TIMEOUT", default=120))
+_RETRY_STOP = stop_after_attempt(_MAX_RETRIES) | stop_after_delay(_RETRY_MAX_DELAY)
+# A Retry-After header is obeyed, but never for longer than this (seconds).
+_RETRY_AFTER_CAP = 30
 
-# Exception types that should trigger a retry
-_RETRY_EXCEPTIONS = (
-    anthropic.APITimeoutError,
-    anthropic.APIConnectionError,
-    ConnectionError,
-    TimeoutError,
-)
+# openai is optional (only the OpenAI-compatible providers need it), so its
+# error classes are looked up only when the package is there.  Its timeout and
+# connection errors are not subclasses of the builtin ones (issue #968).
+try:
+    import openai as _openai
+except ImportError:
+    _openai = None                # type: ignore[assignment]
+
+_RETRY_CONNECTION_ERRORS = (anthropic.APIConnectionError, ConnectionError, TimeoutError) + (
+    (_openai.APIConnectionError,) if _openai else ())            # the Timeout errors are subclasses
+_RETRY_STATUS_ERRORS = (anthropic.APIStatusError,) + ((_openai.APIStatusError,) if _openai else ())
+# Retried status codes: 408, 409, 429 and every 5xx.  Any other 4xx (a bad
+# request, a bad key, an unknown model, a payload too large) fails the same way
+# on every attempt, so it is not retried.
+_RETRY_STATUS_CODES = (408, 409, 429)
+
+
+def _is_retryable(exc: BaseException) -> bool:
+    """True for a dropped or timed-out connection and for the statuses above."""
+    if isinstance(exc, _RETRY_CONNECTION_ERRORS):
+        return True
+    if isinstance(exc, _RETRY_STATUS_ERRORS):
+        code = getattr(exc, "status_code", 0)
+        return code in _RETRY_STATUS_CODES or code >= 500
+    return False
+
+
+def _retry_after(exc: BaseException | None) -> float | None:
+    """The Retry-After header of `exc` in seconds, or None when there is none
+    or it is not a number (an HTTP date is not read)."""
+    headers = getattr(getattr(exc, "response", None), "headers", None) or {}
+    value = headers.get("retry-after")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return None
+    return seconds if seconds >= 0 else None          # nan fails the test too
+
+
+class _RetryAfterOrBackoff(wait_base):
+    """_RETRY_WAIT, unless the server said how long to wait (Retry-After)."""
+
+    def __init__(self, fallback):
+        self.fallback = fallback
+
+    def __call__(self, retry_state) -> float:
+        seconds = _retry_after(retry_state.outcome.exception())
+        if seconds is None:
+            return self.fallback(retry_state)
+        return min(seconds, _RETRY_AFTER_CAP)
+
+
+def _count_retry(retry_state) -> None:
+    """Counts a new attempt in llm_stats and says why it is made."""
+    exc = retry_state.outcome.exception()
+    status = getattr(exc, "status_code", None)
+    reason = f"HTTP {status}" if status else type(exc).__name__
+    llm_stats.bump("provider_retries")
+    logger.warning(f"LLM call retry {retry_state.attempt_number + 1}/{_MAX_RETRIES} after {reason}, "
+                   f"waiting {retry_state.next_action.sleep:.0f}s")
 
 # ---------------------------------------------------------------------------
 # Input/Output length limits for LLM calls
@@ -762,9 +826,10 @@ def _provider_answer(text: str, at_ceiling: bool, label: str, max_tokens: int) -
 
 
 @retry(
-    retry=retry_if_exception_type(_RETRY_EXCEPTIONS),
+    retry=retry_if_exception(_is_retryable),
     stop=_RETRY_STOP,
-    wait=_RETRY_WAIT,
+    wait=_RetryAfterOrBackoff(_RETRY_WAIT),
+    before_sleep=_count_retry,
     reraise=True
 )
 def _call_anthropic_impl(system: str, user: str, max_tokens: int | None = None) -> str:
@@ -850,9 +915,10 @@ def _call_anthropic(system: str, user: str, max_tokens: int | None = None) -> st
 
 
 @retry(
-    retry=retry_if_exception_type(_RETRY_EXCEPTIONS),
+    retry=retry_if_exception(_is_retryable),
     stop=_RETRY_STOP,
-    wait=_RETRY_WAIT,
+    wait=_RetryAfterOrBackoff(_RETRY_WAIT),
+    before_sleep=_count_retry,
     reraise=True
 )
 def _call_openai_compatible_impl(client_param, model: str, system: str, user: str, label: str,
@@ -1613,6 +1679,30 @@ def corroborated_ttp_ids(semantic_ttp_entities) -> set[str]:
     }
 
 
+def _sample_iocs_by_type(candidates: list, cap: int) -> list:
+    """Pick at most `cap` IoCs, spread across their types (issue #970).
+
+    Candidates are grouped by `entity_type.value`, keeping the order they had
+    in the text inside each group.  Types are taken in the order they first
+    appear, one element from each in turn, until `cap` is reached.  A list
+    that already fits is returned unchanged.  Deterministic for a given input.
+    """
+    if len(candidates) <= cap:
+        return list(candidates)
+    groups: dict[str, list] = {}
+    for e in candidates:
+        groups.setdefault(e.entity_type.value, []).append(e)
+    queues = list(groups.values())
+    picked: list = []
+    rank = 0
+    while len(picked) < cap:
+        for queue in queues:
+            if rank < len(queue) and len(picked) < cap:
+                picked.append(queue[rank])
+        rank += 1
+    return picked
+
+
 # Whether this thread's last `enrich_chunk` got an answer it could read.  An
 # empty result means "no relationship" only then: a provider that is not
 # configured, a failed request or an unparseable answer give one too, and
@@ -1677,19 +1767,18 @@ def enrich_chunk(
 
     # IoC summary — regex-extracted technical indicators.
     # Cap at 30 entries so IoC-appendix chunks don't inflate the prompt by
-    # hundreds of lines.  Prioritise diversity across types; add a count suffix
-    # when entries are omitted so the LLM knows more IoCs exist.
+    # hundreds of lines.  Take the entries in turns across types (one per type
+    # in each round) so every type gets a place; add a count suffix when
+    # entries are omitted so the LLM knows more IoCs exist.
     _ioc_candidates = [
         e for e in detected_entities
         if e.entity_type.value not in ("malware", "threat_actor", "tool", "campaign")
     ]
     _IOC_CAP = 30
     if len(_ioc_candidates) > _IOC_CAP:
-        # Keep a representative sample: sort by type so we get type diversity,
-        # then take the first _IOC_CAP entries.
-        _ioc_candidates_sorted = sorted(_ioc_candidates, key=lambda e: e.entity_type.value)
         _omitted = len(_ioc_candidates) - _IOC_CAP
-        _shown   = _ioc_candidates_sorted[:_IOC_CAP]
+        _shown   = _sample_iocs_by_type(_ioc_candidates, _IOC_CAP)
+        llm_stats.bump("ioc_omitted", _omitted)
         ioc_summary = "\n".join(f"- [{e.entity_type.value}] {e.value}" for e in _shown)
         ioc_summary += f"\n  ... and {_omitted} more IoCs (omitted to keep prompt size manageable)"
     else:

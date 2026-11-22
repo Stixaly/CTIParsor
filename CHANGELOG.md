@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 3 no longer loses a passage to a passing provider error (#968, #969, #970).** A timeout or a
+  dropped connection from an OpenAI-compatible provider (vLLM, Ollama, LM Studio) is retried, and so are
+  408, 409, 429 and 5xx from both SDKs; other 4xx are not. `Retry-After` is obeyed up to 30 s, and the
+  total time of one call is bounded by `LLM_RETRY_MAX_DELAY` (default: 3 × `LLM_TIMEOUT`). A passage
+  whose answer could not be read is no longer saved to the checkpoint as done: it gets one second try at
+  the end of the stage (not made once the provider is seen down), and the passages still failing are
+  listed in the stage report (`failed_chunks`, with position and reason) and in the stage 3 message.
+  When a passage has more than 30 IoCs, the list offered to the model takes them by turns across types
+  instead of filling it with the first type in alphabetical order. New stage 3 counts:
+  `provider_retries`, `ioc_omitted`, `failed_chunks`, `retried_chunks`, `recovered_chunks`.
+- **Snort parser fixes (#789-#793).** Nested IP lists are split by bracket depth; a `;` or `,` inside a
+  quoted value no longer splits an option, and an escaped `\;` keeps its `;`; an unknown option name is
+  rejected even when its value is a content modifier; a negated or space-led `pcre` keeps its `!`; a port
+  range needs exactly two bounds with the low one first.
 - **The image's Playwright moves to 1.65.2, which closes 15 Grype alerts.** Its driver embeds
   Node.js 26.13.1 in place of 24.22.1, which fixes CVE-2026-126051, CVE-2026-123863 to
   CVE-2026-123868, CVE-2026-123871, CVE-2026-123872, CVE-2026-123874, CVE-2026-123875,
