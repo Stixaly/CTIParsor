@@ -472,7 +472,7 @@ def _stage_2e(monkeypatch, model):
 def test_the_stage_report_says_ran_with_what_the_model_was_asked(monkeypatch):
     result, outcome = _stage_2e(monkeypatch, _FakeGLiNER([_pred("malware family", 0.9, "Emotet")]))
     assert (outcome.status, outcome.reason) == ("ran", "")
-    assert outcome.counts == {"entities": 1, "chunks": 2, "chunks_unanswered": 0}
+    assert outcome.counts == {"entities": 1, "chunks": 2, "chunks_unanswered": 0, "truncated_chunks": 0}
     assert [e.value for e in result.gliner] == ["Emotet"]
 
 
@@ -488,7 +488,7 @@ def test_the_stage_report_says_failed_when_the_model_answered_nothing(monkeypatc
     _result, outcome = _stage_2e(monkeypatch, _Silent())
     assert outcome.status == "failed"
     assert outcome.reason == "the model answered none of the 2 chunks: TypeError: one string, not this"
-    assert outcome.counts == {"entities": 0, "chunks": 2, "chunks_unanswered": 2}
+    assert outcome.counts == {"entities": 0, "chunks": 2, "chunks_unanswered": 2, "truncated_chunks": 0}
 
 
 def test_the_stage_report_says_failed_when_the_model_did_not_load(monkeypatch):

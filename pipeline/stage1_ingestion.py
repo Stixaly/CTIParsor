@@ -69,6 +69,16 @@ try:
 except ImportError:
     _OCR_AVAILABLE = False
 
+# What the OCR summary says when the OCR libraries are not installed.
+_OCR_LIBS_MISSING = "OCR libraries not installed (pytesseract, pdf2image)"
+
+
+def ocr_available() -> bool:
+    """True when the OCR libraries import and the Tesseract and poppler
+    (pdftoppm) binaries are on PATH.  Said once at worker start (#982)."""
+    import shutil
+    return _OCR_AVAILABLE and bool(shutil.which("tesseract")) and bool(shutil.which("pdftoppm"))
+
 # Minimum average chars per page to consider a PDF text-based (not scanned)
 _MIN_CHARS_PER_PAGE = 50
 _DETECTION_SAMPLE_PAGES = 3
@@ -346,16 +356,19 @@ _OCR_BATCH_PAGES = 10
 def _read_pdf_ocr(path: Path) -> str:
     """OCR path for scanned PDFs — rasterizes and OCRs in fixed-size page
     batches so a large scan never holds every page as an image in RAM at once."""
-    if not _OCR_AVAILABLE:
-        logger.warning("OCR libraries not available. Install pdf2image and pytesseract.")
-        logger.warning("On Linux: sudo apt install tesseract-ocr && pip install pdf2image pytesseract")
-        return ""
-
     try:
         with pdfplumber.open(path) as pdf:
             num_pages = len(pdf.pages)
     except Exception as e:
         logger.warning(f"OCR failed: could not open {path.name}: {e}")
+        _note_unavailable(f"PDF could not be opened for OCR: {e}")
+        return ""
+    _note_pages_total(num_pages)
+    if not _OCR_AVAILABLE:
+        logger.warning("OCR libraries not available. Install pdf2image and pytesseract.")
+        logger.warning("On Linux: sudo apt install tesseract-ocr && pip install pdf2image pytesseract")
+        _note_unavailable(_OCR_LIBS_MISSING)
+        _note_failed(num_pages)
         return ""
 
     pages_text: list[str] = []
@@ -365,13 +378,21 @@ def _read_pdf_ocr(path: Path) -> str:
             images = convert_from_path(str(path), dpi=300, first_page=start, last_page=end)
         except Exception as e:
             logger.warning(f"OCR failed on pages {start}-{end} of {path.name}: {e}")
+            _note_failed(end - start + 1)
             continue
+        # A batch that rasterizes fewer pages than asked for loses the rest silently.
+        _note_failed(max(0, end - start + 1 - len(images)))
         try:
             for page, img in enumerate(images, start):
                 try:
-                    pages_text.append(pytesseract.image_to_string(img, lang=ocr_page_lang(img)))
+                    langs, script = _page_langs(img)
+                    text = pytesseract.image_to_string(img, lang=langs)
                 except Exception as e:
                     logger.warning(f"OCR failed on page {page} of {path.name}: {e}")
+                    _note_failed()
+                    continue
+                _note_page(langs, script)
+                pages_text.append(text)
         finally:
             # Close all PIL images to free resources before the next batch
             for img in images:
@@ -531,7 +552,8 @@ def _count(counts: dict[str, int], key: str) -> None:
 
 
 def _note_page(langs: str, script: str | None) -> None:
-    """Adds one OCR'd page to the document's record, when one is collecting."""
+    """Adds one OCR'd page to the document's record, when one is collecting.
+    Called only for a page whose text was read."""
     summary = _ocr_summary.get()
     if summary is None:
         return
@@ -541,19 +563,53 @@ def _note_page(langs: str, script: str | None) -> None:
         _count(summary.setdefault("scripts", {}), script)
 
 
+def _note_pages_total(total: int) -> None:
+    """The page count of a document that needs OCR, and the zero counts that go
+    with it, when one is collecting."""
+    summary = _ocr_summary.get()
+    if summary is None:
+        return
+    summary.setdefault("pages", 0)
+    summary.setdefault("pages_failed", 0)
+    summary["pages_total"] = total
+
+
+def _note_failed(pages: int = 1) -> None:
+    """Pages that needed OCR and were not read: OCR failed on them, or could not run."""
+    summary = _ocr_summary.get()
+    if summary is None:
+        return
+    summary.setdefault("pages", 0)
+    summary["pages_failed"] = summary.get("pages_failed", 0) + pages
+
+
+def _note_unavailable(reason: str) -> None:
+    """Why OCR could not run on the document, when one is collecting."""
+    summary = _ocr_summary.get()
+    if summary is None:
+        return
+    summary.setdefault("pages", 0)
+    summary.setdefault("pages_failed", 0)
+    summary["unavailable"] = reason
+
+
+def _page_langs(img: Any) -> tuple[str, str | None]:
+    """The languages one page image is read with, and its script (None unless
+    OCR_LANG=auto).  Records nothing: the page is noted once its text is read."""
+    if _ocr_setting() != OCR_LANG_AUTO:
+        return ocr_lang(), None
+    script, langs = _languages_for_script(*_page_script(img))
+    return _auto_langs(script, langs), script
+
+
 def ocr_page_lang(img: Any) -> str:
     """The languages one page image is read with.
 
     ocr_lang() for an explicit OCR_LANG; with OCR_LANG=auto, the languages of
     the script that OSD finds on the page (see _languages_for_script)."""
-    if _ocr_setting() != OCR_LANG_AUTO:
-        langs = ocr_lang()
-        _note_page(langs, None)
-        return langs
-    script, langs = _languages_for_script(*_page_script(img))
-    read_with = _auto_langs(script, langs)
-    _note_page(read_with, script)
-    return read_with
+    langs, script = _page_langs(img)
+    _note_page(langs, script)
+    return langs
 
 
 @contextmanager
@@ -615,20 +671,31 @@ def _page_is_scanned(page) -> bool:
 def _ocr_page(path: Path, page_number: int) -> str:
     """OCR one page (1-based); "" when OCR is unavailable or fails."""
     if not _OCR_AVAILABLE:
+        _note_unavailable(_OCR_LIBS_MISSING)
+        _note_failed()
         return ""
     try:
         images = convert_from_path(str(path), dpi=300, first_page=page_number, last_page=page_number)
     except Exception as e:
         logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
+        _note_failed()
         return ""
     try:
-        return "\n".join(pytesseract.image_to_string(img, lang=ocr_page_lang(img)) for img in images)
+        texts = []
+        for img in images:
+            langs, script = _page_langs(img)
+            texts.append(pytesseract.image_to_string(img, lang=langs))
+            _note_page(langs, script)
     except Exception as e:
         logger.warning(f"OCR failed on page {page_number} of {path.name}: {e}")
+        _note_failed()
         return ""
     finally:
         for img in images:
             img.close()
+    if not texts:
+        _note_failed()
+    return "\n".join(texts)
 
 
 # ── IoCs in wrapped table cells (audit B 8.1.5) ─────────────────────────────
@@ -744,6 +811,7 @@ def _read_pdf(path: Path) -> str:
         # Mixed document: keep each page in place, OCR only the scanned ones.
         logger.info(f"{len(scanned)} of {n_pages} pages are scans — OCR on those pages "
                     f"(lang={ocr_lang()})")
+        _note_pages_total(n_pages)
         for i in scanned:
             page_texts[i] = _ocr_page(path, i + 1) or page_texts[i]
         return _with_table_rows("\n".join(t for t in page_texts if t.strip()), path,

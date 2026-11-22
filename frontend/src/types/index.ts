@@ -42,7 +42,7 @@ export interface EgressRecord {
 export interface StageRecord {
   stage: string
   label?: string
-  status: 'ran' | 'skipped' | 'failed' | string
+  status: 'ran' | 'skipped' | 'failed' | 'degraded' | string
   reason?: string
   egress?: EgressRecord
 }
@@ -579,6 +579,11 @@ export interface LedgerEntity {
    *  'targeted_country' | 'targeted_sector' */
   input?: string
   mitre_id?: string
+  /** reason 'attack_id_revoked' (#980): the revoked id the report wrote, the id that replaces it,
+   *  and the ATT&CK release that revoked it */
+  written?: string
+  replaced_by?: string
+  attack_release?: string
   /** reason 'type_conflict': what MITRE calls this name, in the other family */
   mitre_ids?: string[]
   mitre_types?: string[]

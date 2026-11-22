@@ -56,10 +56,11 @@ def test_parse_payload_rejects_non_object():
     with pytest.raises(ValueError):
         _parse_payload("[1, 2]")
 
-def test_to_read_falls_back_to_none_on_unknown_kind():
+def test_to_read_leaves_an_unknown_kind_unread():
     data = {"figure_kind": "diagram-of-doom", "verbatim_text": [], "edges": [], "iocs": []}
     r = _to_read(data, "p", "m", 0.0, None, None)
-    assert r.kind == "none"
+    assert r.kind == "unread"
+    assert r.unexpected_kind is True
 
 def test_to_read_drops_non_string_verbatim_entries():
     data = {"figure_kind": "none", "verbatim_text": ["ok", 42, None], "edges": [], "iocs": []}

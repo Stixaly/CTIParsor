@@ -146,8 +146,8 @@ class TestMitreIdCase:
     """#254 — a lower-case ATT&CK id is kept, in upper case, when the index holds it."""
 
     def test_a_known_lower_case_id_is_extracted_upper_cased(self):
-        ttps = _values("The actor used t1059.001 and ta0001 again.", EntityType.TTP)
-        assert set(ttps) == {"T1059.001", "TA0001"}
+        ttps = _values("The actor used t1059.001 and t1053.005 again.", EntityType.TTP)
+        assert set(ttps) == {"T1059.001", "T1053.005"}
 
     def test_an_unknown_lower_case_id_is_dropped(self):
         assert not aliases.is_attack_id("T1000")

@@ -314,6 +314,10 @@ def _stored_resolved_away(job_id: str, stored: str | None) -> list[RawEntity]:
     return out
 
 
+# A technique id as Stage 2 writes it: T1059 or T1059.001 (#980).
+_TECHNIQUE_ID = re.compile(r"T\d{4}(?:\.\d{3})?", re.ASCII)
+
+
 def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
                    reconciliation: Reconciliation | None = None) -> None:
     """Persist Stage 2 IoCs, Stage 2b gazetteer, and Stage 3 LLM entities to the DB.
@@ -347,14 +351,44 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
             if _mid in _covered_ids or _mid in _covered_parents:
                 continue
 
-        rows_ioc.append((
+        # #980 — an ATT&CK id the bundled release does not hold (a typo, or a
+        # technique newer than it) waits for an analyst with its reason, as a
+        # ttp_review row does (ADR-0082).  Only Stage 2's own rows are checked
+        # here: Stage 3c resolves the techniques the model proposes.
+        from pipeline.attack_ids import resolve, unknown_reason
+
+        _aid = (e.mitre_id or e.value or "").strip().upper()
+        _held = None
+        if source == "ioc" and e.entity_type.value == "ttp" and _TECHNIQUE_ID.fullmatch(_aid):
+            if resolve(_aid).status == "unknown":
+                _held = unknown_reason(_aid)
+        _row: tuple = (
             str(uuid4()), job_id,
             e.value, e.entity_type.value,
             e.context, e.confidence,
             e.mitre_id, None, source,
-        ))
+        )
+        # #980 — the sentence or table line where the report writes an ATT&CK id
+        # is its evidence, located in the report as a model quote is (ADR-0028):
+        # Stage 2's own offset is relative to a refanged chunk, not to the report.
+        _quote = (getattr(e, "evidence_text", None) or "").strip() if e.entity_type.value == "ttp" else ""
+        if _quote:
+            from pipeline.evidence_span import locate
+            try:
+                _span = locate(_quote, report_text) if report_text else None
+            except Exception as exc:   # locating must never fail a job
+                logger.warning(f"[Worker] job {job_id}: quote of {e.value} not located: "
+                               f"{type(exc).__name__}: {exc}")
+                _span = None
+            _row = (*_row, _quote, "reported",
+                    _span.start if _span is not None else None, _span.end if _span is not None else None)
+        # A held row is 14 fields, its reason the 14th (index 13), as in rows_held.
+        if _held is not None:
+            _row = (*_row, *([None] * (13 - len(_row))), _held)
+        rows_ioc.append(_row)
 
-    # Deliberately heterogeneous: ordinary rows carry 9 fields, TTP rows 13,
+    # Deliberately heterogeneous: ordinary rows carry 9 fields, TTP rows 13
+    # (with their evidence), held rows 14 (their reason last),
     # and they are padded to a common width just before the insert below.
     # The NER stages drop denied names at their own output (ADR-0052); the
     # LLM's name lists are the one source that reaches the store without
@@ -481,7 +515,7 @@ def _save_entities(job_id: str, raw_entities, llm_result, report_text: str = "",
             # reason (ADR-0082); every other row is padded here rather than at
             # each of the places they are built.
             _entity_rows = [
-                (*r, None) if len(r) == 13 else (*r, None, None, None, None, None)
+                r if len(r) == 14 else (*r, None) if len(r) == 13 else (*r, None, None, None, None, None)
                 for r in rows_ioc + rows_llm
             ] + rows_held
             # Stage 3r (ADR-0090): each row's status against the baseline, then the
@@ -693,6 +727,24 @@ def _record_stage_report(job_id: str, stages: list[dict]) -> None:
         logger.warning(f"[run-config] stage report not recorded for job {job_id}: {exc}")
 
 
+def log_missing_optional_dependencies() -> None:
+    """Log once, at worker start, the optional dependencies this process lacks (#982): OCR, iocextract (IPv6) and
+    the spaCy model.  Silent when all are present, and a spaCy model turned off by choice is not missing."""
+    from pipeline.stage1_ingestion import ocr_available
+    from pipeline.stage2_extraction import nlp_status
+
+    status = nlp_status()
+    missing = []
+    if not ocr_available():
+        missing.append("OCR (tesseract/pdftoppm/pytesseract/pdf2image)")
+    if not status["iocextract"]:
+        missing.append("iocextract (IPv6)")
+    if status["spacy_model"] is None and not status["spacy_skipped"]:
+        missing.append("spaCy model")
+    if missing:
+        logger.warning("optional dependencies missing: " + ", ".join(missing))
+
+
 def _run_pipeline(job_id: str, file_path: str, original_filename: str,
                   owner_worker_id: str | None = None) -> None:
     """
@@ -751,7 +803,14 @@ def _run_pipeline(job_id: str, file_path: str, original_filename: str,
         document.output_path = str(bundle_output_path(job_id, document.report_name))
 
         hooks = _WorkerHooks(job_id, _owner_worker_id, start_time)
-        result = run_document(document, RunOptions.from_env(), hooks)
+        from pipeline.orchestrator import StageRequired
+        try:
+            result = run_document(document, RunOptions.from_env(), hooks)
+        except StageRequired as exc:
+            # The stage that stopped the run (an unreadable document, #982) is in
+            # the stage report the job page reads, not only in the progress event.
+            _record_stage_report(job_id, [exc.outcome.as_dict()])
+            raise
         _record_stage_report(job_id, result.stage_report())
         if result.bundle is None:
             raise RuntimeError("the run produced no bundle (Stage 4 did not run)")

@@ -36,9 +36,9 @@ Configuration:
 """
 from __future__ import annotations
 
-import functools
 import json
 import re
+import threading
 from collections.abc import Callable, Sequence
 
 from pydantic import BaseModel, Field
@@ -175,19 +175,54 @@ def _norm(s: str) -> str:
     return " ".join(_INVISIBLE_CHARS.sub("", s).split()).lower()
 
 
-@functools.lru_cache(maxsize=1)
+_definitions_lock = threading.Lock()
+_definitions_cache: dict[str, str] | None = None    # set by a successful load only
+_definitions_error: str | None = None               # why the last load failed
+
+
 def _definitions() -> dict[str, str]:
-    try:
-        from pipeline import mitre_db
-        return {t["id"].upper(): (t.get("description") or "") for t in mitre_db.get_techniques()}
-    except attack_data.UnknownAttackRelease:
-        raise       # an unknown ATTACK_RELEASE reaches the caller; no empty dict is cached (ADR-0087)
-    except Exception as exc:
-        # Cached: every selection prompt of this process then lists the
-        # candidates without their ATT&CK definition.
-        logger.error(f"[Stage 3f] ATT&CK definitions unavailable, candidates are offered "
-                     f"without them: {type(exc).__name__}: {exc}")
-        return {}
+    """The ATT&CK definition of each technique id, loaded once per success.
+
+    A failed load is not kept: the next call tries again, and `definitions_error()`
+    says why the last one failed.  That call returns {}, and its candidates are
+    offered without their definitions."""
+    global _definitions_cache, _definitions_error
+    with _definitions_lock:
+        if _definitions_cache is not None:
+            return _definitions_cache
+        try:
+            from pipeline import mitre_db
+            defs = {t["id"].upper(): (t.get("description") or "") for t in mitre_db.get_techniques()}
+        except attack_data.UnknownAttackRelease:
+            raise       # an unknown ATTACK_RELEASE reaches the caller (ADR-0087)
+        except Exception as exc:
+            _definitions_error = f"ATT&CK definitions unreadable: {type(exc).__name__}: {exc}"
+            logger.error(f"[Stage 3f] {_definitions_error}; candidates are offered without them")
+            return {}
+        if not defs:
+            # mitre_db logs and returns an empty index when its file is missing or
+            # unreadable: that is a failure too, and it is not cached either.
+            _definitions_error = "ATT&CK definitions unreadable: the technique index is empty or missing"
+            logger.error(f"[Stage 3f] {_definitions_error}; candidates are offered without them")
+            return {}
+        _definitions_cache, _definitions_error = defs, None
+        return defs
+
+
+def _forget_definitions() -> None:
+    """Drop the loaded definitions and the error: the next call loads again."""
+    global _definitions_cache, _definitions_error
+    with _definitions_lock:
+        _definitions_cache, _definitions_error = None, None
+
+
+_definitions.cache_clear = _forget_definitions  # type: ignore[attr-defined]  # as lru_cache had it (tests)
+
+
+def definitions_error() -> str | None:
+    """Why the ATT&CK definitions did not load at the last attempt; None after a
+    success, or before any attempt."""
+    return _definitions_error
 
 
 def _clip(s: str, n: int) -> str:

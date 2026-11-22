@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   benignReason, describeTime, edgeKindOf, EDGE_KIND_ORDER, EDGE_KIND_STYLE, EDGE_ORIGIN_LABEL, entityReason,
-  isFromBaseline, isRenamed, OBJECT_ORIGIN_LABEL, reasonRef, relationshipReason,
+  entryReason, isFromBaseline, isRenamed, OBJECT_ORIGIN_LABEL, reasonRef, relationshipReason,
 } from './provenance'
 
 describe('describeTime — what the export did with a date (ADR-0063)', () => {
@@ -53,6 +53,14 @@ describe('baseline vocabulary — the analyst’s STIX bundle (ADR-0090)', () =>
     expect(isRenamed('alias_canonical')).toBe(true)
     expect(isRenamed('same_value')).toBe(false)
     expect(isRenamed(undefined)).toBe(false)
+  })
+
+  it('reads a revoked ATT&CK id the report wrote as a rename, with the id that replaces it', () => {
+    const entry = { reason: 'attack_id_revoked', written: 'T1562', replaced_by: 'T1685', attack_release: '19.2' }
+    expect(entryReason(entry)).toBe('T1562 written in the report, revoked in ATT&CK 19.2, replaced by T1685')
+    expect(entityReason('attack_id_revoked')).toContain('revoked')
+    expect(isRenamed('attack_id_revoked')).toBe(true)
+    expect(entryReason({ reason: 'same_value' })).toBe(entityReason('same_value'))
   })
 
   it('explains a name that denotes objects of several types', () => {

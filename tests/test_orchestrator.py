@@ -210,7 +210,7 @@ def test_a_run_that_read_figures_names_the_provider_and_model(mock_llm, sample_c
 
     outcome = result.outcome("1f")
     assert (outcome.status, outcome.reason, outcome.counts) == (
-        "ran", "vllm/Inferact/Qwen3.8", {"figures": 0, "read": 0})
+        "ran", "vllm/Inferact/Qwen3.8", {"figures": 0, "read": 0, "unexpected_kind": 0})
     assert ("stage", {"stage": "1f", "label": "Figures", "figures": 0, "read": 0,
                       "provider": "vllm", "model": "Inferact/Qwen3.8"}) in events
 

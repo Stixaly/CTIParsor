@@ -40,13 +40,17 @@ def judge(report: object, required: list[str]) -> tuple[list[str], list[str]]:
     for stage, status, reason in rows:
         if status == "failed" and stage not in required:
             problems.append(f"stage {stage} failed: {reason}")
+        # A degraded stage ran on an incomplete input (#982): the image must have the dependency, so it is a problem
+        # wherever the stage is, and a required one is reported here rather than below.
+        if status == "degraded":
+            problems.append(f"stage {stage} degraded: {reason}")
     for name in required:
         found = [row for row in rows if row[0] == name]
         if not found:
             problems.append(f"required stage {name} is missing from the report")
         for _, status, reason in found:
             # It ran, or the configuration turned it off; a skip for any other reason is a problem.
-            if status == "ran" or (status == "skipped" and reason.startswith("disabled")):
+            if status == "ran" or status == "degraded" or (status == "skipped" and reason.startswith("disabled")):
                 continue
             problems.append(f"required stage {name} did not run: {status} ({reason})")
     return lines, problems

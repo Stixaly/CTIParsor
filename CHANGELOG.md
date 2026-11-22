@@ -9,6 +9,25 @@ theme.
 
 ## [Unreleased]
 
+- **A stage that could not do its work no longer reports `ran` (#982, ADR-0104).** The stage report has a
+  fourth state, `degraded`: the stage ran and its result is usable, but incomplete, and the reason says why.
+  It counts as run (`RunResult.ran()`, no `StageRequired`). An empty text after Stage 1 now fails the run;
+  OCR that could not read some pages, an unexpected figure type (the figure is left unread and not cached),
+  a missing spaCy model (unless `SKIP_HEAVY_MODELS`) or `iocextract`, and unreadable ATT&CK definitions at
+  3f give `degraded`; an unreadable `gazetteer.json` fails Stage 2b. GLiNER's truncation warning is
+  counted (`truncated_chunks`) instead of hidden. A failed load is no longer cached. The state shows on the
+  report page, in two new `/metrics` gauges (`ctiparsor_jobs_with_degraded_stages`,
+  `ctiparsor_jobs_with_failed_stages`), in one `optional dependencies missing` line when a worker starts,
+  in the image smoke (a degraded stage is a problem) and in `evaluation score` ("stages degraded").
+  ADR-0104 lists the silent empty returns that remain.
+- **An ATT&CK id written in a report is checked like one the model proposes (#980, ADR-0104).** Each id is
+  classed against the embedded release. A tactic (`TA####`) gives no attack-pattern. A revoked id becomes
+  the attack-pattern of its successor, merged with the model's technique when there is one; the id written
+  stays on it as a `report` external reference, and the ledger says `attack_id_revoked` with `written`,
+  `replaced_by` and `attack_release`. An id the release does not hold (newer, deprecated or mistyped) is
+  held for review and stays out of the bundle until the analyst decides; the command line, which has no
+  review, still ships it. The sentence or table line holding the id is its citation, labelled `reported`.
+
 - **Stage 3 no longer loses a passage to a passing provider error (#968, #969, #970).** A timeout or a
   dropped connection from an OpenAI-compatible provider (vLLM, Ollama, LM Studio) is retried, and so are
   408, 409, 429 and 5xx from both SDKs; other 4xx are not. `Retry-After` is obeyed up to 30 s, and the

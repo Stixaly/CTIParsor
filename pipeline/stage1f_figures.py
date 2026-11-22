@@ -359,6 +359,15 @@ def read_figures(pdf_path: Path | str, backend: VisionBackend,
     return results
 
 
+def count_unexpected_kind(reads: list[tuple[FigureCandidate, FigureRead, str]]) -> int:
+    """How many reads came back with a figure_kind outside the contract (#982).
+
+    Those figures are unread: never cached, retried on the next run, and not in
+    the count of figures read.  The stage report gets this as `unexpected_kind`.
+    """
+    return sum(1 for _, read, _ in reads if read.unexpected_kind)
+
+
 def render_edges(read: FigureRead) -> list[str]:
     """Render a diagram's arrows as one `src -> dst` line each.
 

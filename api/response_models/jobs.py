@@ -82,7 +82,8 @@ class StageRecord(ApiResponse):
 
     stage: JsonValue = None
     label: JsonValue = Field(default=None, description="The stage's name, from its id.")
-    status: JsonValue = Field(default=None, description="ran, skipped or failed.")
+    status: JsonValue = Field(default=None, description="ran, skipped, failed or degraded. degraded: the stage ran "
+                                                       "and its output is usable, but incomplete; reason says why.")
     reason: JsonValue = Field(default=None, description="Why a stage was skipped or failed.")
     egress: JsonValue = Field(
         default=None, description="Present when the stage sends the report out (ADR-0097): "

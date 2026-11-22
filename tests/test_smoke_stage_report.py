@@ -74,6 +74,22 @@ def test_failed_required_stage_is_reported_once():
     assert problems == ["required stage 3 did not run: failed (every extraction call failed)"]
 
 
+def test_degraded_required_stage_is_a_problem_that_names_its_reason_once():
+    # The image must have every dependency: a degraded stage ran, but on an incomplete input (#982).
+    report = [row("2c", "ran"), row("2e", "ran"), row("3", "ran"),
+              row("2d", "degraded", "iocextract not installed: IPv6 addresses are not extracted")]
+    lines, problems = ssr.judge(report, REQUIRED.split())
+
+    assert problems == ["stage 2d degraded: iocextract not installed: IPv6 addresses are not extracted"]
+    assert lines[3] == "stage 2d: degraded (iocextract not installed: IPv6 addresses are not extracted)"
+
+
+def test_degraded_stage_outside_the_required_list_is_a_problem_too():
+    _, problems = ssr.judge([row("2c", "ran"), row("1", "degraded", "2 of 5 pages could not be read by OCR")], ["2c"])
+
+    assert problems == ["stage 1 degraded: 2 of 5 pages could not be read by OCR"]
+
+
 def test_required_stage_absent_from_the_report_is_a_problem():
     _, problems = ssr.judge([row("2c", "ran")], ["2c", "3"])
 
