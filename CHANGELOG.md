@@ -23,6 +23,27 @@ theme.
   quoted value no longer splits an option, and an escaped `\;` keeps its `;`; an unknown option name is
   rejected even when its value is a content modifier; a negated or space-led `pcre` keeps its `!`; a port
   range needs exactly two bounds with the low one first.
+- **The image's Playwright moves to 1.65.2, which closes 15 Grype alerts.** Its driver embeds
+  Node.js 26.13.1 in place of 24.22.1, which fixes CVE-2026-126051, CVE-2026-123863 to
+  CVE-2026-123868, CVE-2026-123871, CVE-2026-123872, CVE-2026-123874, CVE-2026-123875,
+  CVE-2026-123877, CVE-2026-123828, CVE-2026-123829 and CVE-2026-123862 (7 high, 6 medium,
+  2 low). Only that pin moves in `requirements.lock.txt` (`pyee` leaves it, no longer a dependency).
+  The image's Chromium follows the package: 156.0.8078.4 → 159.0.8154.6. The runtime stage now
+  installs `libatomic1`: Node.js 26 links `libatomic.so.1`, which the slim base image lacks.
+- **The Playwright 1.64.1 limitation is gone.** That driver predated the fix for
+  microsoft/playwright#43242, so a URL capture with JavaScript enabled could come back empty when
+  the page loaded its content through a redirected, credentialed cross-origin request. The 1.65.2
+  driver, built on 2026-11-13, carries the fix.
+- **Five CPython 3.14.10 alerts are reviewed and accepted.** CVE-2026-124249 (`http.cookiejar`),
+  CVE-2026-115559 (`imaplib`), CVE-2026-115791 (the `tarfile` / `zipfile` command lines),
+  CVE-2026-16052 (`http.cookies.Morsel`) and CVE-2026-19552 (`ssl.get_server_certificate`) are
+  fixed in 3.16 only, and no newer 3.14 image exists. None is reachable from CTIParsor: the
+  reasons are in SECURITY.md, each with its rule in `.grype.yaml`.
+
+- **The sign-in page has an animated background.** Behind the card, the report's graph grows like
+  the world tree Yggdrasil: branches and roots draw themselves, ten nodes marked with runes light up,
+  and two ravens fly along the branches. It is decorative (hidden from screen readers, no pointer
+  events) and stands still for users who ask for reduced motion.
 - **The sign-in page explains what CTIParsor does.** Beside the card, a left column shows the path
   from a threat report to entities to STIX 2.1 objects, and an example graph of nine STIX objects
   drawn on the world tree Yggdrasil (one realm per object). On load, each object's ring pulses in

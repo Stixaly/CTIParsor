@@ -45,6 +45,51 @@ ignore:
       version: 3.14.10
       type: binary
 
+  # Five more fixed in 3.16 only (NVD), none reachable from CTIParsor:
+  # http.cookiejar lets a response delete another domain's cookie from a shared
+  # jar (the only long-lived jars are the LLM SDKs' and the OIDC client's, each
+  # talking to one host, and no outbound call authenticates with a cookie);
+  # imaplib's STARTTLS keeps plaintext read-ahead (imaplib is never imported);
+  # the tarfile / zipfile command line can run a planted script (CTIParsor only
+  # calls the modules, never `python -m tarfile|zipfile`); http.cookies.Morsel
+  # keeps a semicolon in an attribute value (the API's cookie attributes are
+  # constants in the code); ssl.get_server_certificate skips the identity check
+  # with ca_certs (never called).
+  - vulnerability: CVE-2026-124249
+    reason: "Not exploitable: no shared cookie jar across hosts, and no outbound call authenticates with a cookie (SECURITY.md, reviewed 2026-11-22)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  - vulnerability: CVE-2026-115559
+    reason: "Unreachable: CTIParsor never imports imaplib (SECURITY.md, reviewed 2026-11-22)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  - vulnerability: CVE-2026-115791
+    reason: "Unreachable: only the tarfile / zipfile command line is affected, which CTIParsor never runs (SECURITY.md, reviewed 2026-11-22)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  - vulnerability: CVE-2026-16052
+    reason: "Not exploitable: the API's cookie attributes are constants, never taken from input (SECURITY.md, reviewed 2026-11-22)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
+  - vulnerability: CVE-2026-19552
+    reason: "Unreachable: CTIParsor never calls ssl.get_server_certificate (SECURITY.md, reviewed 2026-11-22)"
+    package:
+      name: python
+      version: 3.14.10
+      type: binary
+
   # hashlib's FIPS enforcement regressed in 3.14.10 only, fixed in 3.14.11.  It
   # matters only with OpenSSL in FIPS mode; the image's OpenSSL 3.0.22 (Debian
   # bookworm) runs with FIPS mode off and CTIParsor sets no OpenSSL configuration.
