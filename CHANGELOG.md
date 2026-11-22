@@ -30,6 +30,12 @@ theme.
   the world tree Yggdrasil: branches and roots draw themselves, ten nodes marked with runes light up,
   and two ravens fly along the branches. It is decorative (hidden from screen readers, no pointer
   events) and stands still for users who ask for reduced motion.
+- **The sign-in page explains what CTIParsor does.** Beside the card, a left column shows the path
+  from a threat report to entities to STIX 2.1 objects, and an example graph of nine STIX objects
+  drawn on the world tree Yggdrasil (one realm per object). On load, each object's ring pulses in
+  turn and the relationships draw themselves once; the page then stays still. The illustration is
+  hidden from screen readers, stands still for users who ask for reduced motion, and the left column
+  is hidden below 1100px.
 - **The 1.0 candidate `ee7847f` is qualified: every blocking gate passes.** The evidence, run on the
   candidate's image by digest between 2026-11-14 and 2026-11-15, is in
   `docs/releases/1.0-qualification.md`: the release dossier, a clean install of 0.8.0 upgraded and
