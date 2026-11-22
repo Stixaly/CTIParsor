@@ -206,6 +206,9 @@ class FigureRead:
     input_tokens: int | None = None
     output_tokens: int | None = None
     error: str | None = None
+    # True when the answer named a figure_kind outside FIGURE_KINDS (#982): the
+    # figure is unread, not a figure without content, and is counted apart.
+    unexpected_kind: bool = False
 
 
 def _without_credentials(url: str) -> str:
@@ -279,7 +282,13 @@ def _to_read(data: dict, provider: str, model: str, elapsed: float,
     """Convert raw model data into a validated FigureRead."""
     kind = data.get("figure_kind")
     if not isinstance(kind, str) or kind not in FIGURE_KINDS:
-        kind = "none"
+        # Not a reading: an answer outside the contract says nothing reliable
+        # about the figure, so it must not pass for "no content" and be cached
+        # as one (#982).  Unread, so it is retried on the next run.
+        shown = repr(kind)[:40]
+        logger.warning("Figure answer with unexpected figure_kind %s - figure left unread", shown)
+        return _unread(provider, model, elapsed,
+                       f"unexpected figure_kind {shown}", unexpected_kind=True)
 
     vt_raw = data.get("verbatim_text")
     verbatim_text = [x for x in vt_raw if isinstance(x, str)] if isinstance(vt_raw, list) else []
@@ -316,7 +325,8 @@ def _to_read(data: dict, provider: str, model: str, elapsed: float,
     )
 
 
-def _unread(provider: str, model: str, elapsed: float, error: str) -> FigureRead:
+def _unread(provider: str, model: str, elapsed: float, error: str,
+            unexpected_kind: bool = False) -> FigureRead:
     """Create a FigureRead representing a failed read."""
     return FigureRead(
         kind="unread",
@@ -328,7 +338,8 @@ def _unread(provider: str, model: str, elapsed: float, error: str) -> FigureRead
         elapsed_s=elapsed,
         input_tokens=None,
         output_tokens=None,
-        error=error
+        error=error,
+        unexpected_kind=unexpected_kind,
     )
 
 

@@ -244,6 +244,35 @@ def test_seeded_database_is_reflected(loopback_client, temp_db):
         assert name in helps and name in types, name
 
 
+def test_stage_report_counts_jobs_with_degraded_or_failed_stages(loopback_client, temp_db):
+    """#982: a job counts once per status, and an unreadable run config is skipped, not a failed scrape."""
+    now = temp_db.now_iso()
+
+    def report(*statuses):
+        return json.dumps({"stage_report": [{"stage": str(i), "status": s, "reason": "r"}
+                                            for i, s in enumerate(statuses)]})
+
+    run_configs = {
+        "d1": report("ran", "degraded"),
+        "d2": report("degraded", "degraded"),
+        "f1": report("failed", "ran"),
+        "ok": report("ran", "skipped"),
+        "unreadable": '{"stage_report": [{"status": "degraded"',
+        "not-a-report": json.dumps(["degraded", "failed"]),
+    }
+    for job_id, run_config in run_configs.items():
+        _insert_job(temp_db, job_id, "completed", now)
+        conn = temp_db.get_conn()
+        conn.execute("UPDATE jobs SET run_config_json=? WHERE id=?", (run_config, job_id))
+        conn.commit()
+
+    helps, types, samples = parse(loopback_client.get("/metrics").text)
+
+    assert _value(samples, "ctiparsor_jobs_with_degraded_stages") == 2
+    assert _value(samples, "ctiparsor_jobs_with_failed_stages") == 1
+    assert "ctiparsor_jobs_with_degraded_stages" in helps and types["ctiparsor_jobs_with_failed_stages"] == "gauge"
+
+
 def test_empty_queue_has_zero_oldest_age_and_no_workers(loopback_client):
     helps, _, samples = parse(loopback_client.get("/metrics").text)
     assert _value(samples, "ctiparsor_oldest_queued_job_age_seconds") == 0

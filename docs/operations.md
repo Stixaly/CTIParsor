@@ -257,6 +257,9 @@ docker compose logs -f app worker
   subprocess of the worker.
 - `LOG_LEVEL` (`INFO`), and `LOG_FORMAT=json` for one JSON object per line;
   `LOG_FILE` adds a rotated file ([configuration.md](configuration.md)).
+- At start, a worker logs one `optional dependencies missing: ...` warning when OCR,
+  `iocextract` (IPv6) or the spaCy model is absent. The reports it then processes show
+  the matching stage as `degraded` in their stage report.
 - `docker compose logs postgres` for the database.
 
 ### Log tags
@@ -409,6 +412,8 @@ The endpoint answers while the database is down: `ctiparsor_database_up` is
 |---|---|
 | `ctiparsor_jobs{status}` | jobs per status (every status is listed, at 0 when none) |
 | `ctiparsor_failed_jobs` | jobs in status `failed` |
+| `ctiparsor_jobs_with_degraded_stages` | jobs whose stage report holds a `degraded` stage (it ran, on incomplete input: a missing optional dependency, pages OCR could not read) |
+| `ctiparsor_jobs_with_failed_stages` | jobs whose stage report holds a `failed` stage |
 | `ctiparsor_oldest_queued_job_age_seconds` | age of the oldest `queued` job; 0 when the queue is empty |
 | `ctiparsor_workers{state}` | worker loops: `busy`, `idle`, `stale` (the rule of `GET /api/queue/status`) |
 | `ctiparsor_database_up` | 1 when PostgreSQL answers `SELECT 1`, else 0 |

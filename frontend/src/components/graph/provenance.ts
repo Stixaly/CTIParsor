@@ -7,7 +7,7 @@
  * the legend and the panels all read from here so they cannot disagree.
  */
 import type { EdgeKind } from './graphLayout'
-import type { LedgerChange, LedgerTime } from '../../types'
+import type { LedgerChange, LedgerEntity, LedgerTime } from '../../types'
 
 /** Ledger `origin` of an SRO → the edge kind it is drawn as. */
 export function edgeKindOf(origin: string | undefined): EdgeKind {
@@ -118,6 +118,7 @@ const ENTITY_REASON: Record<string, string> = {
   same_technique:    'same ATT&CK technique as another row',
   alias_canonical:   'an alias of a MITRE object, named by its canonical name',
   attack_id_named:   'a bare ATT&CK id, named after its technique in the ATT&CK release the bundle was built with — under the id alone, OpenCTI would rename the technique it holds',
+  attack_id_revoked: 'an ATT&CK id the report wrote, revoked in the ATT&CK release the bundle was built with — the object takes the id that replaces it',
   type_conflict:     'MITRE files this name under another kind of object (an actor named after a malware, or software after an actor), so it was not renamed — check the type',
   alias_merge:       'merged into an alias by graph completion (Stage 4b)',
   no_iso_country:    'a STIX Location needs an ISO country code, and this name has none',
@@ -171,7 +172,21 @@ export function entityReason(code: string | undefined): string {
 
 /** An emitted row whose object ships under another name than the row's value. */
 export function isRenamed(code: string | undefined): boolean {
-  return code === 'alias_canonical' || code === 'attack_id_named'
+  return code === 'alias_canonical' || code === 'attack_id_named' || code === 'attack_id_revoked'
+}
+
+/** What a revoked ATT&CK id the report wrote became (#980): the id as written, the release that revoked it
+ *  and the id that replaces it, e.g. "T1562 written in the report, revoked in ATT&CK 19.2, replaced by T1685". */
+export function revokedReason(e: Pick<LedgerEntity, 'written' | 'replaced_by' | 'attack_release'>): string {
+  const written = e.written ?? 'an ATT&CK id'
+  const release = e.attack_release ? ` in ATT&CK ${e.attack_release}` : ''
+  const replaced = e.replaced_by ? `, replaced by ${e.replaced_by}` : ''
+  return `${written} written in the report, revoked${release}${replaced}`
+}
+
+/** The reason of one review row's ledger entry, read for the panel: a revoked id names its ids. */
+export function entryReason(e: Pick<LedgerEntity, 'reason' | 'written' | 'replaced_by' | 'attack_release'>): string {
+  return e.reason === 'attack_id_revoked' ? revokedReason(e) : entityReason(e.reason)
 }
 
 /** A reason may name the object behind it: `baseline_refs_closure:<id>`

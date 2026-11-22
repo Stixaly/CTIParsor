@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
 from pipeline import ner_precision
-from pipeline.aliases import is_attack_id
+from pipeline.attack_ids import resolve
 from pipeline.env_flags import env_bool
 from pipeline.regex_safety import PY_DIGIT, continues_a_word, glued_to_a_word
 from pipeline.regex_safety import PY_WHITESPACE as _WS
@@ -81,14 +81,45 @@ except ImportError:
     _IOCEXTRACT_AVAILABLE = False
 
 _nlp = None
+_nlp_model_name: str | None = None
 if _spacy_module is not None and not _SKIP_HEAVY:
     try:
         _nlp = _spacy_module.load("en_core_web_lg")
+        _nlp_model_name = "en_core_web_lg"
     except OSError:
         try:
             _nlp = _spacy_module.load("en_core_web_sm")
+            _nlp_model_name = "en_core_web_sm"
+            logger.info("en_core_web_lg not installed, using en_core_web_sm")
         except OSError:
             _nlp = None
+
+_nlp_status_logged = False
+
+
+def _log_missing_models_once() -> None:
+    """Warn once per process about a missing iocextract or spaCy model (not when skipped by choice)."""
+    global _nlp_status_logged
+    if _nlp_status_logged:
+        return
+    _nlp_status_logged = True
+    if not _IOCEXTRACT_AVAILABLE:
+        logger.warning("iocextract not installed: IPv6 addresses are not extracted")
+    if _nlp is None and not _SKIP_HEAVY:
+        logger.warning("spaCy model en_core_web_lg/en_core_web_sm not installed: named-entity recognition is off")
+
+
+_log_missing_models_once()
+
+
+def nlp_status() -> dict:
+    """What Stage 2 loaded at import: the spaCy model name (None if none), whether
+    spaCy was skipped by choice, and whether iocextract is installed."""
+    return {
+        "spacy_model": _nlp_model_name,
+        "spacy_skipped": _SKIP_HEAVY,
+        "iocextract": _IOCEXTRACT_AVAILABLE,
+    }
 
 # --- Patterns regex ---
 
@@ -960,24 +991,57 @@ def _extract_cves(text: str) -> list[RawEntity]:
     return results
 
 
+# A break between two sentences of a report (". ", "! ", "? "), or a line break:
+# the sentence, or the table row, that holds an ATT&CK id.
+_QUOTE_BREAK = re.compile(r"(?<=[.!?]) |\n")
+# Longest citation kept for an ATT&CK id, the id included.
+_QUOTE_MAX = 300
+
+
+def _citation(text: str, start: int, end: int) -> tuple[str, int]:
+    """The sentence (or table row) of `text` holding the id at [start, end), spaces
+    normalised and cut to _QUOTE_MAX characters around the id; and the offset in
+    `text` where that citation starts."""
+    left = 0
+    for b in _QUOTE_BREAK.finditer(text, 0, start):
+        left = b.end()
+    right = len(text)
+    after = _QUOTE_BREAK.search(text, end)
+    if after:
+        right = after.start()
+    budget = _QUOTE_MAX - (end - start)
+    before = budget // 2
+    lo = max(left, start - before)
+    hi = min(right, end + budget - before)
+    raw = text[lo:hi]
+    return " ".join(raw.split()), lo + len(raw) - len(raw.lstrip())
+
+
 def _extract_mitre_ttps(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     results: list[RawEntity] = []
     for m in _MITRE_TTP_PATTERN.finditer(text):
-        v = m.group().upper()
-        # An id in upper case is kept, known or not: a report may cite a technique
-        # newer than the bundled release (ATTACK_RELEASE).  One written in lower
-        # case ("t1059.001") is kept only when the index holds it: "t1000" in
-        # prose is no technique.
-        if v != m.group() and not is_attack_id(v):
+        res = resolve(m.group())
+        v = res.written
+        # A tactic (TA####) names a tactic, not a technique: it gives no attack-pattern.
+        if res.status == "tactic":
+            continue
+        # An id in upper case is kept, known, revoked or not: a report may cite a
+        # technique newer than the bundled release (ATTACK_RELEASE), held for review
+        # later.  One written in lower case ("t1059.001") is kept only when the index
+        # holds it, known or revoked: "t1000" in prose is no technique.  A revoked id
+        # keeps the id as written here; Stage 4 replaces it and keeps the trace (#980).
+        if v != m.group() and res.status == "unknown":
             continue
         if v not in seen:
             seen.add(v)
-            # All ATT&CK IDs (TA#### tactics and T####[.###] techniques) are typed
-            # TTP → STIX `attack-pattern` (the only spec object for this concept).
-            # The tactic/technique distinction is preserved in mitre_id / the ID
-            # prefix, which Stage 4 uses for ATT&CK URL routing.
-            results.append(RawEntity(value=v, entity_type=EntityType.TTP, mitre_id=v))
+            # All ATT&CK technique IDs (T####[.###]) are typed TTP → STIX
+            # `attack-pattern` (the only spec object for this concept).
+            # evidence_start is relative to this (refanged) chunk; the worker
+            # locates the quote in the report and grades it "reported" (#980).
+            citation, start = _citation(text, m.start(), m.end())
+            results.append(RawEntity(value=v, entity_type=EntityType.TTP, mitre_id=v,
+                                     evidence_text=citation, evidence_start=start))
     return results
 
 

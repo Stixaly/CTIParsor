@@ -45,6 +45,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 RAN, SKIPPED, FAILED = "ran", "skipped", "failed"
+# Ran, and its result is usable, but incomplete for the reason the stage gives (#982).
+DEGRADED = "degraded"
 
 # Every stage the orchestrator knows, in the order it runs them.
 STAGES: tuple[str, ...] = (
@@ -290,13 +292,13 @@ class RunResult:
         return next((o for o in self.stages if o.stage == stage), None)
 
     def ran(self, stage: str) -> bool:
-        """True when the stage ran, as opposed to being skipped or failing."""
+        """True when the stage ran, degraded or not, as opposed to being skipped or failing."""
         o = self.outcome(stage)
-        return o is not None and o.status == RAN
+        return o is not None and o.status in (RAN, DEGRADED)
 
     def not_run(self) -> list[StageOutcome]:
         """The outcomes of the stages that did not run: skipped or failed."""
-        return [o for o in self.stages if o.status != RAN]
+        return [o for o in self.stages if o.status not in (RAN, DEGRADED)]
 
     def stage_report(self) -> list[dict]:
         """Every outcome as a flat dict, for the stage report."""
@@ -615,9 +617,9 @@ class _Run:
                                details or {})
         self.r.stages.append(outcome)
         if status != RAN:
-            log = logger.warning if status == FAILED else logger.info
+            log = logger.warning if status in (FAILED, DEGRADED) else logger.info
             log(f"[Stage {stage}] {status}: {reason}")
-        if stage in self.opts.required and status != RAN:
+        if stage in self.opts.required and status not in (RAN, DEGRADED):
             raise StageRequired(outcome)
 
     def gate(self, stage: str, available: Callable[[], bool] | None = None,
@@ -705,6 +707,21 @@ class _Run:
 
         self.figures()
 
+        # #982: a text with nothing readable is a failed ingestion, not a run over
+        # an empty report whose every stage then "ran".  Stage 1 is mandatory.
+        if not self.r.text.strip():
+            unavailable = ocr.get("unavailable")
+            pages_total = ocr.get("pages_total")
+            if unavailable:
+                no_text = f"no readable text: {unavailable}"
+            elif pages_total and ocr.get("pages_failed", 0) == pages_total:
+                no_text = "no readable text: OCR failed on every page"
+            else:
+                no_text = "no readable text in the document"
+            self.record("1", FAILED, no_text, t_ingest,
+                        details={"ocr": ocr} if ocr else None, chars=0, chunks=0)
+            raise StageRequired(self.r.stages[-1])   # the outcome just recorded
+
         # The anchor relationship dates resolve against, and where it came from
         # (ADR-0063 §4) — a pasted text has no file, but may have a header line.
         # Read from the final text (figures included), the same text finalize
@@ -722,7 +739,14 @@ class _Run:
                     f"(max_chars={max_chars})")
         # The OCR record (pages, languages, scripts) is counts only; it is kept
         # only for a document with OCR'd pages.
-        self.record("1", RAN, reason, t_ingest + time.monotonic() - t0,
+        # #982: pages OCR could not read leave the text incomplete: degraded, said.
+        pages_failed = ocr.get("pages_failed", 0)
+        if pages_failed:
+            missing = f"{pages_failed} of {ocr.get('pages_total', '?')} pages could not be read by OCR"
+            if ocr.get("unavailable"):
+                missing += f" ({ocr['unavailable']})"
+            reason = "; ".join(filter(None, [reason, missing]))
+        self.record("1", DEGRADED if pages_failed else RAN, reason, t_ingest + time.monotonic() - t0,
                     details={"ocr": ocr} if ocr else None,
                     chars=len(self.r.text), chunks=len(self.r.chunks))
         self.hooks.progress("stage", {
@@ -765,7 +789,7 @@ class _Run:
             self.record("1f", SKIPPED, skip_reason() or "no vision backend", details=egress_note)
             return
         from pipeline.figure_store import SqliteReadCache
-        from pipeline.stage1f_figures import inject_append, map_verbatim, read_figures
+        from pipeline.stage1f_figures import count_unexpected_kind, inject_append, map_verbatim, read_figures
         from pipeline.stage2_extraction import refang
 
         t0 = time.monotonic()
@@ -784,20 +808,28 @@ class _Run:
             self.hooks.progress("stage", {"stage": "1f", "label": "Figures",
                                           "figures": len(reads), "read": kept,
                                           "provider": vision.name, "model": vision.model})
-            # Said in the stage report, as the run manifest cannot: which
-            # provider and model read the figures depends on VISION_PROVIDER
-            # and LLM_PROVIDER together.
-            self.record("1f", RAN, f"{vision.name}/{vision.model}", time.monotonic() - t0,
-                        details=egress_note, figures=len(reads), read=kept)
         except Exception as exc:
             # A figure that cannot be read must never cost the report.
             self.r.figure_spans = []
             self.record("1f", FAILED, str(exc), time.monotonic() - t0, details=egress_note)
+            return
+        # Said in the stage report, as the run manifest cannot: which
+        # provider and model read the figures depends on VISION_PROVIDER
+        # and LLM_PROVIDER together.  Recorded outside the try: a required
+        # stage that is degraded raises StageRequired, which must not be read
+        # back as a failed figure stage.
+        # #982: a figure answer of an unexpected type was never read: degraded, said.
+        unexpected = count_unexpected_kind(reads)
+        reason = f"{vision.name}/{vision.model}"
+        if unexpected:
+            reason += f"; {unexpected} figure answer(s) of an unexpected type left unread"
+        self.record("1f", DEGRADED if unexpected else RAN, reason, time.monotonic() - t0,
+                    details=egress_note, figures=len(reads), read=kept, unexpected_kind=unexpected)
 
     def extract(self) -> None:
         from pipeline import ner_precision
         from pipeline.base import BaseExtractionStage, resolve_type_conflicts
-        from pipeline.stage2_extraction import extract_entities
+        from pipeline.stage2_extraction import extract_entities, nlp_status
 
         text = self.r.text
         # Said in the stage report: the run manifest records the variable only
@@ -825,12 +857,23 @@ class _Run:
                     key = _dedup_key(e)
                     if key not in best or e.confidence > best[key].confidence:
                         best[key] = e
-            self.record("2", RAN, ner_note, time.monotonic() - t0, entities=len(best))
+            # #982: a missing optional library silently narrows what is extracted.
+            # An absent spaCy model that was skipped by choice (SKIP_HEAVY_MODELS) is not a fault.
+            st = nlp_status()
+            missing = []
+            if st["spacy_model"] is None and not st["spacy_skipped"]:
+                missing.append("spaCy model not installed: named-entity recognition is off")
+            if not st["iocextract"]:
+                missing.append("iocextract not installed: IPv6 addresses are not extracted")
+            self.record("2", DEGRADED if missing else RAN, "; ".join(filter(None, [ner_note, *missing])),
+                        time.monotonic() - t0, details={"spacy_model": st["spacy_model"],
+                                                        "iocextract": st["iocextract"]},
+                        entities=len(best))
 
         # Stage 2b — gazetteer; regex wins a tie (more precise for exact values).
         from pipeline import gazetteer_policy
         from pipeline.stage2b_gazetteer import available as gaz_available
-        from pipeline.stage2b_gazetteer import match_gazetteer_traced
+        from pipeline.stage2b_gazetteer import load_error, match_gazetteer_traced
         if self.gate("2b", gaz_available):
             t0 = time.monotonic()
             self.r.gazetteer, gaz_trace = match_gazetteer_traced(text)
@@ -840,9 +883,16 @@ class _Run:
             # in shadow mode what it would withhold, in apply mode what it did.
             policy_mode = gazetteer_policy.mode()
             policy_note = f"ordinary-word policy: {policy_mode} ({gazetteer_policy.version()})"
-            self.record("2b", RAN, "" if policy_mode == "off" else policy_note,
-                        time.monotonic() - t0, entities=len(self.r.gazetteer),
-                        **gazetteer_policy.summary(gaz_trace))
+            # #982: a gazetteer file that cannot be read is a failed stage, not an empty one.
+            unreadable = load_error()
+            if unreadable is not None:
+                self.record("2b", FAILED, f"gazetteer unreadable: {unreadable}",
+                            time.monotonic() - t0, entities=len(self.r.gazetteer),
+                            **gazetteer_policy.summary(gaz_trace))
+            else:
+                self.record("2b", RAN, "" if policy_mode == "off" else policy_note,
+                            time.monotonic() - t0, entities=len(self.r.gazetteer),
+                            **gazetteer_policy.summary(gaz_trace))
         entities = list(best.values())
 
         # Stage 2c — semantic TTP detection (verify mode), or candidate
@@ -929,7 +979,8 @@ class _Run:
             failure = gliner_run.failure()
             self.record("2e", FAILED if failure else RAN, failure or gliner_run.note(),
                         time.monotonic() - t0, entities=len(self.r.gliner),
-                        chunks=gliner_run.chunks, chunks_unanswered=gliner_run.unanswered)
+                        chunks=gliner_run.chunks, chunks_unanswered=gliner_run.unanswered,
+                        truncated_chunks=gliner_run.truncated_chunks)
 
         # Stage 2g — "X (aka Y, Z)" alias lists, deterministic.
         from pipeline.stage2g_alias_list import extract_alias_list_entities
@@ -1277,6 +1328,7 @@ class _Run:
                 notes.append(f"{counts['ioc_omitted']} IoC(s) not offered to the model (30 per passage)")
             self.record("3", RAN, "; ".join(notes), time.monotonic() - t0, details=details, **counts)
         select = opts.ttp_mode == "select"
+        from pipeline.stage3f_ttp_select import definitions_error
         for sid, on, prefix in (("3d", verify_rels, "rel_verification"),
                                 ("3f", verify_ttps, "ttp_selection" if select else "ttp_verification")):
             ok, unparsed, failed = (d.get(f"{prefix}_ok", 0), d.get(f"{prefix}_unparsed", 0),
@@ -1306,10 +1358,17 @@ class _Run:
             at = (f"{ceiling} of {answers} selection answers stopped at the output-token ceiling "
                   f"(TTP_SELECT_MAX_OUTPUT_TOKENS)" if ceiling else "")
             notes += [at] if at else []
+            # #982: techniques selected without their ATT&CK definitions are degraded, not ran.
+            # Only select mode reads the definitions (format_candidates); the error is
+            # process-wide, so a verify-mode run must not inherit an earlier one.
+            defs_error = definitions_error() if sid == "3f" and select else None
+            defs_note = (f"{defs_error}: techniques were selected without their ATT&CK definitions"
+                         if defs_error else "")
             if not on:
                 self.record(sid, SKIPPED, "disabled" + (": the LLM's techniques ship unchecked"
                                                         if sid == "3f" and select else ""))
             elif answers == 0:
+                # Nothing was selected, so no definition was needed (nor read).
                 self.record(sid, RAN, "nothing to verify", 0.0, ok=0, unparsed=0, failed=0, **extra)
             elif ok + cut == 0:
                 # A verification that never answers checked nothing — the
@@ -1321,7 +1380,8 @@ class _Run:
                             + (f"; {at}" if at else ""),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
             else:
-                self.record(sid, RAN, "; ".join(notes),
+                self.record(sid, DEGRADED if defs_error else RAN,
+                            "; ".join(filter(None, [*notes, defs_note])),
                             0.0, ok=ok, unparsed=unparsed, failed=failed, **extra)
         if consensus:
             unanswered = d.get("consensus_unanswered", 0)

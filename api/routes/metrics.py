@@ -122,6 +122,24 @@ def _job_families(conn) -> list[Family]:
     failed = Family("ctiparsor_failed_jobs", "Jobs currently in status failed.")
     failed.add(counts["failed"])
 
+    # The stage report (ADR-0059) sits in run_config_json, a TEXT column. The rows are picked with LIKE and read
+    # in Python: a `::jsonb` cast would fail the whole scrape on one unreadable value (#982).
+    stage_statuses = [
+        _stage_statuses(row["run_config_json"])
+        for row in conn.execute(
+            "SELECT run_config_json FROM jobs WHERE run_config_json LIKE ? OR run_config_json LIKE ?",
+            # json.dumps writes `"status": "failed"`; a bare `"failed"` would also pick
+            # every 3d/3f counter named failed, and read nearly every job.
+            ('%"status": "degraded"%', '%"status": "failed"%'),
+        ).fetchall()
+    ]
+    degraded_stages = Family(
+        "ctiparsor_jobs_with_degraded_stages", "Jobs whose stage report holds a degraded stage (#982)."
+    )
+    degraded_stages.add(sum("degraded" in statuses for statuses in stage_statuses))
+    failed_stages = Family("ctiparsor_jobs_with_failed_stages", "Jobs whose stage report holds a failed stage.")
+    failed_stages.add(sum("failed" in statuses for statuses in stage_statuses))
+
     oldest = conn.execute(
         "SELECT created_at FROM jobs WHERE status='queued' ORDER BY created_at ASC LIMIT 1"
     ).fetchone()
@@ -139,7 +157,20 @@ def _job_families(conn) -> list[Family]:
     for state in WORKER_STATES:
         worker_family.add(sum(1 for w in workers if w["state"] == state), state=state)
 
-    return [jobs, failed, oldest_age, worker_family]
+    return [jobs, failed, degraded_stages, failed_stages, oldest_age, worker_family]
+
+
+def _stage_statuses(run_config_json: str | None) -> set[str]:
+    """The statuses in a job's stage report; empty when the run config holds no readable report."""
+    if not run_config_json:
+        return set()
+    try:
+        report = json.loads(run_config_json).get("stage_report")
+    except (ValueError, AttributeError):
+        return set()
+    if not isinstance(report, list):
+        return set()
+    return {str(entry.get("status")) for entry in report if isinstance(entry, dict)}
 
 
 def _existing_directory(path: Path) -> Path | None:

@@ -543,9 +543,13 @@ def cmd_score(args) -> None:
         print(f"  {et:<13} strict P/R/F1 {v['strict']['precision']:.3f} {v['strict']['recall']:.3f} "
               f"{v['strict']['f1']:.3f}   lenient F1 {v['lenient']['f1']:.3f}")
     print(f"  evidence       {report['evidence']}")
-    skipped = {k: v for k, v in stages.items() if set(v) - {"ran"}}
+    # A degraded stage ran, on an incomplete input (#982): it is not "not run", but the run says so.
+    skipped = {k: v for k, v in stages.items() if set(v) - {"ran", "degraded"}}
     if skipped:
         print(f"  stages not run: {skipped}")
+    degraded = {k: v for k, v in stages.items() if "degraded" in v}
+    if degraded:
+        print(f"  stages degraded: {degraded}")
     print(f"  LLM health     {llm_health}")
 
 

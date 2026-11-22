@@ -61,27 +61,51 @@ except ImportError:
 
 # ── Gazetteer loading ─────────────────────────────────────────────────────────
 
+class _Unreadable(Exception):
+    """The embedded gazetteer.json cannot be used; str(e) is the reason."""
+
+
 @functools.lru_cache(maxsize=1)
-def _load() -> list[dict]:
+def _read_index() -> list[dict]:
     """
     Loads the gazetteer index once and caches it, plus every term the analysts
     promoted (ADR-0052, `entity_overrides` rows with action=promote).
     Entries are sorted longest-first so 'Lazarus Group' matches before 'Lazarus'.
+
+    Raises _Unreadable for a missing, corrupt or empty file.  lru_cache keeps
+    no exception, so a failed read is made again on the next call.
     """
     path = attack_data.resolve(_INDEX_PATH)
     if not path.exists():
-        logger.warning("gazetteer.json not found — skipping gazetteer NER. Run: python scripts/build_indexes.py")
-        return []
+        raise _Unreadable("gazetteer.json not found")
     try:
         entries = json.loads(path.read_text(encoding="utf-8"))
     except Exception as e:
-        logger.error(f"Could not load gazetteer: {e}")
-        return []
+        raise _Unreadable(f"gazetteer.json is not valid JSON: {e}") from e
+    if not isinstance(entries, list):
+        raise _Unreadable(f"gazetteer.json is not a list of entries (its root is {type(entries).__name__})")
+    if not entries:
+        raise _Unreadable("gazetteer.json holds no entry")
     promoted = promoted_entries()
     if promoted:
         entries = entries + promoted
         entries.sort(key=lambda e: -len(e["name"]))
     return entries
+
+
+def _load() -> list[dict]:
+    """
+    The entries of _read_index(), or [] when the embedded file is unreadable
+    (logged here; load_error() says why).
+    """
+    try:
+        return _read_index()
+    except _Unreadable as e:
+        logger.error(f"Gazetteer unusable, Stage 2b matches nothing: {e}")
+        return []
+
+
+_load.cache_clear = _read_index.cache_clear  # type: ignore[attr-defined]
 
 
 # ── Aho-Corasick automaton (built once, cached) ───────────────────────────────
@@ -101,9 +125,7 @@ def _build_automaton():
     if _SKIP_HEAVY or not _AHO_AVAILABLE:
         return None
 
-    entries = _load()
-    if not entries:
-        return None
+    entries = _read_index()
 
     A = _ac.Automaton()
     for entry in entries:
@@ -128,7 +150,7 @@ def match_gazetteer(text: str) -> list[RawEntity]:
 
 @functools.lru_cache(maxsize=1)
 def _policy_index() -> gazetteer_policy.Index:
-    return gazetteer_policy.build_index(_load())
+    return gazetteer_policy.build_index(_read_index())
 
 
 _Judge = Callable[[dict, int, int], Judgement | None]
@@ -166,7 +188,13 @@ def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[l
     An ambiguous occurrence is traced once per identity it could be.
     """
     pmode = policy_mode or gazetteer_policy.mode()
-    index = _policy_index() if pmode != "off" else None
+    try:
+        index = _policy_index() if pmode != "off" else None
+        automaton = _build_automaton()
+    except _Unreadable as e:
+        # Nothing was cached: the next call reads the file again.
+        logger.error(f"Gazetteer unusable, Stage 2b matches nothing: {e}")
+        return [], []
 
     def judge(entry: dict, start: int, end: int) -> Judgement | None:
         if index is None or gazetteer_policy.is_promoted(entry):
@@ -177,7 +205,6 @@ def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[l
 
     trace: list[dict] = []
     use = judge if pmode != "off" else None
-    automaton = _build_automaton()
     if automaton is not None:
         found = _match_aho(text, automaton, use, pmode == "apply", trace)
     else:
@@ -430,6 +457,20 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
 def available() -> bool:
     """Return True if the gazetteer index file exists."""
     return attack_data.resolve(_INDEX_PATH).exists()
+
+
+# available() stays True for a file that is present but unreadable: Stage 2b is
+# then run and must FAIL, not be skipped.  The orchestrator reads load_error()
+# after its gate.  A failure is never cached, so while the file stays unreadable
+# every call reads it again; after a call to match_gazetteer_traced() the answer
+# is current.
+def load_error() -> str | None:
+    """Why the embedded gazetteer cannot be used (the reason), or None when it can."""
+    try:
+        _read_index()
+    except _Unreadable as e:
+        return str(e)
+    return None
 
 
 # ---------------------------------------------------------------------------

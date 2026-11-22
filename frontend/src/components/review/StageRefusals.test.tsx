@@ -44,6 +44,15 @@ describe('StageRefusals', () => {
     expect(container.querySelector('details')).toBeNull()
   })
 
+  it('keeps a degraded stage in view, with the reason', () => {
+    const { container } = render(
+      <StageRefusals stages={[{ stage: '2', label: 'Extraction', status: 'degraded',
+                               reason: 'iocextract not installed: IPv6 addresses are not extracted' }]} />)
+    expect(screen.getByRole('region')).toHaveTextContent(
+      'Stage 2 — Extraction: degraded — iocextract not installed: IPv6 addresses are not extracted')
+    expect(container.querySelector('details')).toBeNull()
+  })
+
   it('highlights an egress refusal in view, says what to do, and folds the rest', () => {
     const { container } = render(<StageRefusals stages={[RAN, REFUSED, skipped('3d', 'Stage 3 did not run')]} />)
     expect(screen.getByRole('region')).toHaveTextContent(

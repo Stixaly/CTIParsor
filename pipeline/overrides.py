@@ -187,7 +187,7 @@ def reload() -> None:
     _load_active.cache_clear()
     try:
         from pipeline import stage2b_gazetteer
-        stage2b_gazetteer._load.cache_clear()
+        stage2b_gazetteer._read_index.cache_clear()
         stage2b_gazetteer._build_automaton.cache_clear()
         stage2b_gazetteer._policy_index.cache_clear()
     except ImportError:  # pragma: no cover - the gazetteer module is always importable here

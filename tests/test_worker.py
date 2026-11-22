@@ -737,3 +737,19 @@ def test_a_run_whose_stage_5_did_not_run_stores_no_verdict(db, monkeypatch):
     row = _row(db)
     assert row["status"] == "for_review" and row["bundle_validation"] is None
     assert row["bundle_validation_errors"] is None
+
+
+def test_a_stage_that_stops_the_run_is_in_the_stage_report(db, monkeypatch):
+    """An unreadable document fails Stage 1 and stops the run (#982): the job page
+    reads why from the stage report, not only from the progress event."""
+    import json
+
+    from pipeline.orchestrator import FAILED, StageOutcome, StageRequired
+
+    _job(db)
+    _run(monkeypatch, StageRequired(StageOutcome("1", FAILED, "no readable text: OCR libraries not installed")))
+
+    assert _row(db)["status"] == "failed"
+    report = json.loads(_row(db)["run_config_json"])["stage_report"]
+    assert [(s["stage"], s["status"], s["reason"]) for s in report] == [
+        ("1", "failed", "no readable text: OCR libraries not installed")]

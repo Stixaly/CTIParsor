@@ -44,7 +44,7 @@ import os
 import re
 import warnings
 from dataclasses import dataclass, field
-from typing import Any, Iterator
+from typing import Any, Callable, Iterator
 
 # Initialize logging
 from api.logging_config import get_logger
@@ -55,14 +55,11 @@ from pipeline.thresholds import get_threshold
 
 logger = get_logger(__name__)
 
-# Suppress GLiNER's "Sentence of length N has been truncated to 384" warning.
-# This fires for IoC-table chunks that exceed the BERT token limit; those
-# sections are already handled by regex extraction so the truncation is benign.
-warnings.filterwarnings(
-    "ignore",
-    message=r"Sentence of length \d+ has been truncated",
-    category=UserWarning,
-)
+# GLiNER warns "Sentence of length N has been truncated to 384" once for each
+# chunk it cuts to its token limit (gliner data_processing/processor.py).  The
+# warning is counted per chunk by _truncations_in, not hidden: a chunk cut there
+# is one the model did not read in full.
+_TRUNCATION_WARNING = re.compile(r"Sentence of length \d+ has been truncated")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 # Default: GLiNER large v2.1 (urchade) — best zero-shot NER accuracy in the
@@ -127,6 +124,7 @@ _GLINER_LABELS = _configured_labels()
 _CHUNK_CHARS    = env_int("GLINER_CHUNK_CHARS", default=1600)
 _OVERLAP_CHARS  = 200   # proportionally wider to avoid missing cross-boundary spans
 _MIN_CHUNK_CHARS = _CHUNK_CHARS // 4
+_MODEL_TOKEN_LIMIT = 384   # GLiNER's max_len: the most tokens it reads from one chunk
 
 # ── Batched inference ─────────────────────────────────────────────────────────
 # N chunks go to the model as one batch, through GLiNER's batch API (see
@@ -224,6 +222,7 @@ class GLiNERRun:
     chunks: int = 0               # non-empty windows of the text
     answered: int = 0             # windows with a well-formed answer from the model
     retried_batches: int = 0      # batch answers refused, asked again chunk by chunk
+    truncated_chunks: int = 0     # answered chunks GLiNER cut to its token limit before reading them
     error: str = ""               # why nothing was loaded, or the last unanswered chunk's error
 
     @property
@@ -241,13 +240,15 @@ class GLiNERRun:
         return ""
 
     def note(self) -> str:
-        """What a stage that ran still has to say: chunks left unanswered, and
-        batches the batch API did not answer."""
+        """What a stage that ran still has to say: chunks left unanswered, batches
+        the batch API did not answer, and chunks cut to the token limit."""
         parts = []
         if self.unanswered:
             parts.append(f"{self.unanswered} of {self.chunks} chunks unanswered: {self.error}")
         if self.retried_batches:
             parts.append(f"{self.retried_batches} batch answers refused, asked again chunk by chunk")
+        if self.truncated_chunks:
+            parts.append(f"{self.truncated_chunks} chunks truncated at {_MODEL_TOKEN_LIMIT} tokens")
         return "; ".join(parts)
 
 
@@ -288,6 +289,31 @@ def _ask_batch(model: Any, texts: list[str], labels: list[str], threshold: float
         raise ValueError(f"expected one list of predictions for each of {len(texts)} chunks, "
                          f"got {_shape(raw)}")
     return [_checked_chunk(preds) for preds in raw]
+
+
+def _ask_chunk(model: Any, text: str, labels: list[str], threshold: float) -> list[dict]:
+    """The predictions for one chunk, from predict_entities: the fallback when a batch is refused."""
+    return _checked_chunk(model.predict_entities(text, labels, threshold=threshold,
+                                                 flat_ner=True, multi_label=False))
+
+
+def _truncations_in(call: Callable[..., Any], *args: Any) -> tuple[Any, int]:
+    """*call*(*args*), and how many of its chunks GLiNER cut to its token limit.
+
+    Those warnings are counted, not shown.  Any other warning raised inside the
+    call is shown again.  catch_warnings changes the process-wide warning state,
+    so this is for one model call at a time: a worker runs each job in its own
+    process (api/worker.py), and Stage 2e runs its calls in turn."""
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")       # every chunk warns, not once per location
+        answer = call(*args)
+    cut = 0
+    for warning in caught:
+        if issubclass(warning.category, UserWarning) and _TRUNCATION_WARNING.match(str(warning.message)):
+            cut += 1
+        else:
+            warnings.warn_explicit(warning.message, warning.category, warning.filename, warning.lineno)
+    return answer, cut
 
 
 def extract_gliner_entities(text: str) -> list[RawEntity]:
@@ -344,21 +370,21 @@ def run_gliner(text: str) -> GLiNERRun:
         batch_texts = [t for t, _ in batch]
 
         try:
-            batch_preds = _ask_batch(model, batch_texts, labels, model_threshold)
+            batch_preds, cut = _truncations_in(_ask_batch, model, batch_texts, labels, model_threshold)
             run.answered += len(batch)
+            run.truncated_chunks += cut
         except Exception as e:
             logger.warning(f"Batch inference error (falling back to single): {e}")
             run.retried_batches += 1
-            # Per-chunk fallback
+            # Per-chunk fallback.  The refused batch's truncation warnings were
+            # raised, not read: they are not counted here.
             batch_preds = []
             for chunk_text, char_offset in batch:
                 try:
-                    batch_preds.append(_checked_chunk(model.predict_entities(
-                        chunk_text, labels,
-                        threshold=model_threshold,
-                        flat_ner=True, multi_label=False,
-                    )))
+                    predictions, cut = _truncations_in(_ask_chunk, model, chunk_text, labels, model_threshold)
+                    batch_preds.append(predictions)
                     run.answered += 1
+                    run.truncated_chunks += cut
                 except Exception as e2:
                     logger.error(f"Inference error at offset {char_offset}: {e2}")
                     run.error = f"{type(e2).__name__}: {e2}"
@@ -395,6 +421,9 @@ def run_gliner(text: str) -> GLiNERRun:
                 key = (value.lower(), etype)
                 if key not in best or score > best[key][0]:
                     best[key] = (score, context, _span_text(chunk_text, pred, value), value)
+
+    if run.truncated_chunks:
+        logger.info(f"GLiNER: {run.truncated_chunks} of {run.chunks} chunks truncated at {_MODEL_TOKEN_LIMIT} tokens")
 
     # ── Convert to RawEntity ─────────────────────────────────────────────────
     results: list[RawEntity] = []

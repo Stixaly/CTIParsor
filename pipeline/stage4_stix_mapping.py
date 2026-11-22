@@ -26,7 +26,7 @@ from jsonschema import Draft202012Validator
 # Initialize logging
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES, EntityType, RawEntity
-from pipeline import attack_data, gazetteer_policy, stix_ids
+from pipeline import attack_data, attack_ids, gazetteer_policy, stix_ids
 from pipeline.aliases import alias_surface_forms, canonical_name, technique_name_for, type_conflict
 from pipeline.benign import benign_reason
 from pipeline.bundle_ledger import ORIGIN_EXTRACTED, MappingLedger
@@ -530,6 +530,58 @@ def _technique_identity(value: str, mitre_id: str | None) -> tuple[str, str | No
     return name, mid, True
 
 
+def _revoked_id(value: str, mitre_id: str | None) -> attack_ids.Resolution | None:
+    """The resolution of a revoked ATT&CK id a technique entity writes (#980), else None.
+
+    The id written is the row's mitre_id, or the value when the row has none.
+    """
+    written = (mitre_id or "").strip() or value.strip()
+    if not written.isascii():
+        return None
+    res = attack_ids.resolve(written)
+    return res if res.status == "revoked" else None
+
+
+def _revoked_reference(revoked: attack_ids.Resolution, successor: str) -> stix2.ExternalReference:
+    """The id the report wrote, kept on its technique as a `report` reference (#980).
+
+    Not a mitre-attack reference: Stage 4b, Stage 4c and ttp_retrieval read those
+    as the ids the release holds, and this one is the id it no longer holds.
+    """
+    return stix2.ExternalReference(
+        source_name="report",
+        external_id=revoked.written,
+        description=f"revoked in ATT&CK {attack_ids.release_version()}, replaced by {successor}",
+    )
+
+
+def _cites(obj: Any, written: str) -> bool:
+    """True when `obj` already carries the `report` reference of the id written."""
+    return any(_field(r, "source_name") == "report" and _field(r, "external_id") == written
+               for r in _field(obj, "external_references") or [])
+
+
+def _cite_revoked_id(old: Any, ref: stix2.ExternalReference, stix_objects: list,
+                     name_to_stix: "_NameIndex", attack_patterns: dict) -> Any:
+    """`old` with `ref` added to its external_references, in place of `old` in every
+    table that holds it.  Same id, so the edges built later find the new object."""
+    data = json.loads(old.serialize())
+    data["external_references"] = [*data.get("external_references", []), json.loads(ref.serialize())]
+    new = stix2.parse(json.dumps(data), allow_custom=True)
+    stix_objects[next(i for i, o in enumerate(stix_objects) if o is old)] = new
+    attack_patterns[new.id] = new
+    name_to_stix.replace(old, new)
+    return new
+
+
+def _revoked_info(revoked: attack_ids.Resolution | None) -> dict:
+    """The ledger facts of a revoked id the report wrote (#980), or none for any other id."""
+    if revoked is None:
+        return {}
+    return {"written": revoked.written, "replaced_by": revoked.mitre_id,
+            "attack_release": attack_ids.release_version()}
+
+
 # Entity types that are technical observables (the regex/defang IoC outputs of
 # Stage 2).  Each should map to a STIX SCO and — via _build_stix_pattern — an
 # Indicator.  CVE/TTP/named-entity types are intentionally excluded: they become
@@ -692,6 +744,14 @@ class _NameIndex:
 
     def of_type(self, key: str, stix_type: str) -> Any:
         return self._direct.get(key, {}).get(stix_type) or self._alias.get(key, {}).get(stix_type)
+
+    def replace(self, old: Any, new: Any) -> None:
+        """`new` takes the place of `old` under every name `old` answers to (#980)."""
+        for table in (self._direct, self._alias):
+            for by_type in table.values():
+                for stix_type, obj in by_type.items():
+                    if obj is old:
+                        by_type[stix_type] = new
 
     def candidates(self, key: str) -> dict[str, Any]:
         """type -> object: the key's direct names, else its alias forms (a
@@ -1048,9 +1108,17 @@ def build_stix_bundle(
     for entity in raw_entities:
         if entity.entity_type in (EntityType.TECHNIQUE, EntityType.TACTIC,
                                    EntityType.PROCEDURE, EntityType.TTP):
-            name, mitre_id, renamed = _technique_identity(entity.value, entity.mitre_id)
+            # A revoked id (#980) is the technique that replaced it: the object is
+            # that one, and the id the report wrote stays on it as a reference.
+            revoked = _revoked_id(entity.value, entity.mitre_id)
+            value, row_mitre = entity.value, entity.mitre_id
+            if revoked is not None:
+                if entity.value.isascii() and _BARE_TECHNIQUE_ID.fullmatch(entity.value.strip()):
+                    value = revoked.mitre_id
+                row_mitre = revoked.mitre_id
+            name, mitre_id, renamed = _technique_identity(value, row_mitre)
             ap_id = stix_ids.attack_pattern_id(name, mitre_id)
-            key = entity.value.lower()
+            key = value.lower()
             id_key = mitre_id.lower() if mitre_id else None
             by_name = name_to_stix.of_type(key, "attack-pattern")
             by_id = name_to_stix.of_type(id_key, "attack-pattern") if id_key else None
@@ -1066,9 +1134,17 @@ def build_stix_bundle(
                     name_to_stix.add(key, hit)
                     if id_key:
                         name_to_stix.add(id_key, hit)
+                if revoked is not None and not _cites(hit, revoked.written):
+                    hit = _cite_revoked_id(hit, _revoked_reference(revoked, revoked.mitre_id), stix_objects,
+                                           name_to_stix, attack_patterns)
+                if revoked is not None:
+                    # A relationship the model wrote to the revoked id ("uses T1562")
+                    # resolves its end by that id: it names this object too.
+                    name_to_stix.add(revoked.written.lower(), hit)
                 led.entity(entity.value, entity.entity_type.value, "merged", obj=hit,
-                           reason="same_value" if by_name or not mitre_id else "same_technique",
-                           mitre_id=entity.mitre_id)
+                           reason=("attack_id_revoked" if revoked is not None else
+                                   "same_value" if by_name or not mitre_id else "same_technique"),
+                           mitre_id=entity.mitre_id, **_revoked_info(revoked))
                 continue
             ext_refs = []
             if mitre_id:
@@ -1091,6 +1167,8 @@ def build_stix_bundle(
                     external_id=mid,
                     url=ref_url,
                 ))
+            if revoked is not None:
+                ext_refs.append(_revoked_reference(revoked, revoked.mitre_id))
             # OpenCTI's standard id, as for the LLM TTPs above (ADR-0066): the
             # same technique lands on the same object from one build to the next.
             obj = stix2.AttackPattern(name=name, external_references=ext_refs, id=ap_id)
@@ -1100,10 +1178,16 @@ def build_stix_bundle(
             name_to_stix.add(name.lower(), obj)
             if id_key:
                 name_to_stix.add(id_key, obj)
-            # A rename is a rewrite: the ledger says which release named it (ADR-0061).
+            if revoked is not None:
+                name_to_stix.add(revoked.written.lower(), obj)   # "uses T1562" ends here too
+            # A rename is a rewrite: the ledger says which release named it (ADR-0061),
+            # and a revoked id says what the report wrote and what replaced it (#980).
+            rename_info = _revoked_info(revoked) or {
+                "attack_release": attack_data.current().version if renamed else None}
             led.entity(entity.value, entity.entity_type.value, "emitted", obj=obj,
-                       reason="attack_id_named" if renamed else None, mitre_id=mitre_id,
-                       attack_release=attack_data.current().version if renamed else None)
+                       reason=("attack_id_revoked" if revoked is not None else
+                               "attack_id_named" if renamed else None),
+                       mitre_id=mitre_id, **rename_info)
             led.object(obj, "entity")
 
     for entity in raw_entities:

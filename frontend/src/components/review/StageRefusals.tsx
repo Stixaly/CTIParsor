@@ -6,9 +6,11 @@ interface Props {
 }
 
 const refusedEgress = (s: StageRecord) => s.egress?.allowed === false
+// A degraded stage ran, but its output is incomplete (#982): it is as loud as a failure.
+const isLoud = (s: StageRecord) => refusedEgress(s) || s.status === 'failed' || s.status === 'degraded'
 
 function StageLine({ s }: { s: StageRecord }) {
-  const loud = refusedEgress(s) || s.status === 'failed'
+  const loud = isLoud(s)
   return (
     <li style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}
         data-egress-refusal={refusedEgress(s) ? 'true' : undefined}>
@@ -26,15 +28,15 @@ function StageLine({ s }: { s: StageRecord }) {
 
 const LIST = { margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 3 } as const
 
-/** The stages that did not run, and why (ADR-0059).  A failed stage and an egress refusal
- *  (ADR-0097) stay in view: the refusal is why a bundle has no LLM content, so it says what
+/** The stages that did not run, and why (ADR-0059).  A failed or degraded stage (#982) and an
+ *  egress refusal (ADR-0097) stay in view: the refusal is why a bundle has no LLM content, so it says what
  *  to do about it.  The other skips (a disabled stage, one with nothing to do, one after a
  *  stage that did not run) fold into one line: an install without the optional models
  *  skips a dozen, and listing them all would push the review out of the window. */
 export default function StageRefusals({ stages }: Props) {
   const notRun = (stages ?? []).filter(s => s.status !== 'ran' && s.reason)
   if (notRun.length === 0) return null
-  const loud = notRun.filter(s => refusedEgress(s) || s.status === 'failed')
+  const loud = notRun.filter(isLoud)
   const quiet = notRun.filter(s => !loud.includes(s))
   const refused = loud.some(refusedEgress)
   return (

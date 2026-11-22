@@ -618,6 +618,10 @@ def main(argv: list[str] | None = None) -> int:
     # Likewise a bad ATTACK_RELEASE (ADR-0087), which this call fixes for the process.
     from pipeline import attack_data
     logger.info("[queue] ATT&CK release: %s", attack_data.current().version)
+    # #982 — a missing optional dependency (OCR, iocextract, a spaCy model) is
+    # said once here, and each run's stage report marks the stage degraded.
+    from api.worker import log_missing_optional_dependencies
+    log_missing_optional_dependencies()
     parser = argparse.ArgumentParser(description="Job-queue supervisor (role worker)")
     from api.worker import _MAX_CONCURRENT_JOBS
 
