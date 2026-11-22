@@ -22,6 +22,7 @@ from typing import Callable, Optional
 
 from api.logging_config import get_logger
 from models.schemas import STIX_RELATIONSHIP_TYPES
+from pipeline import llm_stats
 from pipeline.evidence_span import stated_in, words
 from pipeline.llm_parse import JsonScan, ScanExhausted, fit_report, strip_reasoning
 from pipeline.stage4b_graph_completion import LONG_DISTANCE_TYPES, InferredEdge
@@ -196,9 +197,16 @@ def build_long_distance_inferer(
         )
         raw = llm_fn(f"{system}\n\n{spotlight}", prompt)
         if not raw:
+            # A failed request or an empty answer: no question answered (#998).
+            llm_stats.bump("long_distance_unanswered")
             return None
         data = _parse(raw)
-        if not data or data.get("related") is not True:
+        # An unreadable answer is not "no link" (#998): counted, and the orchestrator says so.
+        if data is None:
+            llm_stats.bump("long_distance_unparsed")
+            return None
+        llm_stats.bump("long_distance_answered")
+        if data.get("related") is not True:
             return None
 
         verb = str(data.get("verb") or "").strip().lower()

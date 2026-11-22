@@ -260,6 +260,8 @@ docker compose logs -f app worker
 - At start, a worker logs one `optional dependencies missing: ...` warning when OCR,
   `iocextract` (IPv6) or the spaCy model is absent. The reports it then processes show
   the matching stage as `degraded` in their stage report.
+  Other stages report `degraded` or `failed` the same way when an embedded data file is unreadable
+  (benign warning lists fail Stage 4; the revoked-id table and the ATT&CK reference pairs give `degraded`).
 - `docker compose logs postgres` for the database.
 
 ### Log tags

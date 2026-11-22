@@ -46,6 +46,7 @@ import json
 import os
 import re
 import string
+import threading
 from pathlib import Path
 
 from models.schemas import EntityType, RawEntity
@@ -95,15 +96,10 @@ _DEFAULT_THRESHOLDS = (0.62, 0.48)
 _TOP2_MARGIN = env_float("TTP_TOP2_MARGIN", default=0.05)
 
 
-def _thresholds() -> tuple[float, float]:
+def _base_thresholds() -> tuple[float, float]:
     """
-    Resolve (high, medium) cosine thresholds for the active embedding model.
-
-    Resolution order (lowest → highest priority):
-      1. per-model default table (_MODEL_THRESHOLDS)
-      2. thresholds recorded in the embedding manifest (written by build_indexes
-         for the model the cache was actually built/calibrated with)
-      3. TTP_HIGH_THRESHOLD / TTP_MEDIUM_THRESHOLD env overrides (operator tuning)
+    The (high, medium) cosine thresholds before the env overrides: the per-model
+    default table, then the thresholds recorded in the embedding manifest.
     """
     high, medium = _MODEL_THRESHOLDS.get(_active_model_name(), _DEFAULT_THRESHOLDS)
 
@@ -120,19 +116,63 @@ def _thresholds() -> tuple[float, float]:
         except (OSError, ValueError, TypeError, AttributeError) as exc:
             logger.warning(f"[Stage 2c] {manifest_path.name} unreadable ({exc}); "
                            f"default thresholds {high}/{medium}")
+    return high, medium
 
+
+def _threshold_problems(default: tuple[float, float]) -> list[str]:
+    """One sentence per TTP_HIGH_THRESHOLD / TTP_MEDIUM_THRESHOLD set to a value
+    that is not a number: the default it leaves in place is the one named."""
+    problems = []
+    for name, applied in zip(("TTP_HIGH_THRESHOLD", "TTP_MEDIUM_THRESHOLD"), default, strict=True):
+        raw = os.getenv(name)
+        if raw:
+            try:
+                float(raw)
+            except ValueError:
+                problems.append(f"{name}={raw!r} is not a number, the default {applied} applies")
+    return problems
+
+
+def threshold_warnings() -> list[str]:
+    """The sentences _thresholds() warns about (#996), computed on each call: a
+    stage reason carries them even when the warning was logged earlier."""
+    return _threshold_problems(_base_thresholds())
+
+
+# The warnings already logged in this process: each is logged once.
+_logged_threshold_warnings: set[str] = set()
+
+
+def _thresholds() -> tuple[float, float]:
+    """
+    Resolve (high, medium) cosine thresholds for the active embedding model.
+
+    Resolution order (lowest → highest priority):
+      1. per-model default table (_MODEL_THRESHOLDS)
+      2. thresholds recorded in the embedding manifest (written by build_indexes
+         for the model the cache was actually built/calibrated with)
+      3. TTP_HIGH_THRESHOLD / TTP_MEDIUM_THRESHOLD env overrides (operator tuning)
+    A non-numeric override is ignored, with one warning per process (#996).
+    """
+    base = _base_thresholds()
+    for sentence in _threshold_problems(base):
+        if sentence not in _logged_threshold_warnings:
+            _logged_threshold_warnings.add(sentence)
+            logger.warning(f"[Stage 2c] {sentence}")
+
+    high, medium = base
     hi_env = os.getenv("TTP_HIGH_THRESHOLD")
     md_env = os.getenv("TTP_MEDIUM_THRESHOLD")
     if hi_env:
         try:
             high = float(hi_env)
         except ValueError:
-            pass
+            pass    # not a number: _threshold_problems has named it above
     if md_env:
         try:
             medium = float(md_env)
         except ValueError:
-            pass
+            pass    # not a number: _threshold_problems has named it above
     return high, medium
 
 
@@ -574,14 +614,26 @@ def _load_corpus() -> tuple | None:
     _load_corpus_for).  Not cached itself: TTP_SEMANTIC_DOMAINS is read on every
     call, so a change of it in the same process takes effect (#389).  Call
     _load_model() first: a fallback to the legacy model changes which cache
-    matches.
+    matches.  None when the corpus cannot be used; last_error() says why (#996).
     """
     enabled = _enabled_domains()
-    return _load_corpus_for(frozenset(enabled) if enabled is not None else None, _active_model_name())
+    try:
+        return _load_corpus_for(frozenset(enabled) if enabled is not None else None, _active_model_name())
+    except _CorpusUnusable as e:
+        _errors.reason = str(e)
+        return None
+
+
+class _CorpusUnusable(Exception):
+    """The semantic corpus cannot be used; str(e) is the reason (#996)."""
+
+
+# Why the last Stage 2c call on this thread could not score (see last_error()).
+_errors = threading.local()
 
 
 @functools.lru_cache(maxsize=1)
-def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None:
+def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple:
     """
     Returns (embeddings_numpy, meta_list) where:
       embeddings has shape (N, D)  — D = 384 for MiniLM, 768 for SecureBERT+
@@ -592,12 +644,14 @@ def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None
 
     Validates the cache against the manifest (mitre_embeddings_manifest.json) to
     detect when the embedding model has changed and a rebuild is needed.
+    Raises _CorpusUnusable for a missing, mismatched or unreadable cache: lru_cache
+    keeps no exception, so a failed load is made again on the next call (#996).
     """
     emb_path = attack_data.resolve(_EMB_PATH)
     meta_path = attack_data.resolve(_META_PATH)
     if not emb_path.exists() or not meta_path.exists():
         logger.warning("Embedding cache not found — run: python scripts/build_indexes.py")
-        return None
+        raise _CorpusUnusable("embedding cache not found (python scripts/build_indexes.py)")
 
     # ── Manifest check — detect stale cache after model change ──────────────
     cache_model = _cache_model()
@@ -608,7 +662,7 @@ def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None
             f"but the model in use is '{model}'. "
             f"Rebuild with: python scripts/build_indexes.py --only embeddings"
         )
-        return None
+        raise _CorpusUnusable(f"embedding cache built for {cache_model}, model in use {model}")
 
     try:
         import numpy as np
@@ -616,7 +670,7 @@ def _load_corpus_for(enabled: frozenset[str] | None, model: str) -> tuple | None
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except Exception as e:
         logger.error(f"Could not load embedding cache: {e}")
-        return None
+        raise _CorpusUnusable(f"could not load embedding cache: {type(e).__name__}: {e}") from e
 
     # ── Restrict the corpus to the enabled taxonomies ───────────────────────
     # The cache mixes ATT&CK (Enterprise/Mobile/ICS) with CAPEC, and CAPEC is
@@ -673,6 +727,19 @@ def semantic_available() -> bool:
         return False
 
 
+def last_error() -> str | None:
+    """Why the last detect_ttps_semantic() call on this thread returned [] without
+    scoring: a scoring error or an unusable corpus.  None when it scored (#996).
+    Reset at the start of each call."""
+    return getattr(_errors, "reason", None)
+
+
+def clear_last_error() -> None:
+    """Forget the last error before a new run reads last_error() (#996): the value
+    is per thread, and a run must never read one left by an earlier document."""
+    _errors.reason = None
+
+
 def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEntity]:
     """
     Scan *text* for MITRE ATT&CK techniques using semantic sentence similarity.
@@ -686,10 +753,15 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
       confidence  = cosine similarity score (clamped to [0, 1])
 
     Duplicates (same mitre_id) are deduplicated keeping the highest score.
+    A scoring or corpus error also returns [], and last_error() says so (#996).
     """
+    _errors.reason = None
     model = _load_model()
     corpus = _load_corpus()
 
+    if model is None and _errors.reason is None and not _SKIP_HEAVY:
+        # No model by choice (SKIP_HEAVY_MODELS) is not one; otherwise it is a failure.
+        _errors.reason = f"embedding model {_TTP_EMBEDDING_MODEL} could not be loaded"
     if model is None or corpus is None:
         return []
 
@@ -743,6 +815,7 @@ def detect_ttps_semantic(text: str, top_k_per_sentence: int = 1) -> list[RawEnti
 
     except Exception as e:
         logger.error(f"Semantic scoring error: {e}")
+        _errors.reason = f"{type(e).__name__}: {e}"
         return []
 
     # Build an O(1) lookup from MITRE ID → meta entry once (avoids O(n²) scan)

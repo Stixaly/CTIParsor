@@ -14,6 +14,7 @@ import concurrent.futures
 import hashlib
 import io
 import logging
+from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Protocol
@@ -114,8 +115,20 @@ class ReadCache(Protocol):
         """Store a read under the same key as get()."""
 
 
+# Why find_figures() found nothing when it failed, "<Type>: <message>"; reset by
+# each call (see find_figures_error()).
+_find_error: ContextVar[str | None] = ContextVar("stage1f_find_error", default=None)
+
+
+def find_figures_error() -> str | None:
+    """Why the last find_figures() call returned [] on an exception, "<Type>: <message>";
+    None when it did not fail."""
+    return _find_error.get()
+
+
 def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
     """Find figure candidates in a PDF using geometric triage."""
+    _find_error.set(None)
     try:
         with pdfplumber.open(pdf_path) as pdf:
             # First pass: count distinct pages for each geometric key
@@ -202,6 +215,7 @@ def find_figures(pdf_path: Path | str) -> list[FigureCandidate]:
             return candidates
     except Exception as e:
         logger.warning("Failed to find figures in %s: %s", pdf_path, e)
+        _find_error.set(f"{type(e).__name__}: {e}")
         return []
 
 

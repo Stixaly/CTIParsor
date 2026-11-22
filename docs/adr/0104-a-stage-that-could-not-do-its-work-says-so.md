@@ -126,40 +126,45 @@ GLiNER truncation, and an empty text at Stage 1.
 
 - `stage2c_ttp_semantic._thresholds`: a malformed `TTP_HIGH_THRESHOLD` or
   `TTP_MEDIUM_THRESHOLD` falls back to the default (the threshold applied is in the
-  details).
+  details). **Fixed by #996** (the reason of 2c names the setting and the default that applies).
 - `stage2g_alias_list.extract_alias_list_entities`: returns `[]` when the `alias_list`
-  threshold exceeds the default confidence; 2g records `ran` with 0 entities.
+  threshold exceeds the default confidence; 2g records `ran` with 0 entities. **Fixed by #999**
+  (2g is `skipped`, with the threshold and the confidence).
 - `stage4b_graph_completion._attack_pairs` and `_ground_reference`: without the ATT&CK
-  index, no reference edge; 4b records `reference_added=0`.
+  index, no reference edge; 4b records `reference_added=0`. **Fixed by #995**
+  (4b is `degraded`).
 - `stage4_stix_mapping._find_embedded_sigma_rules`: a rule whose end is not found or
-  whose YAML is invalid leaves no ledger entry (ADR-0061).
+  whose YAML is invalid leaves no ledger entry (ADR-0061). **Fixed by #997**
+  (`dropped` in the ledger, with the rule's title and the reason).
 - `stage4c_long_distance._parse` and `infer`: an unreadable answer counts as "no link",
-  with no counter.
-- `stage1_ingestion.extract_reference_date`: `None`, debug log only.
+  with no counter. **Fixed by #998** (counters
+  `long_distance_answered`, `long_distance_unparsed`, `long_distance_unanswered`).
+- `stage1_ingestion.extract_reference_date`: `None`, debug log only. **Fixed by #994** (the
+  reason is in the details of Stage 1, not in its state).
 - `stage2b_gazetteer._match_aho` and `_match_regex`: a span is claimed, then its entity
   is dropped (#914).
 
 **Logged only** (a warning, nothing in the stage report):
 
 - `benign._lists`: unreadable warning lists give no benign filter, so public IoCs reach
-  the bundle.
-- `stage1_ingestion._is_scanned_pdf`: a detection error reads the PDF as text, without OCR.
-- `stage1_ingestion._rejoined_table_rows`: tables not read, cell IoCs lost.
-- `mitre_db._revoked`: revoked ids not replaced (Stage 3c and #980 both rely on it).
-- `stage1f_figures.find_figures`: figures not detected; 1f ran with `figures=0`.
+  the bundle. **Fixed by #995** (Stage 4 fails).
+- `stage1_ingestion._is_scanned_pdf`: a detection error reads the PDF as text, without OCR. **Fixed by #994**.
+- `stage1_ingestion._rejoined_table_rows`: tables not read, cell IoCs lost. **Fixed by #994**.
+- `mitre_db._revoked`: revoked ids not replaced (Stage 3c and #980 both rely on it). **Fixed by #995**.
+- `stage1f_figures.find_figures`: figures not detected; 1f ran with `figures=0`. **Fixed by #994**.
 - `stage2c_ttp_semantic.detect_ttps_semantic` and `_load_corpus_for`: a scoring or cache
-  error gives 2c with 0 entities.
+  error gives 2c with 0 entities. **Fixed by #996**.
 - `stage3e_consensus.consensus_enabled`: `ENABLE_CONSENSUS` without `CONSENSUS_PROVIDER`
-  skips 3e as "disabled", without the reason.
+  skips 3e as "disabled", without the reason. **Fixed by #998**.
 - `stage4_stix_mapping._add_relationship` and `_stamp_objects`: a relation refused by
-  `stix2`, or an object without context.
-- `ttp_retrieval._exclusions`: an unreadable `TTP_RETRIEVAL_EXCLUDE_CITED` gives no exclusion.
+  `stix2`, or an object without context. **Fixed by #997**.
+- `ttp_retrieval._exclusions`: an unreadable `TTP_RETRIEVAL_EXCLUDE_CITED` gives no exclusion. **Fixed by #999** (2c is `degraded`).
 
 **Reported** (reaches the stage report: counter, FAILED, review): the provider, empty and
 invalid answers of Stage 3 (`llm_stats`), the 3f selection failures, the 3d verification,
 the 2d and 2e load failures, 2f when CIRCL is unavailable, the Stage 4 drops (ledger). A
-missing client or an unknown provider in `stage3_llm` counts as `extraction_empty`, not
-as a provider failure.
+missing client in `stage3_llm` counts as a failed request (#998); an unknown provider still
+counts as `extraction_empty`.
 
 **Intended** (an empty value is the answer): alias and id lookups, release availability,
 benign checks on invalid input, multi-form JSON parsing, date and XML parsing, figure
@@ -168,3 +173,18 @@ CVE (404), validation filters, the rule, relation and anchor policy guards of St
 
 The silent and log-only cases that this ADR does not treat remain to be handled; the
 follow-up is one issue for each group.
+
+## Amendment 2026-11-23: #994 to #999
+
+The decisions of #994 to #999 follow the rule above: a stage that could not do its work
+says so, in its state and its reason, and a load failure is never cached. Three choices
+belong to this series:
+
+- Unreadable warning lists fail Stage 4 and stop the run, but only when the benign
+  filter is enabled: publishing the bundle without the filter is worse than publishing nothing.
+- Stage 2g cut off by the policy threshold is `skipped`, not `ran` with 0 entities.
+- Stage 4c is `degraded` when none of its questions got a readable answer.
+
+Still open in the census: `stage2b_gazetteer._match_aho` and `_match_regex` (a span is
+claimed, then its entity is dropped, #914), and the groups the census puts under
+"Intended" are unchanged.

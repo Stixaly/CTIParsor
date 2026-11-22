@@ -592,15 +592,53 @@ def stated_by_the_report(obj) -> bool:
     return not (isinstance(rule, str) and rule.startswith(NOT_STATED_BY_THE_REPORT))
 
 
+class _Unreadable(Exception):
+    """The ATT&CK reference pairs cannot be used; str(e) is the reason."""
+
+
 @functools.lru_cache(maxsize=1)
-def _attack_pairs() -> dict[tuple[str, str], str]:
-    """(src_attack_id, tgt_attack_id) → verb, or {} when the index is absent."""
+def _read_attack_pairs() -> dict[tuple[str, str], str]:
+    """
+    The ATT&CK reference pairs, read once.  Raises _Unreadable for a missing,
+    corrupt or malformed file (#995).  lru_cache keeps no exception, so a failed
+    read is made again on the next call.
+    """
     path = attack_data.resolve(_ATTACK_REL_PATH)     # outside the try: UnknownAttackRelease is a ValueError
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise _Unreadable(f"{path.name} unreadable: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict):
+        raise _Unreadable(f"{path.name} is not a JSON object")
+    try:
         return {(s, t): v for s, v, t in data.get("pairs", [])}
-    except (OSError, ValueError):
+    except (TypeError, ValueError) as exc:
+        raise _Unreadable(f"{path.name} has a malformed pair: {type(exc).__name__}: {exc}") from exc
+
+
+def _attack_pairs() -> dict[tuple[str, str], str]:
+    """
+    (src_attack_id, tgt_attack_id) → verb, or {} when the index is absent or
+    cannot be read (logged here; attack_pairs_error() says why).  Nothing is
+    cached on a failure.
+    """
+    try:
+        return _read_attack_pairs()
+    except _Unreadable as exc:
+        logger.warning(f"[Stage 4b] {exc}, no ATT&CK reference edge is added")
         return {}
+
+
+_attack_pairs.cache_clear = _read_attack_pairs.cache_clear  # type: ignore[attr-defined]
+
+
+def attack_pairs_error() -> str | None:
+    """Why the ATT&CK reference pairs cannot be read, or None when they can (#995)."""
+    try:
+        _read_attack_pairs()
+    except _Unreadable as exc:
+        return str(exc)
+    return None
 
 
 def _own_names(obj) -> list[str]:

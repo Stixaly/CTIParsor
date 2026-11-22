@@ -327,14 +327,16 @@ def _authoring_identity() -> stix2.Identity:
 
 def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
                    skip_ids: frozenset[str] = frozenset(),
-                   describe: Callable[[dict], None] | None = None) -> list:
+                   describe: Callable[[dict], None] | None = None,
+                   ledger: MappingLedger | None = None) -> list:
     """Return a copy of `stix_objects` with provenance stamped on each object:
     `object_marking_refs` (all objects) and `created_by_ref` (SDO/SRO only —
     SCOs have neither a `created` timestamp nor a created_by_ref property).
     An object whose id is in `skip_ids` (a baseline object, ADR-0090) is kept
     as it is, like a marking-definition.  `describe`, when given, writes the
     context of each other object into its dict (ADR-0093); an error there
-    costs that object its description, never the object.
+    costs that object its description, never the object, and the ledger
+    records it on the object as `stamp_failed` (#997).
 
     stix2 objects are immutable and SCOs don't support new_version(), so each is
     round-tripped through JSON — this preserves deterministic IDs (neither
@@ -351,6 +353,8 @@ def _stamp_objects(stix_objects: list, author_id: str, marking_refs: list[str],
                 describe(d)
             except Exception as exc:
                 logger.warning(f"[Stage 4] no context written on {d.get('id')}: {type(exc).__name__}: {exc}")
+                if ledger is not None:
+                    ledger.annotate(d.get("id"), stamp_failed=f"{type(exc).__name__}: {exc}"[:200])
         if marking_refs:
             existing = list(d.get("object_marking_refs", []))
             for ref in marking_refs:
@@ -1360,7 +1364,8 @@ def build_stix_bundle(
     # not a claim a pinned rule may rewrite.
     def _based_on(indicator, sco) -> None:
         rel = _add_relationship(stix_objects, indicator, "based-on", sco, confidence=0.9,
-                                pol_index=None, seen=seen_rel_keys, custom=_EV_OBSERVED)
+                                pol_index=None, seen=seen_rel_keys, custom=_EV_OBSERVED,
+                                ledger=led)
         if rel is not None:
             led.object(rel, "ioc_based_on")
 
@@ -1640,7 +1645,7 @@ def build_stix_bundle(
                 rel = _add_relationship(
                     stix_objects, existing_indicator, "indicates", malware,
                     confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
-                    custom=_EV_REPORTED,
+                    custom=_EV_REPORTED, ledger=led,
                 )
                 if rel is not None:
                     led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
@@ -1678,7 +1683,7 @@ def build_stix_bundle(
                     rel = _add_relationship(
                         stix_objects, indicator, "indicates", malware,
                         confidence=0.8, pol_index=_pol_index, seen=seen_rel_keys,
-                        custom=_EV_REPORTED,
+                        custom=_EV_REPORTED, ledger=led,
                     )
                     if rel is not None:
                         led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
@@ -1709,7 +1714,7 @@ def build_stix_bundle(
             if not _association_refused(sco, indicator, malware, assoc):
                 rel = _add_relationship(stix_objects, indicator, "indicates", malware,
                                         confidence=0.8, pol_index=_pol_index,
-                                        seen=seen_rel_keys, custom=_EV_REPORTED)
+                                        seen=seen_rel_keys, custom=_EV_REPORTED, ledger=led)
                 if rel is not None:
                     led.object(rel, "ioc_association", ioc_value=assoc.ioc_value,
                                malware_name=assoc.malware_name)
@@ -1808,7 +1813,11 @@ def build_stix_bundle(
             ledger=led, ledger_info=pattern_ledger_info(_status, _retyped),
         )
 
-    for _yaml_text, _doc in _find_embedded_sigma_rules(report_text):
+    _sigma_rules, _sigma_skipped = _scan_embedded_sigma_rules(report_text)
+    for _title, _reason in _sigma_skipped:
+        # A rule the report states and the bundle does not carry: said, with why (#997).
+        led.entity(_title, "indicator", "dropped", reason=_reason, pattern_type="sigma")
+    for _yaml_text, _doc in _sigma_rules:
         _status, _error = check_pattern("sigma", _yaml_text)
         if _status == PATTERN_REFUSED:
             led.left_out(stix_ids.indicator_id(_yaml_text), "object", "rule_does_not_parse",
@@ -1865,7 +1874,7 @@ def build_stix_bundle(
             return
         rel = _add_relationship(stix_objects, actor, "targets", tgt,
                                 pol_index=_pol_index, seen=seen_rel_keys,
-                                custom=_EV_REPORTED)
+                                custom=_EV_REPORTED, ledger=led)
         if rel is not None:
             led.object(rel, "targeted_location", actor=actor_name, target=target_name)
 
@@ -1997,7 +2006,7 @@ def build_stix_bundle(
     # served: see _materialise_pinned_edges and ADR-0026.
     _pin_stats = _materialise_pinned_edges(
         stix_objects, relationship_policy, seen_rel_keys, report_text,
-        sco_id_to_indicator=sco_id_to_indicator, forbidden=_forbidden,
+        sco_id_to_indicator=sco_id_to_indicator, forbidden=_forbidden, ledger=led,
     )
     for _r in _pin_stats.refused:
         led.refused_edge(_r["source_ref"], _r["relationship_type"], _r["target_ref"],
@@ -2094,7 +2103,7 @@ def build_stix_bundle(
             else:
                 rel = _add_relationship(stix_objects, actor, "targets", tgt,
                                         pol_index=_pol_index, seen=set(_present),
-                                        custom=_EV_REPORTED)
+                                        custom=_EV_REPORTED, ledger=led)
                 if rel is not None:
                     _present.add(pair_key)
                     led.object(rel, "targeted_location", actor=actor_name, target=target_name)
@@ -2337,7 +2346,7 @@ def build_stix_bundle(
         logger.warning(f"[Stage 4] no context written: {type(exc).__name__}: {exc}")
 
     stamped = _stamp_objects(stix_objects, author.id, marking_refs, skip_ids=skip_ids,
-                             describe=describe)
+                             describe=describe, ledger=led)
     led.object(author, "author_identity")
     for _m in marking_defs:
         led.object(_m, "marking")
@@ -2932,7 +2941,7 @@ def _add_embedded_rule_indicator(
         rel = _add_relationship(
             stix_objects, indicator, "indicates", target,
             confidence=0.9, pol_index=pol_index, seen=seen_rel_keys,
-            custom=_EV_OBSERVED,
+            custom=_EV_OBSERVED, ledger=ledger,
         )
         if rel is not None and ledger is not None:
             ledger.object(rel, "embedded_rule_title", title=title, name=candidate_name)
@@ -2999,7 +3008,22 @@ def _find_embedded_sigma_rules(report_text: str) -> list[tuple[str, dict]]:
 
     Returns a list of (yaml_text, parsed_doc) tuples.
     """
+    return _scan_embedded_sigma_rules(report_text)[0]
+
+
+def _scan_embedded_sigma_rules(report_text: str) -> tuple[list[tuple[str, dict]], list[tuple[str, str]]]:
+    """
+    The scan behind _find_embedded_sigma_rules, which also says what it gave up
+    on (#997).
+
+    Returns (rules, skipped): rules as _find_embedded_sigma_rules returns them,
+    and skipped as (title, reason) pairs, the title being the rule's `title:`
+    line.  Reasons: "sigma_rule_end_not_found" (the window ran out before the
+    rule did), "sigma_rule_invalid_yaml" (no reduction of the candidate parses
+    with title and detection).
+    """
     results: list[tuple[str, dict]] = []
+    skipped: list[tuple[str, str]] = []
     # Bounding how far a candidate can extend keeps this O(matches x cap)
     # instead of O(matches x document length): slicing report_text[m.start():]
     # to the END of the document on every match, before even looking for the
@@ -3027,7 +3051,9 @@ def _find_embedded_sigma_rules(report_text: str) -> list[tuple[str, dict]]:
             # parsing a truncated prefix risks exporting a corrupted,
             # incomplete rule as if it were complete. Best-effort, per this
             # function's own contract -- skip rather than guess.
+            skipped.append((_sigma_title_line(lines[0]), "sigma_rule_end_not_found"))
             continue
+        parsed = False
         for shrink in range(min(end_idx, 60)):
             candidate = "\n".join(lines[:end_idx - shrink]).strip()
             if not candidate:
@@ -3038,8 +3064,18 @@ def _find_embedded_sigma_rules(report_text: str) -> list[tuple[str, dict]]:
                 continue
             if isinstance(doc, dict) and "title" in doc and "detection" in doc:
                 results.append((candidate, doc))
+                parsed = True
                 break
-    return results
+        # A `title:` line in prose with no `detection:` block is no rule given up
+        # on, only a word: the ledger records the candidates that were rules.
+        if not parsed and any(ln.lstrip().startswith("detection:") for ln in lines[:end_idx]):
+            skipped.append((_sigma_title_line(lines[0]), "sigma_rule_invalid_yaml"))
+    return results, skipped
+
+
+def _sigma_title_line(line: str) -> str:
+    """The value of a `title:` line, quotes removed: what a skipped rule is called in the ledger."""
+    return line.split(":", 1)[1].strip().strip("'\"")
 
 
 def _pin_edge_key(src_obj, verb: str, tgt_obj) -> tuple[str, str, str] | None:
@@ -3319,6 +3355,7 @@ def _materialise_pinned_edges(
     report_text: str = "",
     sco_id_to_indicator: dict | None = None,
     forbidden: dict[tuple[str, str, str], str] | None = None,
+    ledger: MappingLedger | None = None,
 ) -> PinStats:
     """Materialise policy-pinned edges under a per-rule budget (ADR-0026).
 
@@ -3463,6 +3500,9 @@ def _materialise_pinned_edges(
     stats_rules: list[PinRuleStat] = []
     for idx, (label, _rule, candidates, blocked) in enumerate(plans):
         emitted = 0
+        # Granted candidates stix2 refused.  The ledger records them as dropped
+        # (#997); they are not also counted as cut by the budget below.
+        refused_by_stix = 0
         for _s_obj, _verb, _t_obj, _anchor in candidates[:grants[idx]]:
             _before = len(stix_objects)
             _custom = {
@@ -3472,13 +3512,17 @@ def _materialise_pinned_edges(
             }
             _add_relationship(
                 stix_objects, _s_obj, _verb, _t_obj,
-                pol_index=None, seen=seen_rel_keys, custom=_custom,
+                pol_index=None, seen=seen_rel_keys, custom=_custom, ledger=ledger,
             )
             if len(stix_objects) > _before:
                 emitted += 1
+            else:
+                # Every pair here has ids, is not a self-pair and is not a duplicate
+                # (checked above), so nothing but stix2 can have refused it.
+                refused_by_stix += 1
 
         candidates_count = len(candidates)
-        truncated = candidates_count - emitted
+        truncated = candidates_count - emitted - refused_by_stix
         stats_rules.append(PinRuleStat(
             rule=label,
             candidates=candidates_count,
@@ -3539,9 +3583,11 @@ def _add_relationship(
     pol_index: dict | None = None,
     seen: set | None = None,
     custom: dict | None = None,
+    ledger: MappingLedger | None = None,
 ):
     """Appends a Relationship SRO if source and target have ids, and returns it
-    (None when nothing was appended: no ids, a self-pair, a duplicate key).
+    (None when nothing was appended: no ids, a self-pair, a duplicate key, or
+    a relationship stix2 refuses, which the ledger records as dropped, #997).
 
     pol_index: optional policy rule index (pre-computed in build_stix_bundle).
     When provided, a pinned rule for the (source.type, target.type) pair
@@ -3600,6 +3646,9 @@ def _add_relationship(
         logger.warning(f"[Stage 4] {rel_type} relationship not built between "
                        f"{getattr(source, 'id', source)} and {getattr(target, 'id', target)}: "
                        f"{type(exc).__name__}: {exc}")
+        if ledger is not None:
+            ledger.relationship_refused(source, rel_type, target, "stix2_refused",
+                                        detail=str(exc)[:200])
         return None
     stix_objects.append(rel)
     return rel

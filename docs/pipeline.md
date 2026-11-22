@@ -359,7 +359,7 @@ only in what happens around it (job store, progress events, crash-resume).
 Every run records which stages ran, were skipped (disabled, model missing, no
 LLM provider), failed, or ran **degraded** (#982: their output is usable but
 incomplete, and the reason says why, e.g. an optional dependency missing or a
-page the OCR could not read) — the CLI prints it, the worker stores it in the
+page the OCR could not read; ADR-0104 lists the stages) — the CLI prints it, the worker stores it in the
 job's run config (`stage_report`).
 
 **Stage 5's verdict decides what the API serves** (ADR-0084). The worker stores

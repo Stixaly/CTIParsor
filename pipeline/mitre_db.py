@@ -110,19 +110,49 @@ def search(query: str, limit: int = 15) -> list[dict]:
 _REVOKED_PATH = Path(__file__).parent / "data" / "attack_revoked.json"
 
 
+class _Unreadable(Exception):
+    """The revoked-id table cannot be used; str(e) is the reason."""
+
+
 @functools.lru_cache(maxsize=1)
-def _revoked() -> dict:
+def _read_revoked() -> dict:
+    """
+    The revoked-id table, read once.  Raises _Unreadable for a missing, corrupt
+    or non-object file (#995).  lru_cache keeps no exception, so a failed read
+    is made again on the next call.
+    """
     path = attack_data.resolve(_REVOKED_PATH)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning(f"[mitre_db] {path.name} unreadable, revoked ids are not "
-                       f"replaced: {type(exc).__name__}: {exc}")
-        return {}
+        raise _Unreadable(f"{path.name} unreadable: {type(exc).__name__}: {exc}") from exc
     if not isinstance(data, dict):
-        logger.warning(f"[mitre_db] {path.name} is not a JSON object, revoked ids are not replaced")
-        return {}
+        raise _Unreadable(f"{path.name} is not a JSON object")
     return data
+
+
+def _revoked() -> dict:
+    """
+    The revoked-id table, or {} when it cannot be read (logged here;
+    revoked_error() says why).  Nothing is cached on a failure.
+    """
+    try:
+        return _read_revoked()
+    except _Unreadable as exc:
+        logger.warning(f"[mitre_db] {exc}, revoked ids are not replaced")
+        return {}
+
+
+_revoked.cache_clear = _read_revoked.cache_clear  # type: ignore[attr-defined]
+
+
+def revoked_error() -> str | None:
+    """Why the revoked-id table cannot be read, or None when it can (#995)."""
+    try:
+        _read_revoked()
+    except _Unreadable as exc:
+        return str(exc)
+    return None
 
 
 def replacement_for(mitre_id: str) -> str | None:

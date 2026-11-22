@@ -609,9 +609,23 @@ def _exclusions(path: str) -> list[str]:
         return []
     try:
         return [ln.strip() for ln in Path(path).read_text(encoding="utf-8").splitlines() if ln.strip()]
-    except OSError:
+    except (OSError, ValueError):
         logger.warning("TTP_RETRIEVAL_EXCLUDE_CITED=%s cannot be read — nothing excluded", path)
         return []
+
+
+def exclusions_error() -> str | None:
+    """Why TTP_RETRIEVAL_EXCLUDE_CITED cannot be read, or None when it is unset or readable.
+    Nothing is cached: the file is read on each call."""
+    path = os.getenv("TTP_RETRIEVAL_EXCLUDE_CITED", "").strip()
+    if not path:
+        return None
+    try:
+        Path(path).read_text(encoding="utf-8")
+    except (OSError, ValueError) as exc:
+        return (f"TTP_RETRIEVAL_EXCLUDE_CITED={path} cannot be read "
+                f"({type(exc).__name__}: {exc}): nothing excluded")
+    return None
 
 
 @functools.lru_cache(maxsize=2)
@@ -640,6 +654,15 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
     return Retriever(c, method, model)
 
 
+def _current_retriever(corpus: str, method: str, exclude_cited: str) -> Retriever | None:
+    """_production_retriever, except while the exclusions cannot be read: that retriever
+    is built on each call, so a cached one does not keep the search without the
+    exclusions after the file is fixed."""
+    if exclusions_error() is None:
+        return _production_retriever(corpus, method, exclude_cited)
+    return _production_retriever.__wrapped__(corpus, method, exclude_cited)
+
+
 def retrieval_available() -> bool:
     """True when the retrieval settings name a known corpus and method, and that retriever can be
     built. With SKIP_HEAVY_MODELS only the BM25 method is available."""
@@ -648,7 +671,7 @@ def retrieval_available() -> bool:
         return False
     if s["method"] != "bm25" and env_bool("SKIP_HEAVY_MODELS"):
         return False
-    return _production_retriever(s["corpus"], s["method"], s["exclude_cited"]) is not None
+    return _current_retriever(s["corpus"], s["method"], s["exclude_cited"]) is not None
 
 
 def retrieval_status() -> dict:
@@ -689,7 +712,7 @@ def candidates_for_chunks(chunks: Sequence[str]) -> list[list[TtpCandidate]]:
     """The candidates of every chunk, for the selector, with the production
     settings (`retrieval_settings`).  Empty lists when retrieval is off."""
     s = retrieval_settings()
-    retriever = _production_retriever(s["corpus"], s["method"], s["exclude_cited"])
+    retriever = _current_retriever(s["corpus"], s["method"], s["exclude_cited"])
     if retriever is None:
         return [[] for _ in chunks]
     return chunk_candidates_with(retriever, chunks, k_per_passage=s["k_per_passage"],

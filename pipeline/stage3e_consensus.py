@@ -28,23 +28,33 @@ _AGREE_BOOST   = 0.10   # both models proposed the relationship
 _SINGLE_PENALTY = 0.20  # only the primary model proposed it
 
 
-def consensus_enabled() -> bool:
-    """True when cross-model consensus is switched on and a 2nd provider is set."""
+def consensus_disabled_reason() -> str | None:
+    """The sentence the warning gives when consensus was asked for and refused
+    (#998), None otherwise, including when it was not asked for."""
     if not env_bool("ENABLE_CONSENSUS"):
-        return False
+        return None
     second = os.getenv("CONSENSUS_PROVIDER", "").strip().lower()
     primary = os.getenv("LLM_PROVIDER", "anthropic").strip().lower()
     if second == "none":
         # No second provider named: the same as ENABLE_CONSENSUS=false.
-        return False
+        return None
     if not second:
-        logger.warning("[Stage 3e] ENABLE_CONSENSUS=true but CONSENSUS_PROVIDER is unset — disabled.")
-        return False
+        return "ENABLE_CONSENSUS=true but CONSENSUS_PROVIDER is unset — disabled."
     if second == primary:
-        logger.warning(
-            "[Stage 3e] CONSENSUS_PROVIDER == LLM_PROVIDER (%s) — consensus needs two "
-            "different models; disabled.", second,
-        )
+        return (f"CONSENSUS_PROVIDER == LLM_PROVIDER ({second}) — consensus needs two "
+                "different models; disabled.")
+    return None
+
+
+def consensus_enabled() -> bool:
+    """True when cross-model consensus is switched on and a 2nd provider is set."""
+    if not env_bool("ENABLE_CONSENSUS"):
+        return False
+    if os.getenv("CONSENSUS_PROVIDER", "").strip().lower() == "none":
+        return False
+    reason = consensus_disabled_reason()
+    if reason is not None:
+        logger.warning(f"[Stage 3e] {reason}")
         return False
     return True
 
