@@ -150,12 +150,14 @@ listed one by one.
 
 `python -m playwright install --with-deps --only-shell chromium` runs in the
 `Dockerfile` unless it is built with `--build-arg INSTALL_CAPTURE=false`. The
-`playwright` Python package (1.64.1) is Apache-2.0 by its metadata, and its
-driver embeds the Node.js binary under the Node.js licence. In the image,
-`/ms-playwright` holds two downloads (read on 2026-11-01):
+`playwright` Python package (1.65.2) is Apache-2.0 by its metadata, and its
+driver embeds the Node.js binary (26.13.1) under the Node.js licence. In the
+image, `/ms-playwright` holds two downloads (read on 2026-11-01 with
+Playwright 1.64.1; since 1.65.2 the shell is revision 1255, Chrome for Testing
+159.0.8154.6, by Playwright's `browsers.json`, its size not measured again):
 
-- `chromium_headless_shell-1248` (273 MB), Chrome for Testing 156.0.8078.4 in
-  its headless shell form. This is the browser `pipeline/web_capture.py`
+- `chromium_headless_shell-1255`, Chrome for Testing 159.0.8154.6 in
+  its headless shell form (revision 1248, 156.0.8078.4, 273 MB, under 1.64.1). This is the browser `pipeline/web_capture.py`
   starts: a headless launch ran this executable in the image. Its `ABOUT` file
   names Google Chrome, "Copyright 2026 Google LLC. All rights reserved", and
   refers to the Terms of Service at `chrome://terms`, which were not verified.

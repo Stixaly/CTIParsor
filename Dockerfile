@@ -92,6 +92,8 @@ ENV PYTHONUNBUFFERED=1 \
 # `apt-get upgrade` first (ADR-0078): the base image is pinned by digest, so
 # the Debian security updates published since it was built (libpcre2, Grype
 # 2026-10-04) reach this image only here, not when Dependabot next bumps it.
+# libatomic1: Playwright's driver embeds Node.js, whose 26.x binary (Playwright
+# 1.65) links libatomic.so.1, which the slim image lacks.
 RUN apt-get update && apt-get upgrade -y --no-install-recommends \
     && apt-get install -y --no-install-recommends \
         ca-certificates git tini tesseract-ocr poppler-utils \
@@ -102,6 +104,7 @@ RUN apt-get update && apt-get upgrade -y --no-install-recommends \
         tesseract-ocr-kor tesseract-ocr-tur tesseract-ocr-vie tesseract-ocr-ita \
         tesseract-ocr-fas tesseract-ocr-heb tesseract-ocr-tha \
         libxml2 libxslt1.1 libmagic1 \
+        libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # The base image's own pip (/usr/local) is never used: the application runs
