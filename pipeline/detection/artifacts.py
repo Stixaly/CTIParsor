@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 from pipeline.detection.coverage import job_technique_ids
 from pipeline.detection.observables import Observable, observables_from_entities
 from pipeline.detection.phases import phase_band
-from pipeline.detection.relevance import MATCHABLE, job_observable_rows
+from pipeline.detection.relevance import MATCHABLE, NAME_TITLE_MAX_RULES, job_observable_rows
 from pipeline.detection.store import (
     atom_document_frequency,
     atom_hits,
@@ -63,11 +63,11 @@ TIER_LABEL: dict[int, str] = {
 VOCABULARY_DF_MIN = 20
 VOCABULARY_DF_SHARE = 0.0005
 
-#: A tool or malware name appearing in more than this many rule titles is a
-#: category label, not an identity. Measured against the live store: cobaltstrike
-#: 202, trickbot 72, xmrig 31, meshagent 6 -- all real identities that must keep
-#: their evidence. CVE ids are exempt: an id is specific by construction.
-NAME_TITLE_MAX_RULES = 500
+#: NAME_TITLE_MAX_RULES (imported from relevance, one bound for both views): a tool
+#: or malware name appearing in more than that many rule titles is a category label,
+#: not an identity. Measured against the live store: cobaltstrike 202, trickbot 72,
+#: xmrig 31, meshagent 6 -- all real identities that must keep their evidence. CVE
+#: ids are exempt: an id is specific by construction.
 
 #: Evidence is for reading, not exhaustiveness -- the count is kept in full.
 MAX_EVIDENCE_PER_ARTIFACT = 20

@@ -9,6 +9,17 @@ theme.
 
 ## [Unreleased]
 
+- **A malware named by many rules keeps its title evidence in the detection proposals (#897).** The guard
+  that drops a non-discriminative name ("powershell") from title matching was 20 % of the candidate rules.
+  Every rule that names a report's name joins that set, so the share measured the name against itself: on a
+  real report Remcos, named by 64 of 271 candidates, lost its 64 rules (Windows_Trojan_Remcos, Remcos C2
+  domains). The guard is now an absolute count, `NAME_TITLE_MAX_RULES = 500`, the one the artifact view
+  already used. Measured on 7 real reports against a 75,138-rule store: 163 proposals come back (Remcos,
+  Telegram C2), 2 PowerShell-only Sigma proposals go, nothing else changes; medium (13,473 rules), route and
+  powershell are still dropped, and sliver (489), cobalt strike (446), apt28 (190) keep their evidence. A
+  share of the whole store was rejected: 0.2 % (150 rules) dropped Cobalt Strike, Sliver and APT28, and
+  20 % kept the spurious name "medium" (194 unrelated proposals). A spurious name under the bound ("tool
+  set", 347) still passes, as before: frequency cannot tell it from an identity.
 - **Stage 2 extracts fewer false and more real IoCs (#972, #973).**
   - No longer emitted: an IPv4 address after a version word (`version 2.17.1.0`), unless a port follows;
     technology names (`ASP.NET`, `Node.js`), unless written defanged; hex runs labelled imphash, JA3,

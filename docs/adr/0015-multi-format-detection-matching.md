@@ -152,7 +152,10 @@ already demotes a literal that thousands of rules share.
   format=…)` take a format and count only within it.
 - `dedup_key` payload is prefixed with the format string, so no Sigma rule can
   ever fold into a YARA one.
-- `NAME_TITLE_MAX_SHARE` is evaluated per format for the same reason.
+- `NAME_TITLE_MAX_SHARE` is evaluated per format for the same reason. *(Superseded on
+  2026-11-23 by #897: the share, computed on the candidate set, dropped real malware names
+  such as Remcos; the guard is now an absolute count, `NAME_TITLE_MAX_RULES = 500`, shared
+  with the artifact view and not split by format.)*
 
 This keeps every existing Sigma score **bit-identical** after the new corpora
 land — the acceptance test for this ADR (§Validation).

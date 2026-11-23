@@ -423,12 +423,14 @@ def test_proposals_endpoint_limit_is_bounded(temp_db, temp_db_client):
 
 
 def test_like_only_rules_without_evidence_are_not_proposed(temp_db):
-    """#329: 300 rules whose title merely contains "PowerShell" are not 300 proposals."""
+    """#329: rules whose title merely contains "PowerShell" are not proposals once the
+    name is in more rules than NAME_TITLE_MAX_RULES (#897: an absolute bound)."""
+    from pipeline.detection.relevance import NAME_TITLE_MAX_RULES
     conn = temp_db.get_conn()
     rconn = temp_db.get_rule_conn()
     replace_corpus_rules(rconn, "ioc", [
         _rule("ioc", f"ps{i}", [], title=f"Suspicious PowerShell download {i}")
-        for i in range(300)
+        for i in range(NAME_TITLE_MAX_RULES + 1)
     ])
     _seed_job(temp_db, "j329", [("PowerShell", "tool", None)])
     out = propose_for_job(rconn, "j329", jobs_conn=conn)
@@ -478,3 +480,29 @@ def test_a_ubiquitous_basename_does_not_shadow_its_discriminating_path(temp_db, 
              if p["id"] == "c:implant"]
     assert top["evidence_count"] == 1
     assert [(m["value"], m["discriminating"]) for m in top["matches"]] == [(path, True)]
+
+
+# ── #897: the name-title bound is absolute, not a share of the candidates ─────
+
+def test_a_malware_named_by_most_candidate_rules_keeps_its_title_evidence(temp_db):
+    """The issue's case: Mimikatz names 3 of the 4 candidate rules; it is a malware, not noise."""
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "sigma", [
+        _rule("sigma", f"m{i}", [], title=f"Mimikatz Credential Dump {i}") for i in range(3)
+    ] + [_rule("sigma", "cve", [], title="PAN-OS CVE-2024-3400 Exploit")])
+    _seed_job(temp_db, "j897", [("Mimikatz", "malware", None)])
+    ids = {p["id"] for p in propose_for_job(rconn, "j897", jobs_conn=conn)["proposals"]}
+    assert ids == {"sigma:m0", "sigma:m1", "sigma:m2"}
+
+
+def test_a_name_s_evidence_no_longer_depends_on_the_other_names_of_the_report(temp_db):
+    """Measured on a real report: Remcos in 64 rules among 271 candidates was dropped (64 > 20 %)."""
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "yara", [
+        _rule("yara", f"r{i}", [], title=f"Windows_Trojan_Remcos_{i}") for i in range(64)
+    ] + [_rule("yara", f"z{i}", [], title=f"ZGRat loader {i}") for i in range(16)])
+    _seed_job(temp_db, "j897b", [("Remcos", "malware", None), ("ZGRat", "malware", None)])
+    ids = {p["id"] for p in propose_for_job(rconn, "j897b", jobs_conn=conn, limit=500)["proposals"]}
+    assert {f"yara:r{i}" for i in range(64)} <= ids
