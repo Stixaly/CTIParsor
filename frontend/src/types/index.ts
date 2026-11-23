@@ -683,6 +683,7 @@ export const STIX_COLORS: Record<string, string> = {
   ipv6:            '#1d4ed8',   // → ipv6-addr
   domain:          '#7c3aed',   // → domain-name
   email:           '#db2777',   // → email-addr
+  sha512:          '#0891b2',   // → file
   sha256:          '#0891b2',   // → file
   md5:             '#0891b2',   // → file
   sha1:            '#0891b2',   // → file
@@ -711,6 +712,7 @@ export const ENTITY_HIGHLIGHT: Record<string, string> = {
   // File / hash SCOs
   md5:              'bg-amber-100 text-amber-900 border-b-2 border-amber-400',
   sha1:             'bg-amber-100 text-amber-900 border-b-2 border-amber-400',
+  sha512:           'bg-amber-100 text-amber-900 border-b-2 border-amber-400',
   sha256:           'bg-amber-100 text-amber-900 border-b-2 border-amber-400',
   file:             'bg-amber-100 text-amber-900 border-b-2 border-amber-500',
   // System SCOs
@@ -742,7 +744,7 @@ export const ENTITY_TYPE_LABELS: Record<string, string> = {
   ipv4: 'IPv4', ipv6: 'IPv6', domain: 'Domain', url: 'URL',
   email: 'Email', mac_addr: 'MAC', asn: 'ASN', network_traffic: 'Net Traffic',
   // File / hash SCOs
-  md5: 'MD5', sha1: 'SHA-1', sha256: 'SHA-256', file: 'File',
+  md5: 'MD5', sha1: 'SHA-1', sha256: 'SHA-256', sha512: 'SHA-512', file: 'File',
   // System SCOs
   registry_key: 'Registry Key', mutex: 'Mutex', user_account: 'User Account',
   // Vulnerability

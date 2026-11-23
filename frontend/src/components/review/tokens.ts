@@ -25,6 +25,7 @@ export const TYPE_STYLE: Record<string, TypeStyle> = {
   asn:                { hue: 205, label: 'ASN' },
   network_traffic:    { hue: 196, label: 'Net traffic' },
   // ── File / Hash SCOs ─────────────────────────────────────────────────────
+  sha512:             { hue:  40, label: 'SHA-512' },
   sha256:             { hue:  40, label: 'SHA-256' },
   md5:                { hue:  40, label: 'MD5' },
   sha1:               { hue:  40, label: 'SHA-1' },
@@ -87,7 +88,7 @@ export const TYPE_STYLE: Record<string, TypeStyle> = {
 // not STIX canonical aliases (which are only needed by the graph view).
 export const TYPE_GROUPS: Array<{ label: string; types: string[] }> = [
   { label: 'Network IoC',   types: ['ipv4', 'ipv6', 'domain', 'url', 'email', 'mac_addr', 'asn', 'network_traffic'] },
-  { label: 'File / Hash',   types: ['sha256', 'md5', 'sha1', 'file'] },
+  { label: 'File / Hash',   types: ['sha512', 'sha256', 'md5', 'sha1', 'file'] },
   { label: 'Host artifact', types: ['registry_key', 'mutex', 'user_account'] },
   { label: 'Vulnerability', types: ['cve', 'vulnerability'] },
   // Single ATT&CK category — all map to the STIX attack-pattern SDO. The legacy
@@ -373,7 +374,7 @@ export function verbsForPair(srcType: string, tgtType: string): {
   const aliases: Record<string, string> = {
     cve: 'vulnerability', ttp: 'attack-pattern', technique: 'attack-pattern',
     tactic: 'attack-pattern', procedure: 'attack-pattern',
-    sha256: 'file', sha1: 'file', md5: 'file',
+    sha512: 'file', sha256: 'file', sha1: 'file', md5: 'file',
     asn: 'autonomous-system', domain: 'domain-name',
     email: 'email-addr', ipv4: 'ipv4-addr', ipv6: 'ipv6-addr',
     mac_addr: 'mac-addr', registry_key: 'windows-registry-key',
@@ -405,7 +406,7 @@ const _DEFANGABLE_TYPES = new Set(['domain', 'url', 'email', 'ipv4', 'ipv6'])
 // source document may still have it wrapped across lines inside a table cell.
 // These are matched with whitespace tolerance so the wrapped occurrence is
 // highlighted and click-to-locate works.
-const _HASH_TYPES = new Set(['md5', 'sha1', 'sha256'])
+const _HASH_TYPES = new Set(['md5', 'sha1', 'sha256', 'sha512'])
 
 /**
  * Given a clean (refanged) IOC value, generate the defanged forms a CTI

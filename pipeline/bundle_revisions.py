@@ -264,6 +264,11 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "Stage 2b: a name two ATT&CK entities share goes to the one its context names, and the "
      "other no longer blocks a mention of its own (ADR-0105; #914)",
      "extraction"),
+    ("acfd56f", "2026-11-23",
+     "Stage 2 IoCs: no IPv4 after a version word, no technology name as a domain, no "
+     "imphash/JA3/commit as a file hash; Windows paths with %VAR% or spaces, SHA-512, IPv4 "
+     "ranges and new file extensions are extracted (#972, #973)",
+     "extraction"),
 )
 
 

@@ -106,7 +106,7 @@ def family(stix_type: str) -> str:
 _OBSERVABLE_TO_STIX = {
     "ipv4": "ipv4-addr", "ipv6": "ipv6-addr", "domain": "domain-name", "url": "url",
     "email": "email-addr", "mac_addr": "mac-addr", "asn": "autonomous-system",
-    "md5": "file", "sha1": "file", "sha256": "file", "file": "file",
+    "md5": "file", "sha1": "file", "sha256": "file", "sha512": "file", "file": "file",
     "registry_key": "windows-registry-key", "mutex": "mutex",
     "network_traffic": "network-traffic", "user_account": "user-account",
 }
@@ -136,7 +136,7 @@ _SCO_VALUE_FIELD = {
 }
 # The SDO types that get name keys (everything else keeps its id key only).
 _NAMED_STIX_TYPES = frozenset(set(ENTITY_TO_STIX.values()) - set(_OBSERVABLE_TO_STIX.values()))
-_HASH_ENTITY_ALGO = {"md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256"}
+_HASH_ENTITY_ALGO = {"md5": "MD5", "sha1": "SHA-1", "sha256": "SHA-256", "sha512": "SHA-512"}
 
 
 def _entity_type_value(entity_type: object) -> str:
@@ -213,7 +213,7 @@ def normalize_value(entity_type: str, value: str) -> str:
 # Both kinds of key are returned as (strong + named keys, weak keys); a weak key
 # (a file name) counts only when one baseline file alone carries it (lot 7).
 
-_HASH_ALGOS = {"MD5": "MD5", "SHA1": "SHA-1", "SHA256": "SHA-256"}
+_HASH_ALGOS = {"MD5": "MD5", "SHA1": "SHA-1", "SHA256": "SHA-256", "SHA512": "SHA-512"}
 # Stage 4 writes source_name="capec" for a CAPEC id, which a row carries as mitre_id.
 _MITRE_SOURCES = frozenset({"mitre-attack", "mitre-mobile-attack", "mitre-ics-attack", "capec"})
 _CVE = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
@@ -1202,7 +1202,7 @@ _ENTITY_OF_SDO = {
     "campaign": "campaign", "infrastructure": "infrastructure", "incident": "incident",
     "attack-pattern": "ttp", "vulnerability": "cve", "location": "location", "identity": "identity",
 }
-_HASH_PRIORITY = (("SHA-256", "sha256"), ("SHA-1", "sha1"), ("MD5", "md5"))
+_HASH_PRIORITY = (("SHA-256", "sha256"), ("SHA-1", "sha1"), ("MD5", "md5"), ("SHA-512", "sha512"))
 _MIN_FORM = 3                         # a form shorter than this would be found inside other words ("ab" in "table")
 
 
