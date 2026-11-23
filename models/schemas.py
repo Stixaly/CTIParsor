@@ -23,6 +23,7 @@ class EntityType(str, Enum):
     MD5 = "md5"
     SHA1 = "sha1"
     SHA256 = "sha256"
+    SHA512 = "sha512"
     MAC_ADDR = "mac_addr"          # mac-addr SCO
     ASN = "asn"                    # autonomous-system SCO
     FILE = "file"                  # file SCO (path / filename)

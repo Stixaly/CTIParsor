@@ -85,6 +85,11 @@ function validateIoC(text: string, type: string): ValidationResult | null {
         valid: /^[0-9a-fA-F]{64}$/.test(v),
         hint: 'Expected: 64 hexadecimal characters',
       }
+    case 'sha512':
+      return {
+        valid: /^[0-9a-fA-F]{128}$/.test(v),
+        hint: 'Expected: 128 hexadecimal characters',
+      }
     case 'cve':
       return {
         valid: /^CVE-\d{4}-\d{4,7}$/i.test(v),

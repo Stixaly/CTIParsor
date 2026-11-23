@@ -64,8 +64,11 @@ def test_a_windows_path_stops_at_any_blank(b):
                  f"dropped C:\\Windows\\Temp\\evil.dll{b}and more",
                  f"copied to \\\\file{b}srv\\share\\evil.dll today"):
         got = {e.value for e in _extract_file_paths(text)}
-        assert got == {e.value for e in _extract_file_paths(text.replace(b, " "))}
+        # #972: an ASCII space joins the words of a directory ("Program Data"), so
+        # only the other blanks end a path here.
         assert not any(b in v for v in got), got
+    assert {e.value for e in _extract_file_paths(f"dropped C:\\Windows\\Temp\\evil.dll{b}and more")} \
+        == {"C:\\Windows\\Temp\\evil.dll"}
 
 
 @pytest.mark.parametrize("b", BLANKS)

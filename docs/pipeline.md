@@ -87,7 +87,7 @@ The boxes below give each stage in detail, in execution order.
 ┌─────────────────────────────▼────────────────────────────────────────┐
 │  Stage 2 — REGEX IOC EXTRACTION                         (offline ✅)  │
 │  IPv4/v6, domains, URLs, emails, MAC, ASN, file paths + filenames   │
-│  Registry keys, MD5/SHA-1/SHA-256 (incl. line-wrapped hashes)        │
+│  Registry keys, MD5/SHA-1/SHA-256/SHA-512 (incl. line-wrapped), CIDR │
 │  CVE IDs, raw MITRE ATT&CK IDs (T1234 / T1234.001) → ttp            │
 │  spaCy GPE → location, if a model is installed; kept only if it can │
 │  be a place name: "C&C", "XSS" go (NER_PRECISION_FILTERS, ADR-0088) │
@@ -455,6 +455,14 @@ acceptance gates pass; `off` has no policy and no counts
 Stage 2 drops an email or ASN match that is glued to a cased letter or a digit on
 either side (`glued_to_a_word`, ADR-0049): `o@evil.com` is not cut out of
 `joão@evil.com`. Chinese, Japanese, Korean and Thai characters do not glue a match.
+
+Stage 2 also refuses some values, and counts them: the Stage 2 report's `details`
+carry `discarded_iocs`, the number of values refused per reason, summed over the
+chunks (#973). The reasons: `version_number` (an IPv4 address after a version word,
+unless a port follows), `technology_name` (`ASP.NET`, `Node.js`, unless written
+defanged), `imphash`, `ja3`, `commit_id` and `non_file_hash` (a hex run labelled
+as one of those, not as a file hash). An IPv4 range (`203.0.113.0/24`) is one `ipv4`
+entity with its prefix; SHA-512 is a hash type of its own.
 
 ### 2. Sliding-window chunk overlap (Stage 1)
 

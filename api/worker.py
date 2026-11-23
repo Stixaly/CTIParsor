@@ -1274,7 +1274,8 @@ def re_run_final_stages(job_id: str, quick: bool = False, *, _rebuilds: int = 0)
         # SCOs
         EntityType.IPV4.value, EntityType.IPV6.value, EntityType.DOMAIN.value,
         EntityType.URL.value, EntityType.EMAIL.value, EntityType.MD5.value,
-        EntityType.SHA1.value, EntityType.SHA256.value, EntityType.MAC_ADDR.value,
+        EntityType.SHA1.value, EntityType.SHA256.value, EntityType.SHA512.value,
+        EntityType.MAC_ADDR.value,
         EntityType.ASN.value, EntityType.FILE.value, EntityType.REGISTRY_KEY.value,
         EntityType.MUTEX.value, EntityType.NETWORK_TRAFFIC.value,
         EntityType.USER_ACCOUNT.value,

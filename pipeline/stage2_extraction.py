@@ -12,6 +12,8 @@ pipeline.regex_safety.
 import ipaddress
 import re
 from collections.abc import Iterator
+from contextvars import ContextVar
+from typing import Any
 from urllib.parse import urlparse
 
 from models.schemas import EntityType, RawEntity
@@ -205,6 +207,13 @@ def _hash_blocks(text: str) -> Iterator[tuple[int, str]]:
 _IPV4_PATTERN = _compile_pattern(
     r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
 )
+# An address with its prefix length, "203.0.113.0/24" (#972): a range, one observable.
+# The same guards as _ipv4_matches, applied in _extract_network_iocs; the prefix
+# is 0 to 32 and no digit or letter follows it (checked there, RE2 having no lookahead).
+_IPV4_CIDR_PATTERN = _compile_pattern(
+    r"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)"
+    r"/(?:3[0-2]|[12][0-9]|[0-9])"
+)
 
 
 def _ipv4_matches(text: str) -> Iterator[str]:
@@ -214,7 +223,88 @@ def _ipv4_matches(text: str) -> Iterator[str]:
         if (before.isdecimal() or before == "."
                 or after[:1].isdecimal() or (after[:1] == "." and after[1:].isdecimal())):
             continue
+        # "Log4j version 2.17.1.0" is a version, not an address; a port after it
+        # ("2.17.1.0:443") still makes it one (#973).
+        if _names_a_version(text, start) and not (text[end:end + 1] == ":" and text[end + 1:end + 2].isdecimal()):
+            _discard("version_number", m.group())
+            continue
         yield m.group()
+
+
+# A version word that names the number before an address: "version 2.17.1.0",
+# "v2.17.1.0", "rev. 1.2.3.4" (#973).  Only the 20 characters before the address
+# are read, and a line break ends the phrase.
+_VERSION_WORDS = ("version", "ver", "rev")
+_VERSION_WINDOW = 20
+
+
+def _names_a_version(text: str, start: int) -> bool:
+    """Does the text just before `start` end with a version word, blanks and one full stop aside?"""
+    if text[start - 1:start] in ("v", "V") and not text[start - 2:start - 1].isalnum():
+        return True
+    window_start = max(0, start - _VERSION_WINDOW)
+    before = text[window_start:start].rstrip(" \t")
+    # "Version: 2.17.1.0", "ver. 1.2.3.4": one colon or one full stop after the word.
+    if before.endswith((".", ":")):
+        before = before[:-1].rstrip(" \t")
+    for word in _VERSION_WORDS:
+        if before[-len(word):].lower() == word:
+            begin = window_start + len(before) - len(word)
+            # The word is whole: "over 1.2.3.4" is not "ver".
+            if begin == 0 or not text[begin - 1].isalnum():
+                return True
+    return False
+
+
+# What the regex pass refuses during one extract_entities() call (#973): reason ->
+# {"count": n, "examples": up to _DISCARD_EXAMPLES values}.  extract_entities() starts
+# it empty; nothing is recorded outside a call.
+_discards: ContextVar[dict[str, dict[str, Any]] | None] = ContextVar("stage2_discards", default=None)
+_DISCARD_EXAMPLES = 5
+
+
+def _discard(reason: str, value: str) -> None:
+    """Records one value the regex pass refused, and why, for the call in progress."""
+    record = _discards.get()
+    if record is None:
+        return
+    entry = record.setdefault(reason, {"count": 0, "examples": []})
+    entry["count"] += 1
+    if len(entry["examples"]) < _DISCARD_EXAMPLES and value not in entry["examples"]:
+        entry["examples"].append(value)
+
+
+def discarded_counts() -> dict[str, int]:
+    """How many values the last extract_entities() call refused, per reason."""
+    record = _discards.get() or {}
+    return {reason: entry["count"] for reason, entry in record.items()}
+
+
+def discarded_iocs() -> dict[str, list[str]]:
+    """Up to five values the last extract_entities() call refused, per reason."""
+    record = _discards.get() or {}
+    return {reason: list(entry["examples"]) for reason, entry in record.items()}
+
+
+# Technology names shaped like a domain or a file name ("ASP.NET", "Node.js").  Such
+# a value is not reported, unless the text wrote it defanged ("asp[.]net"): then
+# it is an indicator.  deno.land is not listed: it is the live host of Deno's
+# module registry.
+_TECH_NAMES = frozenset({
+    "asp.net", "vb.net", "ado.net", "node.js", "vue.js", "next.js", "nuxt.js", "react.js",
+    "express.js", "three.js", "d3.js", "chart.js", "socket.io", "angular.js", "backbone.js",
+    "ember.js",
+})
+
+
+def _written_defanged(source: tuple[str, list[int]] | None, start: int, end: int, value: str) -> bool:
+    """Was refanged[start:end] (`value`) written neutralised in the text, as "asp[.]net"?
+    `source` is the text refang read and the offset in it of each refanged character
+    (refang_with_offsets); None when the caller has no text, and nothing is defanged."""
+    if source is None:
+        return False
+    original, offsets = source
+    return original[offsets[start]:offsets[end - 1] + 1].lower() != value.lower()
 
 # Bare filenames (no path) — only when the extension is executable / script /
 # installer-like, so we capture malware artefacts (payload.exe, _fanout.sh,
@@ -241,8 +331,15 @@ def _ipv4_matches(text: str) -> Iterator[str]:
 _MALWARE_FILE_EXTS = (
     "exe|dll|sys|drv|scr|cpl|ocx|bin|elf|so|ko|"
     "ps1|psm1|psd1|bat|cmd|vbs|vbe|js|jse|wsf|wsh|hta|lnk|"
-    "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img"
+    "sh|bash|zsh|py|pyc|pyw|pl|rb|php|jar|war|apk|dmg|app|msi|iso|img|"
+    # #972: office macro documents, droppers and archives, disk images.  Of these
+    # only app and zip are TLDs; zip was already in _DOMAIN_EXTRA_NON_TLD_EXTS, so
+    # the domain exclusion is unchanged by it.
+    "docm|xlsm|dotm|pptm|dat|tmp|chm|xll|url|reg|inf|pif|zip|7z|rar|vhd|vhdx"
 )
+# The same extensions as a set: a path with a space in it is a file only when its
+# extension is one of these (_extract_file_paths).
+_KNOWN_FILE_EXTS = frozenset(_MALWARE_FILE_EXTS.split("|"))
 
 # Extensions _DOMAIN_PATTERN must also reject that are not malware-adjacent
 # (so don't belong in _MALWARE_FILE_EXTS itself) — common document/media/
@@ -334,18 +431,28 @@ _MAC_CISCO = _compile_pattern(
 _ASN_PATTERN = _compile_pattern(
     r"\bAS(?:N[" + _WS + r"]*|[" + _WS + r"]*)([0-9]{1,10})\b", re.ASCII)
 
-# Windows file paths — drive letter or UNC share, at least one path component,
-# and a file extension.  Spaces are excluded from path components so the match
-# stops at the end of the actual filename (avoids greedy over-matching).
+# Windows file paths — a drive letter, a UNC share or an environment variable
+# ("%APPDATA%\", "$env:TEMP\") at the root, at least one path component, and a
+# file extension.  A directory may hold single spaces between its words
+# ("Program Files\"); a blank run or a sentence's full stop still ends the path.
+# The filename has no space, and a path with a space in it is kept only when its
+# extension is a known one (_KNOWN_FILE_EXTS, checked in _extract_file_paths): "C:\Program
+# Files\Acme is the folder." is prose.  Plain RE2, no lookaround (ADR-0049).
 # Examples: C:\Windows\System32\cmd.exe  \\server\share\payload.dll
+#           C:\Program Files\Acme\update.exe  %APPDATA%\Microsoft\svc.exe
 # The caller drops a path whose extension runs on into a word: RE2 gave
 # "C:\x\relatório.comunica" for "...relatório.comunicação".
 # No IGNORECASE: its letters are [A-Za-z] already, and it added only the Kelvin
 # sign and the long s (and, under `re`, the Turkish dotted and dotless i).
 _WIN_PATH_PATTERN = _compile_pattern(
-    r"(?:[A-Za-z]:\\|\\\\[^\\" + _WS + r"]+\\[^\\" + _WS + r"]+\\)"   # drive root or UNC root
-    r"(?:[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\\)*"      # zero or more directories (no spaces)
-    r"[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\.[A-Za-z]{2,10}\b",  # filename.ext (no spaces)
+    r"(?:[A-Za-z]:\\|\\\\[^\\" + _WS + r"]+\\[^\\" + _WS + r"]+\\"   # drive root or UNC root
+    r"|%[A-Za-z0-9_]+%\\|\$[Ee][Nn][Vv]:[A-Za-z0-9_]+\\)"            # or an environment variable
+    # Up to 24 directories, each a token with no blank, or 2 to 5 words joined by one
+    # space with no dot nor comma ("Program Files", "%GPO ID%"): a sentence's ". "
+    # or ", " ends the path, and the bounds keep `re` linear on hostile text.
+    r"(?:(?:[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+"
+    r"|[A-Za-z0-9_()&'+%\-]+(?: [A-Za-z0-9_()&'+%\-]+){1,4})\\){0,24}"
+    r"[^\\" + _WS + r"\n\r\t<>:\"|?*\x00-\x1F]+\.(?:[A-Za-z]{2,10}|7z)\b",  # filename.ext (no spaces)
     re.ASCII,
 )
 
@@ -519,17 +626,19 @@ def extract_entities(text: str) -> list[RawEntity]:
     - CVE / TTP          → regex
     - NER                → spaCy pour malwares et acteurs
     """
-    refanged = refang(text)
+    _discards.set({})                  # this call's refusals only (#973)
+    refanged, offsets = refang_with_offsets(text)
+    source = (text, offsets)
 
     entities: list[RawEntity] = []
     entities.extend(_extract_hashes_regex(refanged))
-    entities.extend(_extract_network_iocs(refanged))
+    entities.extend(_extract_network_iocs(refanged, source))
     entities.extend(_extract_cves(refanged))
     entities.extend(_extract_mitre_ttps(refanged))
     entities.extend(_extract_mac_addresses(refanged))
     entities.extend(_extract_asns(refanged))
     entities.extend(_extract_file_paths(refanged))
-    entities.extend(_extract_bare_filenames(refanged))
+    entities.extend(_extract_bare_filenames(refanged, source))
     entities.extend(_extract_registry_keys(refanged))
 
     if _nlp is not None:
@@ -538,7 +647,7 @@ def extract_entities(text: str) -> list[RawEntity]:
     return _deduplicate(entities)
 
 
-_HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.MD5}
+_HASH_TYPE_BY_LEN = {128: EntityType.SHA512, 64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.MD5}
 
 # Algorithm labels that precede a hash column/cell in an IOC table ("SHA-256",
 # "Hash (md5)", "SHA 1"…).  Used only to break genuinely ambiguous blocks, where
@@ -547,6 +656,7 @@ _HASH_TYPE_BY_LEN = {64: EntityType.SHA256, 40: EntityType.SHA1, 32: EntityType.
 # in _labelled_hash_len, RE2 having no lookahead (ADR-0049).  A refused match
 # hides no other: none can start inside one.
 _HASH_LABEL_PATTERNS = (
+    (128, _compile_pattern(r"sha[" + _WS + r"\-_]*512", re.IGNORECASE), False),
     (64, _compile_pattern(r"sha[" + _WS + r"\-_]*256", re.IGNORECASE), False),
     (40, _compile_pattern(r"sha[" + _WS + r"\-_]*1", re.IGNORECASE), True),
     (32, _compile_pattern(r"md[" + _WS + r"\-_]*5", re.IGNORECASE), True),
@@ -573,9 +683,50 @@ def _labelled_hash_len(text: str, block_start: int) -> int | None:
     return best_len
 
 
+# Labels that name a fingerprint which is not a file's hash (#973), and the reason
+# a value under one is refused.  ja3s and ja4 are TLS fingerprints, as ja3 is.
+_NON_FILE_LABELS = {
+    "imphash": "imphash", "ja3": "ja3", "ja3s": "ja3", "ja4": "ja3",
+    "commit": "commit_id", "guid": "non_file_hash", "uuid": "non_file_hash",
+    "ssdeep": "non_file_hash", "tlsh": "non_file_hash",
+}
+# How far before a hex run its label may be, on the same line.
+_NON_FILE_LABEL_WINDOW = 40
+
+
+def _non_file_label(text: str, block_start: int) -> str | None:
+    """
+    The reason (a value of _NON_FILE_LABELS) when the label nearest before `block_start`,
+    within 40 characters on the same line, names a fingerprint that is not a file's hash;
+    None when that label is an algorithm (MD5, SHA-1, SHA-256) or no label is near.
+    """
+    window = text[max(0, block_start - _NON_FILE_LABEL_WINDOW):block_start]
+    line = window[max(window.rfind("\n"), window.rfind("\r")) + 1:]
+    nearest_end, reason = -1, None
+    for m in _ALNUM_RUN_PATTERN.finditer(line):
+        label = m.group().lower()
+        if label in _NON_FILE_LABELS and m.end() > nearest_end:
+            nearest_end, reason = m.end(), _NON_FILE_LABELS[label]
+    for _, pattern, no_digit_after in _HASH_LABEL_PATTERNS:
+        for m in pattern.finditer(line):
+            if no_digit_after and line[m.end():m.end() + 1].isdecimal():
+                continue
+            if m.end() > nearest_end:
+                nearest_end, reason = m.end(), None
+    if reason is None:
+        return None
+    between = [w.lower() for w in _ALNUM_RUN_PATTERN.findall(line[nearest_end:])]
+    return reason if all(w in _LABEL_FILLERS for w in between) else None
+
+
+# Words that may stand between a fingerprint's label and its value.
+_LABEL_FILLERS = frozenset({"hash", "hashes", "fingerprint", "fingerprints", "digest", "value",
+                            "string", "id", "is", "of"})
+
+
 def _extract_hashes_regex(text: str) -> list[RawEntity]:
     """
-    Extract MD5, SHA1 and SHA256 hashes — including hashes that a PDF has wrapped
+    Extract MD5, SHA1, SHA256 and SHA512 hashes — including hashes that a PDF has wrapped
     across multiple lines inside a table cell.
 
     A "block" is a run of hex fragments separated only by whitespace/newlines.
@@ -615,6 +766,15 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
 
     for block_start, block in _hash_blocks(text):
         fragments = block.split()
+        reason = _non_file_label(text, block_start)
+        if reason is not None:
+            # An imphash, a TLS fingerprint or a commit id is not a file's hash (#973).
+            refused = [f for f in fragments if len(f) in _HASH_TYPE_BY_LEN]
+            if not refused and len("".join(fragments)) in _HASH_TYPE_BY_LEN:
+                refused = ["".join(fragments)]
+            for f in refused:
+                _discard(reason, f)
+            continue
         if len(fragments) == 1:
             emit(block)
             continue
@@ -647,7 +807,7 @@ def _extract_hashes_regex(text: str) -> list[RawEntity]:
     return results
 
 
-def _extract_network_iocs(text: str) -> list[RawEntity]:
+def _extract_network_iocs(text: str, source: tuple[str, list[int]] | None = None) -> list[RawEntity]:
     """
     Extrait IP, URL, domaines et emails, from text `refang` already ran on.
 
@@ -681,8 +841,26 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
             if ip:
                 results.append(RawEntity(value=ip, entity_type=EntityType.IPV6))
 
+    # Plages IPv4 (#972): the address of a range is blanked out of the text the
+    # address pass reads, so "203.0.113.0/24" is one ipv4 observable, not two.
+    blanked: list[str] = []
+    pos = 0
+    for m in _IPV4_CIDR_PATTERN.finditer(text):
+        start, end = m.span()
+        before, after = text[start - 1:start], text[end:end + 2]
+        if (before.isdecimal() or before in (".", "/") or after[:1].isalnum() or after[:1] == "/"
+                or (after[:1] == "." and after[1:].isdecimal())):
+            continue
+        results.append(RawEntity(value=m.group(), entity_type=EntityType.IPV4))
+        blanked += [text[pos:start], " " * (end - start)]
+        pos = end
+    if blanked:
+        text_ipv4 = "".join(blanked) + text[pos:]
+    else:
+        text_ipv4 = text
+
     # IPv4 par regex
-    for ip in _ipv4_matches(text):
+    for ip in _ipv4_matches(text_ipv4):
         results.append(RawEntity(value=ip, entity_type=EntityType.IPV4))
 
     # URLs complètes
@@ -733,6 +911,14 @@ def _extract_network_iocs(text: str) -> list[RawEntity]:
     for m in _DOMAIN_PATTERN.finditer(text):
         domain = m.group().lower()
         if not _domain_accepted(domain):
+            continue
+        start, end = m.span()
+        # The head of a longer dotted name: "reminder.uue" of "reminder.uue.rar", once
+        # the pattern refused the file extension that ends it (#972), is no domain.
+        if text[end:end + 1] == "." and text[end + 1:end + 2].isalnum():
+            continue
+        if domain in _TECH_NAMES and not _written_defanged(source, start, end, domain):
+            _discard("technology_name", m.group())
             continue
         if domain not in url_hostnames:
             results.append(RawEntity(value=domain, entity_type=EntityType.DOMAIN))
@@ -858,6 +1044,8 @@ def _extract_file_paths(text: str) -> list[RawEntity]:
             if pattern is _WIN_PATH_PATTERN and continues_a_word(text[m.end():m.end() + 1]):
                 continue                  # the extension goes on
             v = m.group().strip()
+            if pattern is _WIN_PATH_PATTERN and " " in v and v.rsplit(".", 1)[-1].lower() not in _KNOWN_FILE_EXTS:
+                continue                  # a path with a space is a file only with a known extension (#972)
             if v.startswith("/"):
                 v = v.rstrip(".,:;!?")          # sentence punctuation after a Unix path is prose
             key = v.lower()
@@ -868,7 +1056,7 @@ def _extract_file_paths(text: str) -> list[RawEntity]:
     return results
 
 
-def _extract_bare_filenames(text: str) -> list[RawEntity]:
+def _extract_bare_filenames(text: str, source: tuple[str, list[int]] | None = None) -> list[RawEntity]:
     """
     Extract bare filenames (no directory) that carry an executable / script /
     installer extension — e.g. `meshagent64-azure-ops.exe`, `_fanout.sh`,
@@ -880,6 +1068,10 @@ def _extract_bare_filenames(text: str) -> list[RawEntity]:
     seen: set[str] = set()
     for m in _BARE_FILENAME_PATTERN.finditer(text):
         v = m.group(1).strip()
+        start, end = m.span(1)
+        if v.lower() in _TECH_NAMES and not _written_defanged(source, start, end, v.lower()):
+            _discard("technology_name", v)
+            continue
         key = v.lower()
         if key not in seen:
             seen.add(key)
