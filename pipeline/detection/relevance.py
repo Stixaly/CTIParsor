@@ -321,6 +321,38 @@ def _partial_matches(
     return hits
 
 
+#: What may join the words of a name as a rule author writes it: "Cobalt Strike",
+#: "Cobalt_Strike", "Cobalt-Strike", "CobaltStrike" are one name.
+_NAME_WORD_GLUE = r"[\s_\-./]*"
+
+
+def _name_pattern(name: str) -> re.Pattern[str]:
+    """The lowercased `name`, its words joined by anything _NAME_WORD_GLUE allows."""
+    words = [w for w in re.split(r"[\s_\-./]+", name.lower()) if w]
+    return re.compile(_NAME_WORD_GLUE.join(re.escape(w) for w in words))
+
+
+def _names(pattern: re.Pattern[str], text: str, raw: str) -> bool:
+    """Does the lowercased `text` hold the name as a whole word (#1004)?
+
+    A letter or digit glued before it, or a letter glued after it, makes it part
+    of another word ("Molerats", "phishing") -- except a case change in `raw`,
+    which is a word boundary in a rule name ("HKTL_MimikatzLoader", "ApolloRemcos").
+    A digit after it is a version ("Remcos3"), not another word.  `raw` is `text`
+    before lower(), used only when the two are the same length.
+    """
+    camel = len(raw) == len(text)
+    for m in pattern.finditer(text):
+        s, e = m.span()
+        before_ok = (s == 0 or not text[s - 1].isalnum()
+                     or (camel and raw[s].isupper() and not raw[s - 1].isupper()))
+        after_ok = (e == len(text) or not text[e].isalpha()
+                    or (camel and raw[e].isupper() and raw[e - 1].islower()))
+        if before_ok and after_ok:
+            return True
+    return False
+
+
 def _text_matches(
     observables: list[Observable], details: dict[str, dict]
 ) -> dict[str, list[tuple[Observable, str, str]]]:
@@ -337,10 +369,8 @@ def _text_matches(
     if not needles or not details:
         return {}
 
-    texts = {
-        rid: f"{d.get('title') or ''} {d.get('description') or ''}".lower()
-        for rid, d in details.items()
-    }
+    raw = {rid: f"{d.get('title') or ''} {d.get('description') or ''}" for rid, d in details.items()}
+    texts = {rid: text.lower() for rid, text in raw.items()}
     limit = NAME_TITLE_MAX_RULES
 
     hits: dict[str, list[tuple[Observable, str, str]]] = {}
@@ -355,7 +385,10 @@ def _text_matches(
                              + r"(?![0-9])")
             matched = [rid for rid, text in texts.items() if pat.search(text)]
         else:
-            matched = [rid for rid, text in texts.items() if obs.value in text]
+            # A name as a WHOLE word (#1004): "rats" is not evidence for a
+            # Molerats rule, nor "fish" for a phishing one.
+            pat = _name_pattern(obs.value)
+            matched = [rid for rid, text in texts.items() if _names(pat, text, raw[rid])]
         # Only names need the share guard; a CVE id is specific by construction.
         if obs.obs_class == "name" and len(matched) > limit:
             continue
@@ -383,6 +416,12 @@ def _text_rule_ids(conn: DBConnection, observables: list[Observable]) -> set[str
         # A CVE id is also written with underscores in a title (#902): search both spellings.
         terms = [o.value for o in batch]
         terms += [o.value.replace("-", "_") for o in batch if o.obs_class == "cve"]
+        # A name of several words is also written glued or with "_" / "-" in a rule
+        # title ("CobaltStrike", "Cobalt_Strike"): _text_matches accepts all of them (#1004).
+        for o in batch:
+            if o.obs_class == "name" and re.search(r"[\s_\-./]", o.value):
+                words = [w for w in re.split(r"[\s_\-./]+", o.value) if w]
+                terms += sorted({sep.join(words) for sep in ("", "_", "-", " ")} - {o.value})
         clauses = " OR ".join(
             "(lower(title) LIKE ? ESCAPE '\\' OR lower(description) LIKE ? ESCAPE '\\')"
             for _ in terms
