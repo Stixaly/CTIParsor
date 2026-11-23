@@ -33,6 +33,7 @@ BASELINES = Path(__file__).parent / "fixtures" / "baselines"
 SHA256 = "9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972"
 MD5 = "5d41402abc4b2a76b9719d911017c592"
 SHA1 = "aaf4c61ddcc5e8a2dabede0f3b482cd9aea9434d"
+SHA512 = "9f2b6c1d4a7e3085b1d6f4e2a9c37d58e0b4a1f6c2d93e7a5b80c4d1f6e3a972" * 2
 
 
 def _objects(name: str) -> dict[str, dict]:
@@ -54,7 +55,7 @@ def _id(stix_type: str, n: int) -> str:
 OBSERVABLE_VALUES = {
     "ipv4": "198.18.0.1", "ipv6": "2001:db8::1", "domain": "evil.test", "url": "http://evil.test/a",
     "email": "a@evil.test", "mac_addr": "00:11:22:33:44:55", "asn": "AS64500",
-    "md5": MD5, "sha1": SHA1, "sha256": SHA256, "file": "svchost.exe",
+    "md5": MD5, "sha1": SHA1, "sha256": SHA256, "sha512": SHA512, "file": "svchost.exe",
     "registry_key": r"HKLM\Software\Run", "mutex": "Global\\FrostMtx", "user_account": "svc_frost",
 }
 

@@ -169,7 +169,9 @@ def benign_reason(entity_type: EntityType, value: str) -> str | None:
     v = value.strip().lower()
     if entity_type in (EntityType.IPV4, EntityType.IPV6):
         try:
-            address = ipaddress.ip_address(v)
+            # A range ("203.0.113.0/24") is judged by its network address; a plain
+            # address is its own /32 or /128.
+            address = ipaddress.ip_network(v, strict=False).network_address
         except ValueError:
             return None
         # ::ffff:8.8.8.8 is the IPv4 address it wraps, and private as an IPv6 one.

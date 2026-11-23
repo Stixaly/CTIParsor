@@ -9,6 +9,21 @@ theme.
 
 ## [Unreleased]
 
+- **Stage 2 extracts fewer false and more real IoCs (#972, #973).**
+  - No longer emitted: an IPv4 address after a version word (`version 2.17.1.0`), unless a port follows;
+    technology names (`ASP.NET`, `Node.js`), unless written defanged; hex runs labelled imphash, JA3,
+    commit, GUID, ssdeep or TLSH; the head of a longer dotted name (`reminder.uue` of `reminder.uue.rar`).
+  - Now extracted: Windows paths with an environment variable (`%APPDATA%\...`) or spaces, when the
+    extension is a known one; SHA-512 (`file:hashes.'SHA-512'`); IPv4 ranges (`ipv4-addr` with the prefix,
+    judged benign when reserved); new extensions (docm, xlsm, dat, tmp, chm, xll, zip, 7z, rar, vhd...).
+  - Stage 2 counts the values it refused, per reason, in its details (`discarded_iocs`).
+  - Measured with regexes alone on the 8 in-house reports: IoC precision 0.486 to 0.499, recall 0.639 to
+    0.647, F1 0.552 to 0.563, no document worse. On AnnoCTR dev (no IoC gold) the changed values were
+    read: `.dat` and `.docm` taken for domains become files, /19 to /24 ranges are kept, `%SystemDrive%\...`
+    paths are extracted.
+  - Out of scope: a domain followed by a path with no scheme (`evil-c2[.]com/gate.php`), because a STIX
+    `url` needs a scheme and inventing one would fabricate the value; SHA-384 and SHA-224, which are not in
+    STIX 2.1's hash vocabulary.
 - **A name two ATT&CK entities share goes to the one its context names (#914, ADR-0105).** Six gazetteer
   names are carried by two entities of one type (`thrip`: Lotus Blossom G0030 and Thrip G0076; `uac-0056`;
   `corona updates` and `concipit1248`; `dnsmessenger`; `spicyomelette`). The first entity used to reserve the

@@ -22,7 +22,7 @@ _SCO_FIELD = {"ipv4-addr": "value", "ipv6-addr": "value", "domain-name": "value"
               "windows-registry-key": "key", "autonomous-system": "number", "file": "name"}
 # The value property of any SCO an Indicator is based on (as `evaluation.__main__._SCO_VALUE`).
 _VALUE_FIELD = {"file": "name", "windows-registry-key": "key", "user-account": "user_id", "mutex": "name"}
-_HASH_TYPE = {"MD5": "md5", "SHA1": "sha1", "SHA256": "sha256"}
+_HASH_TYPE = {"MD5": "md5", "SHA1": "sha1", "SHA256": "sha256", "SHA512": "sha512"}
 _ENTITY_TYPE = {"malware": "malware", "tool": "tool", "campaign": "campaign",
                 "threat-actor": "threat_actor", "intrusion-set": "threat_actor"}
 _ATTACK_SOURCES = {"mitre-attack", "mitre-mobile-attack", "mitre-ics-attack"}

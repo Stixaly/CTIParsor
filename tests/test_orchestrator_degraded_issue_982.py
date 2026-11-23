@@ -142,7 +142,7 @@ def test_a_missing_iocextract_degrades_stage_2(mock_llm, sample_cti_text, monkey
     stage2 = result.outcome("2")
     assert stage2.status == DEGRADED
     assert "iocextract not installed: IPv6 addresses are not extracted" in stage2.reason
-    assert stage2.details == {"spacy_model": "en_core_web_sm", "iocextract": False}
+    assert stage2.details == {"spacy_model": "en_core_web_sm", "iocextract": False, "discarded_iocs": {}}
 
 
 def test_a_missing_spacy_model_degrades_stage_2(mock_llm, sample_cti_text, monkeypatch):
@@ -162,7 +162,7 @@ def test_a_spacy_model_skipped_by_choice_is_not_a_fault(mock_llm, sample_cti_tex
 
     stage2 = result.outcome("2")
     assert stage2.status == RAN and "spaCy" not in stage2.reason
-    assert stage2.details == {"spacy_model": None, "iocextract": True}
+    assert stage2.details == {"spacy_model": None, "iocextract": True, "discarded_iocs": {}}
 
 
 # ── Stage 2b: gazetteer ──────────────────────────────────────────────────────
