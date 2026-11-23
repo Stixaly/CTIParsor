@@ -153,7 +153,28 @@ def _policy_index() -> gazetteer_policy.Index:
     return gazetteer_policy.build_index(_read_index())
 
 
+def _identity(entry: dict) -> tuple[str, str]:
+    """What an entry names: its canonical (lowercase) and its entity_type."""
+    return (entry["canonical"].lower(), entry["entity_type"])
+
+
+@functools.lru_cache(maxsize=1)
+def _shared_groups() -> dict[tuple[str, str], list[dict]]:
+    """
+    The names that at least two distinct canonicals carry for one entity_type
+    (#914: 'thrip' is Lotus Blossom G0030 and Thrip G0076), as
+    {(name, entity_type): [entries…]} in index order.  Raises _Unreadable like
+    _read_index(), and so is never cached on a failure.
+    """
+    groups: dict[tuple[str, str], list[dict]] = {}
+    for entry in _read_index():
+        groups.setdefault((entry["name"], entry["entity_type"]), []).append(entry)
+    return {key: entries for key, entries in groups.items()
+            if len({_identity(e) for e in entries}) >= 2}
+
+
 _Judge = Callable[[dict, int, int], Judgement | None]
+_Keep = Callable[[dict, int, int], bool]
 
 
 def _trace_item(entry: dict, text: str, start: int, end: int, verdict: Judgement) -> dict:
@@ -186,11 +207,16 @@ def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[l
     claims a span or a canonical name (so a later, qualifying mention of the
     same name is still found), and traces each one it withheld or let through.
     An ambiguous occurrence is traced once per identity it could be.
+
+    A name shared by two entities of one type (#914) is attributed to one of
+    them by the context of each mention (_context_winner); the others are not
+    matched on that span.
     """
     pmode = policy_mode or gazetteer_policy.mode()
     try:
         index = _policy_index() if pmode != "off" else None
         automaton = _build_automaton()
+        keep = _shared_alias_filter(text)
     except _Unreadable as e:
         # Nothing was cached: the next call reads the file again.
         logger.error(f"Gazetteer unusable, Stage 2b matches nothing: {e}")
@@ -206,9 +232,9 @@ def match_gazetteer_traced(text: str, policy_mode: str | None = None) -> tuple[l
     trace: list[dict] = []
     use = judge if pmode != "off" else None
     if automaton is not None:
-        found = _match_aho(text, automaton, use, pmode == "apply", trace)
+        found = _match_aho(text, automaton, use, pmode == "apply", trace, keep)
     else:
-        found = _match_regex(text, use, pmode == "apply", trace)
+        found = _match_regex(text, use, pmode == "apply", trace, keep)
     return drop_denied(found), trace
 
 
@@ -227,6 +253,141 @@ def _lower_index_map(text: str) -> list[int]:
     for i, ch in enumerate(text):
         index_map.extend([i] * len(ch.lower()))
     return index_map
+
+
+def _whole_word_spans(text: str, needle: str, text_lower: str | None = None,
+                      index_map: list[int] | None = None) -> list[tuple[int, int]]:
+    """Every whole-word, case-insensitive occurrence of `needle` in `text`, as
+    (start, end) in the coordinates of `text`.  The boundaries are those of the
+    regex path.  `text_lower` and `index_map` may be passed in, computed once
+    per document."""
+    if text_lower is None:
+        text_lower = text.lower()
+    if index_map is None:
+        index_map = _lower_index_map(text)
+    pattern = r'(?<![^\W_])(?<!-)' + re.escape(needle.lower()) + r'(?![^\W_])(?!-)'
+    spans: list[tuple[int, int]] = []
+    for m in re.finditer(pattern, text_lower):
+        if m.end() > len(index_map):
+            continue
+        start = index_map[m.start()]
+        end = index_map[m.end() - 1] + 1
+        if (start > 0 and _is_word_char(text[start - 1])) or \
+                (end < len(text) and _is_word_char(text[end])):
+            continue
+        spans.append((start, end))
+    return spans
+
+
+# #914: an ATT&CK id written right after a mention, with nothing but spaces and
+# punctuation between them ("Thrip (G0076)", "Thrip: G0076"), names the entity
+# the mention is about.  An id BEFORE it is not read: in "Concipit1248 (S0426):
+# we analyzed Corona Updates" the id belongs to the name it follows.
+_ID_RANGE = 12
+# "Lotus Blossom, also known as Thrip", "More_eggs (aka SpicyOmelette)": the rival
+# named just before the mention and joined to it by an alias link is the entity
+# the mention is an alias of -- not the rival whose canonical name it is.
+_ALIAS_RANGE = 40
+# Nothing but the link between the two names: "X, also known as Y", "X (aka Y)",
+# "X (Y)".  "X (S0425) vs Y" is no link.
+_ALIAS_LINK = re.compile(r"[\s,;:\-]*(?:\(\s*|\(?\s*(?:aka\b|a\.k\.a\.?|also known as\b|known as\b"
+                         r"|also called\b|alias\b)[\s:,]*)", re.IGNORECASE)
+
+
+def _context_winner(text: str, start: int, end: int, rivals: list[dict],
+                    spans: Callable[[str], list[tuple[int, int]]] | None = None) -> dict:
+    """
+    Which of the `rivals` (entries sharing one name and entity_type) the mention
+    text[start:end] is about.  Each rule in turn keeps the rivals it points to;
+    the first rule that keeps exactly one rival decides:
+      0. the rival's canonical name ends at most _ALIAS_RANGE characters before
+         the mention, joined to it by an alias link (_ALIAS_LINK), in the same sentence;
+      1. the rival's mitre_id is written right after the mention, with nothing
+         but spaces and punctuation between them (at most _ID_RANGE characters);
+      2. the mention, lowercased, is the rival's canonical name;
+      3. the rival's mitre_id is written elsewhere in the text, as a whole word;
+      4. the rival's canonical name is written elsewhere, as a whole word.
+    Otherwise the first rival in index order decides.
+
+    Returns {"winner": entry, "rule": 0..4, or None when no rule decided}.
+    `spans(needle)` gives the whole-word spans of a lowercased needle; the caller
+    passes a memoized one so that the text is searched once per document.
+    """
+    if spans is None:
+        spans = functools.partial(_whole_word_spans, text)
+    mention = " ".join(text[start:end].lower().split())
+
+    def gap(s: int, e: int) -> int | None:
+        """Characters between an occurrence and the mention; None if they overlap."""
+        if e <= start:
+            return start - e
+        if s >= end:
+            return s - end
+        return None
+
+    def id_near(rival: dict) -> bool:
+        if not rival.get("mitre_id"):
+            return False
+        return any(end <= s <= end + _ID_RANGE and not any(ch.isalnum() for ch in text[end:s])
+                   for s, _e in spans(rival["mitre_id"]))
+
+    def aliased_here(rival: dict) -> bool:
+        for _s, e in spans(rival["canonical"]):
+            between = text[e:start]
+            if e <= start and start - e <= _ALIAS_RANGE and _ALIAS_LINK.fullmatch(between):
+                return True
+        return False
+
+    def named_here(rival: dict) -> bool:
+        return " ".join(rival["canonical"].lower().split()) == mention
+
+    def id_elsewhere(rival: dict) -> bool:
+        return bool(rival.get("mitre_id")) and \
+            any(gap(s, e) is not None for s, e in spans(rival["mitre_id"]))
+
+    def name_elsewhere(rival: dict) -> bool:
+        return any(gap(s, e) is not None for s, e in spans(rival["canonical"]))
+
+    for rule, keeps in ((0, aliased_here), (1, id_near), (2, named_here), (3, id_elsewhere),
+                        (4, name_elsewhere)):
+        kept = {_identity(r): r for r in rivals if keeps(r)}
+        if len(kept) == 1:
+            return {"winner": next(iter(kept.values())), "rule": rule}
+    return {"winner": rivals[0], "rule": None}
+
+
+def _shared_alias_filter(text: str) -> _Keep | None:
+    """
+    For one document: a `keep(entry, start, end)` that says whether the entry
+    may match the span, or None when no name of the text is shared (#914).  An
+    entry of a shared name is kept only when _context_winner picks its entity
+    for that mention.  An ambiguous mention (no rule decided) is logged once per
+    shared name and document.
+    """
+    groups = _shared_groups()
+    if not groups:
+        return None
+    spans = functools.lru_cache(maxsize=None)(functools.partial(
+        _whole_word_spans, text, text_lower=text.lower(), index_map=_lower_index_map(text)))
+    logged: set[tuple[str, str]] = set()
+
+    def keep(entry: dict, start: int, end: int) -> bool:
+        key = (entry["name"], entry["entity_type"])
+        rivals = groups.get(key)
+        if rivals is None:
+            return True
+        verdict = _context_winner(text, start, end, rivals, spans)
+        winner = verdict["winner"]
+        if verdict["rule"] is None and key not in logged:
+            logged.add(key)
+            others = {_identity(r): r for r in rivals if _identity(r) != _identity(winner)}
+            logger.info(f"shared alias {entry['name']!r} left ambiguous: "
+                        f"{winner['canonical']} ({winner['mitre_id']}) kept, "
+                        + ", ".join(f"{r['canonical']} ({r['mitre_id']})" for r in others.values())
+                        + " possible")
+        return _identity(winner) == _identity(entry)
+
+    return keep
 
 
 class _Claims:
@@ -265,7 +426,7 @@ class _Claims:
 
 
 def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = False,
-               trace: list[dict] | None = None) -> list[RawEntity]:
+               trace: list[dict] | None = None, keep: _Keep | None = None) -> list[RawEntity]:
     """
     Aho-Corasick path — O(text_len + match_count).
 
@@ -315,6 +476,8 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
         # object kinds (Machete G0095 group vs S0409 malware, ...).
         seen_key        = (canonical_lower, entry["entity_type"])
 
+        if keep is not None and not keep(entry, start, end):
+            continue          # another entity of a shared name owns this mention (#914)
         if claimed.blocks(start, end, entry["entity_type"]):
             continue
         if seen_key in seen_canonicals:
@@ -359,7 +522,7 @@ def _match_aho(text: str, automaton, judge: _Judge | None = None, apply: bool = 
 
 
 def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
-                 trace: list[dict] | None = None) -> list[RawEntity]:
+                 trace: list[dict] | None = None, keep: _Keep | None = None) -> list[RawEntity]:
     """
     Regex fallback path — O(N × text_len).  Used when pyahocorasick is absent.
     Semantically identical to the original implementation.
@@ -412,6 +575,8 @@ def _match_regex(text: str, judge: _Judge | None = None, apply: bool = False,
             if (start > 0 and _is_word_char(text[start - 1])) or \
                     (end < len(text) and _is_word_char(text[end])):
                 continue
+            if keep is not None and not keep(entry, start, end):
+                continue      # another entity of a shared name owns this mention (#914)
             if claimed.blocks(start, end, etype_str):
                 continue
             if seen_key in seen_canonicals:

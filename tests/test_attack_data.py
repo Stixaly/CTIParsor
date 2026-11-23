@@ -31,7 +31,7 @@ _CACHES = (
     ("pipeline.mitre_db", "_load"), ("pipeline.mitre_db", "_revoked"),
     ("pipeline.aliases", "_load"), ("pipeline.aliases", "_load_techniques"),
     ("pipeline.stage2b_gazetteer", "_load"), ("pipeline.stage2b_gazetteer", "_build_automaton"),
-    ("pipeline.stage2b_gazetteer", "_policy_index"),
+    ("pipeline.stage2b_gazetteer", "_policy_index"), ("pipeline.stage2b_gazetteer", "_shared_groups"),
     ("pipeline.stage2c_ttp_semantic", "_load_corpus_for"),
     ("pipeline.stage3c_mitre", "_load_index"), ("pipeline.stage3c_mitre", "_tactics_by_id"),
     ("pipeline.stage3f_ttp_select", "_definitions"),

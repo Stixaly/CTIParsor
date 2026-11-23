@@ -142,7 +142,8 @@ GLiNER truncation, and an empty text at Stage 1.
 - `stage1_ingestion.extract_reference_date`: `None`, debug log only. **Fixed by #994** (the
   reason is in the details of Stage 1, not in its state).
 - `stage2b_gazetteer._match_aho` and `_match_regex`: a span is claimed, then its entity
-  is dropped (#914).
+  is dropped (#914). **Fixed by #914** (ADR-0105: a shared name goes to the entity its
+  context names; the other rival reserves nothing).
 
 **Logged only** (a warning, nothing in the stage report):
 
@@ -185,6 +186,6 @@ belong to this series:
 - Stage 2g cut off by the policy threshold is `skipped`, not `ran` with 0 entities.
 - Stage 4c is `degraded` when none of its questions got a readable answer.
 
-Still open in the census: `stage2b_gazetteer._match_aho` and `_match_regex` (a span is
-claimed, then its entity is dropped, #914), and the groups the census puts under
-"Intended" are unchanged.
+The last open case of the census, `stage2b_gazetteer._match_aho` and `_match_regex` (a
+span is claimed, then its entity is dropped), is fixed by #914 (ADR-0105). The groups the
+census puts under "Intended" are unchanged.

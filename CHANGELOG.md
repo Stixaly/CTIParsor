@@ -9,6 +9,17 @@ theme.
 
 ## [Unreleased]
 
+- **A name two ATT&CK entities share goes to the one its context names (#914, ADR-0105).** Six gazetteer
+  names are carried by two entities of one type (`thrip`: Lotus Blossom G0030 and Thrip G0076; `uac-0056`;
+  `corona updates` and `concipit1248`; `dnsmessenger`; `spicyomelette`). The first entity used to reserve the
+  span and the second was lost, even when the report wrote its identifier. Stage 2b now picks, for each
+  mention, the entity named just before it by an alias link ("Lotus Blossom, also known as Thrip"), the
+  one whose id is written right after it, whose canonical name it is, whose id is written
+  elsewhere, or whose canonical name is written elsewhere; failing that, the first in index order, with
+  one log line per name and document. An id written before the mention is not read. In `apply` mode the
+  ordinary-word policy still withholds a mention with no identity (`ambiguous_identity`).
+- `BUNDLE_AFFECTING` now lists the fixes of #789-#793 and #968-#970 (Stage 3 retries, Snort parsing) and
+  of #980 and #982 (ATT&CK ids written in a report, Stage 1 with no readable text).
 - **More stages say when they could not do their work (#994-#999, ADR-0104).** The same rule as #982, applied
   to the cases its census left open. A load failure is not cached; the reason is in the stage report.
   - Stage 1: a scan-detection error (the PDF is read as text, without OCR), tables not read, and the
