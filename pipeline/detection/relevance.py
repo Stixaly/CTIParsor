@@ -119,9 +119,17 @@ MIN_PARTIAL_RATIO = 0.5
 #: the cap is what the new curve is measured against.
 MAX_SCORING_MATCHES = 4
 
-#: A tool/malware name matching more than this share of the candidate rules is
-#: not discriminative ("python", "powershell") — dropped from title matching.
-NAME_TITLE_MAX_SHARE = 0.20
+#: A tool or malware name in more than this many rule titles or descriptions is a
+#: category label, not an identity: dropped from title matching.  An absolute count
+#: (#897), not a share of the candidate set: every rule whose text names the report's
+#: names joins that set (_text_rule_ids), so the share measured the name against
+#: itself and dropped Remcos (64 rules of 271 candidates) from a Remcos report.
+#: Measured on a 75,138-rule store (2026-11-23): medium 13,473, route 844 and
+#: powershell 749 are dropped; sliver 489, cobalt strike 446, apt28 190, remcos 64
+#: keep their evidence.  A spurious name under it ("tool set", 347) still passes:
+#: frequency cannot tell it from an identity, which is Stage 2's to fix.  The same
+#: bound as the artifact view (pipeline/detection/artifacts.py).
+NAME_TITLE_MAX_RULES = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -319,9 +327,10 @@ def _text_matches(
     """CVE ids and tool/malware names appearing in a rule's title or description.
 
     A rule *named* after the tool the report describes is a strong proposal even
-    when no field value matches. Names hitting a large share of the candidates
-    are dropped as non-discriminative — the same idea as IDF, computed against
-    the candidate set because rule text is not in the atom index.
+    when no field value matches. A name in more than NAME_TITLE_MAX_RULES rule
+    texts is dropped as non-discriminative.  The candidate set holds every rule
+    whose text names a report name (_text_rule_ids), so counting the matches in
+    it counts them in the whole store.
     """
     needles = [o for o in observables
                if o.obs_class == "cve" or (o.obs_class == "name" and len(o.value) >= 4)]
@@ -332,7 +341,7 @@ def _text_matches(
         rid: f"{d.get('title') or ''} {d.get('description') or ''}".lower()
         for rid, d in details.items()
     }
-    limit = max(1, int(len(texts) * NAME_TITLE_MAX_SHARE))
+    limit = NAME_TITLE_MAX_RULES
 
     hits: dict[str, list[tuple[Observable, str, str]]] = {}
     for obs in needles:
