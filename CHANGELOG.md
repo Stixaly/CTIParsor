@@ -9,6 +9,16 @@ theme.
 
 ## [Unreleased]
 
+- **A report name matches a rule's text as a whole word in the detection proposals (#1004).** It was a
+  substring: "rats" proposed the Molerats, morerats and Ratsnif rules, "machine" the `*.machinezdesign.com`
+  dynamic-DNS rules, "socks5" the Socks5Systemz ones. A letter or digit glued before the name, or a letter
+  after it, now makes it part of another word, except a case change ("HKTL_MimikatzLoader"); a digit after
+  it is a version ("Remcos3"). A name of several words also matches glued or with `_`/`-`
+  ("CobaltStrike", "Cobalt_Strike"), and the LIKE pre-filter looks for those forms too. Measured on the 7
+  real reports of #897: 280 title proposals go, all read and unrelated to their report (dynamic-DNS
+  domains, other malware families); Remcos, Telegram, Industroyer and the other real names keep every
+  proposal. A spurious name gains from the glued forms: "tool set" (a Stage 2 extraction) now also matches
+  "Toolset", 131 to 171 unrelated proposals.
 - **A malware named by many rules keeps its title evidence in the detection proposals (#897).** The guard
   that drops a non-discriminative name ("powershell") from title matching was 20 % of the candidate rules.
   Every rule that names a report's name joins that set, so the share measured the name against itself: on a

@@ -506,3 +506,34 @@ def test_a_name_s_evidence_no_longer_depends_on_the_other_names_of_the_report(te
     _seed_job(temp_db, "j897b", [("Remcos", "malware", None), ("ZGRat", "malware", None)])
     ids = {p["id"] for p in propose_for_job(rconn, "j897b", jobs_conn=conn, limit=500)["proposals"]}
     assert {f"yara:r{i}" for i in range(64)} <= ids
+
+
+# ── #1004: a report name matches a rule's text as a whole word ───────────────
+
+@pytest.mark.parametrize("name, title, expected", [
+    ("rats", "Molerats_Jul17_Sample_5", False),
+    ("fish", "Generic phishing kit landing page", False),
+    ("remcos", "Windows_Trojan_Remcos_7591e9f1", True),
+    ("remcos", "ET MALWARE DNS Query to Remcos Related Domain", True),
+    ("remcos", "Remcos3 loader", True),
+    ("cobalt strike", "CobaltStrike Beacon", True),
+    ("cobalt strike", "Cobalt Strike beacon default profile", True),
+    ("cobalt strike", "HKTL_Cobalt_Strike_Loader", True),
+    ("mimikatz", "HKTL_MimikatzLoader", True),
+    ("mimikatz", "SUSP_mimikatzish strings", False),
+])
+def test_a_name_matches_a_rule_title_as_a_whole_word(name, title, expected):
+    from pipeline.detection.observables import Observable
+    from pipeline.detection.relevance import _text_matches
+    obs = [Observable("name", name, "malware", name)]
+    assert bool(_text_matches(obs, {"r1": {"title": title, "description": ""}})) is expected
+
+
+def test_a_glued_rule_title_joins_the_candidates_of_a_spaced_name(temp_db):
+    """#1004: the LIKE pre-filter also looks for "cobaltstrike" when the report says "Cobalt Strike"."""
+    conn = temp_db.get_conn()
+    rconn = temp_db.get_rule_conn()
+    replace_corpus_rules(rconn, "yara", [_rule("yara", "cs", [], title="CobaltStrike_Beacon_Encoded")])
+    _seed_job(temp_db, "j1004", [("Cobalt Strike", "tool", None)])
+    ids = {p["id"] for p in propose_for_job(rconn, "j1004", jobs_conn=conn)["proposals"]}
+    assert ids == {"yara:cs"}
