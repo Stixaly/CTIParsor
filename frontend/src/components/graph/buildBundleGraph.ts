@@ -402,6 +402,9 @@ export function buildBundleGraph(
     const seen = new Set<string>()
     for (const l of ledger?.relationships ?? []) {
       const k = relKey(l.source_value, l.relationship_type, l.target_value)
+      // A relationship stix2 refused at build time (#997) was never in the bundle,
+      // and often has no row: it was not removed since the build.
+      if (l.outcome === 'dropped' && l.reason === 'stix2_refused') continue
       if (liveRelKeys.has(k) || seen.has(k)) continue
       seen.add(k)
       diff.push({ kind: 'stale', subject: 'relationship', reason: 'removed_since_build', ledgerRel: l,

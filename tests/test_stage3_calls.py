@@ -198,7 +198,8 @@ def test_an_empty_anthropic_content_list_is_an_empty_answer(monkeypatch):
 
 def test_no_anthropic_client_means_no_call(monkeypatch):
     monkeypatch.setattr(s3, "_get_anthropic_client", lambda: None)
-    assert s3._call_anthropic_impl("s", "u") == ""
+    with pytest.raises(s3._ProviderNotConfigured):   # #998: a failed request, not an empty answer
+        s3._call_anthropic_impl("s", "u")
 
 
 def test_a_transient_anthropic_error_is_retried_then_succeeds(monkeypatch, no_sleep):
@@ -300,8 +301,9 @@ def test_no_choices_or_null_content_is_an_empty_answer(response):
     assert s3._call_openai_compatible(client, "m", "s", "u", "Gemini") == ""
 
 
-def test_no_client_is_an_empty_answer():
-    assert s3._call_openai_compatible_impl(None, "m", "s", "u", "Ollama") == ""
+def test_no_client_is_a_failed_request():   # #998: not an empty answer
+    with pytest.raises(s3._ProviderNotConfigured):
+        s3._call_openai_compatible_impl(None, "m", "s", "u", "Ollama")
 
 
 def test_an_openai_compatible_connection_error_is_retried(no_sleep):

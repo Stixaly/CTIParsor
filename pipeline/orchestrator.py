@@ -680,22 +680,30 @@ class _Run:
             extract_anchor,
             extract_reference_date,
             ingest,
+            ingestion_notes,
+            ingestion_record,
             ocr_summary,
+            reference_date_error,
         )
         from pipeline.stage2_extraction import refang
 
         t0 = time.monotonic()
         self.hooks.check_timeout()
         ocr: dict[str, Any] = {}
+        notes: list[str] = []
+        ref_error: str | None = None
         if self.doc.text is not None:
             raw_text = self.doc.text
             reason = "text provided"
         elif self.doc.file_path is not None:
-            with ocr_summary() as ocr:
+            with ocr_summary() as ocr, ingestion_record():
                 raw_text = ingest(self.doc.file_path)
-            # Best-effort document creation time (TimeML/TIMEX3-style anchor)
-            # for Stage 3 to resolve simple relative relationship dates against.
-            self.r.reference_date = extract_reference_date(self.doc.file_path)
+                # #994: the reads that came out incomplete (tables, scan detection).
+                notes = ingestion_notes()
+                # Best-effort document creation time (TimeML/TIMEX3-style anchor)
+                # for Stage 3 to resolve simple relative relationship dates against.
+                self.r.reference_date = extract_reference_date(self.doc.file_path)
+                ref_error = reference_date_error()
             reason = ""
         else:
             raise ValueError("Document needs a file_path or a text")
@@ -746,8 +754,19 @@ class _Run:
             if ocr.get("unavailable"):
                 missing += f" ({ocr['unavailable']})"
             reason = "; ".join(filter(None, [reason, missing]))
-        self.record("1", DEGRADED if pages_failed else RAN, reason, t_ingest + time.monotonic() - t0,
-                    details={"ocr": ocr} if ocr else None,
+        # #994: a read that came out incomplete is degraded too, and says what was lost.
+        # The reference date is not: it is an anchor's absence, kept in the details.
+        if notes:
+            reason = "; ".join(filter(None, [reason, *notes]))
+        details: dict[str, Any] = {}
+        if ocr:
+            details["ocr"] = ocr
+        if notes:
+            details["ingestion_notes"] = notes
+        if ref_error:
+            details["reference_date_error"] = ref_error
+        self.record("1", DEGRADED if pages_failed or notes else RAN, reason, t_ingest + time.monotonic() - t0,
+                    details=details or None,
                     chars=len(self.r.text), chunks=len(self.r.chunks))
         self.hooks.progress("stage", {
             "stage": 1, "label": "Ingestion",
@@ -789,7 +808,13 @@ class _Run:
             self.record("1f", SKIPPED, skip_reason() or "no vision backend", details=egress_note)
             return
         from pipeline.figure_store import SqliteReadCache
-        from pipeline.stage1f_figures import count_unexpected_kind, inject_append, map_verbatim, read_figures
+        from pipeline.stage1f_figures import (
+            count_unexpected_kind,
+            find_figures_error,
+            inject_append,
+            map_verbatim,
+            read_figures,
+        )
         from pipeline.stage2_extraction import refang
 
         t0 = time.monotonic()
@@ -823,7 +848,11 @@ class _Run:
         reason = f"{vision.name}/{vision.model}"
         if unexpected:
             reason += f"; {unexpected} figure answer(s) of an unexpected type left unread"
-        self.record("1f", DEGRADED if unexpected else RAN, reason, time.monotonic() - t0,
+        # #994: a PDF whose images could not be listed has no figure read at all.
+        not_detected = find_figures_error()
+        if not_detected:
+            reason += f"; figures not detected: {not_detected}"
+        self.record("1f", DEGRADED if unexpected or not_detected else RAN, reason, time.monotonic() - t0,
                     details=egress_note, figures=len(reads), read=kept, unexpected_kind=unexpected)
 
     def extract(self) -> None:
@@ -912,12 +941,16 @@ class _Run:
                                                         "--only retrieval)", "retrieval"),
                          details=lambda: self._embedding_details(retrieval_status()),
                          disabled_details=off):
+                from pipeline.ttp_retrieval import exclusions_error
                 t0 = time.monotonic()
                 self.r.ttp_candidates = candidates_for_chunks(self.r.chunks)
                 status = retrieval_status()
+                # #999: exclusions asked for and not applied leave a measurement
+                # without the leak guard it was set up with.
+                excl_error = exclusions_error()
                 note = "; ".join(filter(None, ["candidates only (select mode)",
-                                               self._embedding_caveat(status)]))
-                self.record("2c", RAN, note, time.monotonic() - t0,
+                                               self._embedding_caveat(status), excl_error]))
+                self.record("2c", DEGRADED if excl_error else RAN, note, time.monotonic() - t0,
                             details=self._embedding_details(status),
                             candidates=sum(len(c) for c in self.r.ttp_candidates))
         elif self.gate("2c", semantic_available,
@@ -932,7 +965,13 @@ class _Run:
                                 "unvalidated semantic matches, less reliable")
                 logger.warning(f"[Stage 2c] {offline_note}")
             t0 = time.monotonic()
+            from pipeline.stage2c_ttp_semantic import clear_last_error
+            clear_last_error()
             self.r.semantic_ttps = detect_ttps_semantic(text)
+            # #996: a scoring or corpus error also gives [], and is not "no technique".
+            # The whole text is one call here (no chunks), so a failure is all of 2c.
+            from pipeline.stage2c_ttp_semantic import last_error, threshold_warnings
+            error = last_error()
             keys = {(e.value.lower(), e.entity_type) for e in entities}
             for se in self.r.semantic_ttps:
                 key = (se.value.lower(), se.entity_type)
@@ -940,7 +979,14 @@ class _Run:
                     entities.append(se)
                     keys.add(key)
             status = embedding_status()
-            self.record("2c", RAN, "; ".join(filter(None, [offline_note, self._embedding_caveat(status)])),
+            # An ignored threshold setting is said in the reason, the state unchanged.
+            threshold_notes = threshold_warnings()
+            if error:
+                state, reason = FAILED, f"semantic scoring failed: {error}"
+            else:
+                state = RAN
+                reason = "; ".join(filter(None, [offline_note, self._embedding_caveat(status)]))
+            self.record("2c", state, "; ".join(filter(None, [reason, *threshold_notes])),
                         time.monotonic() - t0, details=self._embedding_details(status),
                         entities=len(self.r.semantic_ttps))
 
@@ -983,12 +1029,16 @@ class _Run:
                         truncated_chunks=gliner_run.truncated_chunks)
 
         # Stage 2g — "X (aka Y, Z)" alias lists, deterministic.
-        from pipeline.stage2g_alias_list import extract_alias_list_entities
+        from pipeline.stage2g_alias_list import extract_alias_list_entities, policy_cut_reason
         if self.gate("2g"):
             t0 = time.monotonic()
-            self.r.alias_list = extract_alias_list_entities(text)
-            entities = BaseExtractionStage.merge_into(entities, self.r.alias_list)
-            self.record("2g", RAN, "", time.monotonic() - t0, entities=len(self.r.alias_list))
+            cut = policy_cut_reason()
+            if cut is not None:
+                self.record("2g", SKIPPED, cut, time.monotonic() - t0, entities=0)
+            else:
+                self.r.alias_list = extract_alias_list_entities(text)
+                entities = BaseExtractionStage.merge_into(entities, self.r.alias_list)
+                self.record("2g", RAN, "", time.monotonic() - t0, entities=len(self.r.alias_list))
 
         # Same value, different type from two stages (gazetteer `tool` vs
         # CyNER `malware`): merge_into's (value, type) key kept both.
@@ -1071,7 +1121,12 @@ class _Run:
         from pipeline import llm_stats
         from pipeline.stage3_llm import LLMEnrichmentResult, enrich_chunk, last_chunk_answered, stage3_settings
         from pipeline.stage3d_verify import verify_enabled as rel_verify_enabled
-        from pipeline.stage3e_consensus import consensus_enabled, consensus_provider, reconcile
+        from pipeline.stage3e_consensus import (
+            consensus_disabled_reason,
+            consensus_enabled,
+            consensus_provider,
+            reconcile,
+        )
         from pipeline.stage3f_ttp_verify import verify_enabled as ttp_verify_enabled
 
         r, hooks, opts = self.r, self.hooks, self.opts
@@ -1389,7 +1444,9 @@ class _Run:
                         f"{unanswered} chunks without a usable second answer, kept as is" if unanswered else "",
                         0.0, chunks=doubled, unanswered=unanswered)
         else:
-            self.record("3e", SKIPPED, consensus_refusal or "disabled")
+            # The environment asked for consensus and it was refused: say why (#998).
+            refused = None if "3e" in self.opts.disabled else consensus_disabled_reason()
+            self.record("3e", SKIPPED, consensus_refusal or refused or "disabled")
         # Results in chunk order; a skipped chunk contributes an empty result.
         return [chunk_results.get(i, LLMEnrichmentResult()) for i in range(1, total + 1)]
 
@@ -1440,6 +1497,13 @@ class _Run:
             for sid in ("2f", "4b", "4c", "5"):
                 self.record(sid, SKIPPED, "Stage 4 did not run")
             return
+        # #995: without its warning lists the bundle would publish the benign values
+        # as Indicators, so an unreadable list stops the run before the bundle is built.
+        from pipeline import benign
+        benign_error = benign.load_error() if benign.enabled() else None
+        if benign_error is not None:
+            self.record("4", FAILED, f"benign warning lists unreadable: {benign_error}")
+            raise StageRequired(self.r.stages[-1])   # the outcome just recorded
         r = self.r
         r.policy = self.hooks.policy()
         self.hooks.policy_used(r.policy)
@@ -1463,9 +1527,10 @@ class _Run:
             raise RuntimeError("Stage 4 reached without a Stage 3 result")
         from pipeline.baseline_stix import MATCHED, BaselineBuild
         from pipeline.bundle_ledger import MappingLedger
+        from pipeline.mitre_db import revoked_error
         from pipeline.named_entities import with_named_entities
         from pipeline.overrides import without_denied_listed
-        from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, RefusedRelationship
+        from pipeline.stage4b_graph_completion import HELD_FOR_REVIEW, RefusedRelationship, attack_pairs_error
         ledger = MappingLedger()
         # Enrich mode (ADR-0090 lot 4): the baseline is merged into Stage 4's
         # output.  Nothing is rejected at run time, so no exclusion; the rows
@@ -1507,6 +1572,8 @@ class _Run:
         named.record(ledger)
         for name, etype in denied:
             ledger.entity(name, etype, "dropped", reason="denied")
+        from pipeline import llm_stats
+        ld_before = llm_stats.snapshot()   # for the 4c record (#998)
         r.bundle = build_bundle(
             [e for e in entities if named.keeps(e)], named.llm_result,
             report_name=self.doc.report_name,
@@ -1555,13 +1622,22 @@ class _Run:
                         "%d rules (budget %d, mode %s)",
                         pin.get("total_emitted", 0), pin.get("total_candidates", 0),
                         len(pin["rules"]), pin.get("budget", 0), pin.get("mode", ""))
-        self.record("4", RAN, "", time.monotonic() - t0, objects=n_objects,
+        # #995: revoked ids that could not be replaced stay in the bundle: degraded, said.
+        revoked_problem = revoked_error()
+        self.record("4", DEGRADED if revoked_problem else RAN,
+                    f"revoked ATT&CK ids not replaced: {revoked_problem}" if revoked_problem else "",
+                    time.monotonic() - t0, objects=n_objects,
                     iocs=cov["total_iocs"], with_indicator=cov["with_indicator"])
         comp = (r.synthesis or {}).get("completion") or {}
         if "4b" in self.opts.disabled:
             self.record("4b", SKIPPED, "disabled")
         else:
-            self.record("4b", RAN, "", 0.0, aliases_merged=comp.get("aliases_merged", 0),
+            # #995: without the ATT&CK reference pairs, 4b ran and added no reference edge.
+            pairs_problem = attack_pairs_error()
+            self.record("4b", DEGRADED if pairs_problem else RAN,
+                        f"ATT&CK reference pairs unreadable, no reference edge added: {pairs_problem}"
+                        if pairs_problem else "", 0.0,
+                        aliases_merged=comp.get("aliases_merged", 0),
                         reference_added=comp.get("reference_added", 0),
                         transitive_added=comp.get("transitive_added", 0))
         ld_policy = ((r.policy or {}).get("completion") or {}).get("long_distance")
@@ -1572,7 +1648,21 @@ class _Run:
         elif not self.text_decision.allowed:
             self.record("4c", SKIPPED, self.text_decision.reason)
         else:
-            self.record("4c", RAN, "", 0.0, long_distance_added=comp.get("long_distance_added", 0))
+            # Read per answer during build_bundle (#998): an unreadable answer is not "no link".
+            # llm_stats is process-wide; the worker runs one job per subprocess, so the
+            # delta is this job's.  A caller running jobs concurrently in one process
+            # (none does) would mix them.
+            ld = llm_stats.delta(ld_before, llm_stats.snapshot())
+            unparsed, answered = ld.get("long_distance_unparsed", 0), ld.get("long_distance_answered", 0)
+            unanswered = ld.get("long_distance_unanswered", 0)     # failed request or empty answer
+            asked = unparsed + answered + unanswered
+            notes = [f"{unparsed} of {asked} answers unreadable, read as no link" if unparsed else "",
+                     f"{unanswered} of {asked} questions got no answer" if unanswered else ""]
+            self.record("4c", DEGRADED if asked and answered == 0 else RAN,
+                        "; ".join(filter(None, notes)),
+                        0.0, long_distance_added=comp.get("long_distance_added", 0),
+                        long_distance_answered=answered, long_distance_unparsed=unparsed,
+                        long_distance_unanswered=unanswered)
         self.hooks.progress("stage", {
             "stage": 4, "label": "STIX mapping", "objects": n_objects,
             "ioc_coverage": {"total": cov["total_iocs"],

@@ -805,6 +805,15 @@ Return ONLY this JSON shape:
 _LLM_TIMEOUT = env_int("LLM_TIMEOUT", default=120)
 
 
+class _ProviderNotConfigured(Exception):
+    """The provider's client is absent (no key, no SDK): no request was made.
+    Raised by the *_impl functions and caught by their wrappers, which record
+    it as a failed request, not as an empty answer (#998).  Not retried."""
+
+    def __init__(self, label: str):
+        super().__init__(f"no client: {label} is not configured")
+
+
 class _ProviderAnswer(str):
     """A provider's answer text, and whether the provider stopped it at the
     output-token ceiling (finish_reason "length", Anthropic "max_tokens")
@@ -837,7 +846,7 @@ def _call_anthropic_impl(system: str, user: str, max_tokens: int | None = None) 
     lowers LLM_MAX_OUTPUT_TOKENS for this call."""
     client = _get_anthropic_client()
     if not client:
-        return ""
+        raise _ProviderNotConfigured("Anthropic")
     max_tokens = max_tokens or _MAX_OUTPUT_TOKENS
     t0 = time.monotonic()
     try:
@@ -904,6 +913,10 @@ def _call_anthropic(system: str, user: str, max_tokens: int | None = None) -> st
         out = _call_anthropic_impl(system, user, max_tokens)
         _record_call(at_ceiling=getattr(out, "at_ceiling", False))
         return str(out)
+    except _ProviderNotConfigured as e:
+        logger.error(str(e))
+        _record_call(str(e))
+        return ""
     except RetryError as e:
         logger.error(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
         _record_call(f"Anthropic failed after {_MAX_RETRIES} retries: {e}")
@@ -931,7 +944,7 @@ def _call_openai_compatible_impl(client_param, model: str, system: str, user: st
     `max_tokens` lowers LLM_MAX_OUTPUT_TOKENS for this call.
     """
     if not client_param:
-        return ""
+        raise _ProviderNotConfigured(label)
     max_tokens = max_tokens or _MAX_OUTPUT_TOKENS
     t0 = time.monotonic()
     try:
@@ -983,6 +996,10 @@ def _call_openai_compatible(client_param, model: str, system: str, user: str, la
                                            sampling, max_tokens)
         _record_call(at_ceiling=getattr(out, "at_ceiling", False))
         return str(out)
+    except _ProviderNotConfigured as e:
+        logger.error(str(e))
+        _record_call(str(e))
+        return ""
     except RetryError as e:
         logger.error(f"{label} failed after {_MAX_RETRIES} retries: {e}")
         _record_call(f"{label} failed after {_MAX_RETRIES} retries: {e}")

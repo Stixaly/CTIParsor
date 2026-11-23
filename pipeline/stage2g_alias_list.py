@@ -146,17 +146,27 @@ def _split_aliases(raw: str, masked: str) -> list[str]:
     return out
 
 
+def policy_cut_reason() -> str | None:
+    """Why the policy cuts this stage off, or None.  The threshold is read on each call
+    (get_threshold), not stored at import time."""
+    cutoff = get_threshold("alias_list", EntityType.THREAT_ACTOR.value, _DEFAULT_CONFIDENCE)
+    if _DEFAULT_CONFIDENCE < cutoff:
+        return (f"the policy threshold for alias_list/threat_actor ({cutoff}) is above this "
+                f"stage's confidence ({_DEFAULT_CONFIDENCE}): nothing it finds could pass")
+    return None
+
+
 def extract_alias_list_entities(text: str) -> list[RawEntity]:
     """
     Scan *text* for explicit "X (aka Y, Z)" / "X, also known as Y and Z"
     constructs and emit one THREAT_ACTOR RawEntity per name mentioned
     (anchor included), deduplicated by value.
 
-    Returns [] if the text contains no such construct — this stage never
-    raises and never needs a model, so it is always `available()`.
+    Returns [] if the text contains no such construct, or if the policy cuts
+    this stage off (policy_cut_reason).  This stage never raises and never
+    needs a model, so it is always `available()`.
     """
-    cutoff = get_threshold("alias_list", EntityType.THREAT_ACTOR.value, _DEFAULT_CONFIDENCE)
-    if _DEFAULT_CONFIDENCE < cutoff:
+    if policy_cut_reason() is not None:
         return []
 
     seen: set[str] = set()

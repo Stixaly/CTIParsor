@@ -255,6 +255,9 @@ def extract_reference_date(file_path: str) -> datetime | None:
         # -- every sibling broad-except added this month logs before
         # swallowing; this one silently did not.
         logger.debug(f"[reference date] {suffix} metadata extraction failed for {file_path}: {exc}")
+        record = _ingestion_record.get()
+        if record is not None:
+            record["reference_date_error"] = f"{type(exc).__name__}: {exc}"
         return None
     return None
 
@@ -341,6 +344,7 @@ def _is_scanned_pdf(path: Path) -> bool:
     except Exception as exc:
         logger.warning(f"[Stage 1] could not tell whether {Path(path).name} is a scan, reading it as "
                        f"text (no OCR): {type(exc).__name__}: {exc}")
+        _note_incomplete(f"scan detection failed, read as text without OCR: {type(exc).__name__}: {exc}")
         return False
 
 
@@ -626,6 +630,44 @@ def ocr_summary() -> Iterator[dict[str, Any]]:
         _ocr_summary.reset(token)
 
 
+# Per-document record of the reads that came out incomplete, set while the
+# orchestrator reads a document (see ingestion_record()).
+_ingestion_record: ContextVar[dict[str, Any] | None] = ContextVar("stage1_ingestion_record", default=None)
+
+
+@contextmanager
+def ingestion_record() -> Iterator[None]:
+    """Collects, for the document read inside the block, the reads that came out
+    incomplete (ingestion_notes()) and why the reference date is missing
+    (reference_date_error()).  Nothing is collected outside the block."""
+    token = _ingestion_record.set({"notes": [], "reference_date_error": None})
+    try:
+        yield
+    finally:
+        _ingestion_record.reset(token)
+
+
+def _note_incomplete(note: str) -> None:
+    """Adds one read that came out incomplete to the document's record, when one is collecting."""
+    record = _ingestion_record.get()
+    if record is not None:
+        record["notes"].append(note)
+
+
+def ingestion_notes() -> list[str]:
+    """The reads of the document inside ingestion_record() that came out
+    incomplete, one note each: [] for an ordinary document."""
+    record = _ingestion_record.get()
+    return list(record["notes"]) if record is not None else []
+
+
+def reference_date_error() -> str | None:
+    """Why extract_reference_date() found no date for the document inside
+    ingestion_record(), "<Type>: <message>"; None when it failed on nothing."""
+    record = _ingestion_record.get()
+    return record["reference_date_error"] if record is not None else None
+
+
 # A page is read as a scan when it carries almost no text and an image covers
 # at least this share of it.  The image test is what keeps a blank page, a
 # sparse cover or a divider out of OCR.
@@ -765,10 +807,13 @@ def _rejoined_table_rows(path: Path, skip_pages: frozenset[int] = frozenset()) -
                 if tables >= _MAX_TABLES or cells >= _MAX_CELLS:
                     logger.warning(f"[Stage 1] {path.name}: table pass stopped at {tables} tables, "
                                    f"{cells} cells")
+                    _note_incomplete(f"table pass stopped at {tables} tables, {cells} cells")
                     break
     except Exception as exc:
         logger.warning(f"[Stage 1] {path.name}: tables not read, wrapped IoCs in table cells may be "
                        f"lost: {type(exc).__name__}: {exc}")
+        _note_incomplete(f"tables not read, IoCs wrapped in table cells may be lost: "
+                         f"{type(exc).__name__}: {exc}")
         return ""
     if out:
         logger.info(f"[Stage 1] {path.name}: {sum(b.count(chr(10)) for b in out)} table rows "

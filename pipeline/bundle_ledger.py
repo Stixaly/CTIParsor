@@ -144,6 +144,25 @@ class MappingLedger:
         self.relationships.append(entry)
         return entry
 
+    def relationship_refused(self, source: Any, relationship_type: str, target: Any,
+                             reason: str, **info: Any) -> None:
+        """A relationship Stage 4 built from something other than a job-store row
+        (an embedded rule's edge, the targets product, a pinned edge) and stix2
+        refused: it is not in the bundle (#997).  `changes` is empty: the Graph page
+        reads a change as a rewrite, and nothing was rewritten."""
+        entry: dict = {
+            "source_value": _label(source),
+            "relationship_type": relationship_type,
+            "target_value": _label(target),
+            "outcome": "dropped",
+            "reason": reason,
+            "source_ref": stix_field(source, "id"),
+            "target_ref": stix_field(target, "id"),
+            "changes": [],
+        }
+        entry.update(_clean(info))
+        self.relationships.append(entry)
+
     def replace_relationship(self, old_id: str, new_rel: Any) -> None:
         """A later copy of the same edge replaced `old_id` in the bundle (it
         carried start/stop times the first did not).  Entries that pointed at
@@ -367,6 +386,11 @@ def _refused_key(entry: dict) -> tuple:
 def _clean(info: dict) -> dict:
     """Drop None values so the stored JSON only says what is known."""
     return {k: v for k, v in info.items() if v is not None}
+
+
+def _label(obj: Any) -> str:
+    """What a STIX object reads as in the review: its name, else its value, else its id."""
+    return stix_field(obj, "name") or stix_field(obj, "value") or stix_field(obj, "id") or ""
 
 
 def _merged_as(entry: dict, reason: str) -> None:

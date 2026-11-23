@@ -9,6 +9,32 @@ theme.
 
 ## [Unreleased]
 
+- **More stages say when they could not do their work (#994-#999, ADR-0104).** The same rule as #982, applied
+  to the cases its census left open. A load failure is not cached; the reason is in the stage report.
+  - Stage 1: a scan-detection error (the PDF is read as text, without OCR), tables not read, and the
+    table pass stopping at its cap (200 tables or 20,000 cells) give `degraded`, each with its note. A
+    reference date that could not be read goes to the details of Stage 1 (`reference_date_error`), not
+    to its state.
+  - Stage 1f: figures that could not be listed give `degraded` ("figures not detected").
+  - Stage 2c: a scoring or corpus error gives `failed`; a `TTP_HIGH_THRESHOLD` or `TTP_MEDIUM_THRESHOLD`
+    that is not a number is named in the reason, with the default that applies, and warned once per
+    process. In select mode, an unreadable `TTP_RETRIEVAL_EXCLUDE_CITED` gives `degraded` ("nothing excluded").
+  - Stage 2g: cut off by the `alias_list` policy threshold, it is `skipped`, with the threshold and the
+    stage's confidence, not `ran` with 0 entities.
+  - Stage 3: a missing client (no key, no SDK) counts as a failed request (`extraction_provider_failed`),
+    not as an empty answer.
+  - Stage 3e: when `ENABLE_CONSENSUS=true` is refused (no `CONSENSUS_PROVIDER`, or the same as
+    `LLM_PROVIDER`), the skipped reason says why instead of "disabled".
+  - Stage 4: unreadable benign warning lists give `failed` and stop the run, when the benign filter is
+    enabled; an unreadable revoked-id table gives `degraded`. In the ledger: a Sigma rule of the report
+    that the bundle does not carry is `dropped` (`sigma_rule_end_not_found`, `sigma_rule_invalid_yaml`), a
+    relationship refused by stix2 is `dropped` with the reason `stix2_refused`, on every path, and an
+    object whose context could not be written carries `stamp_failed`.
+  - Stage 4b: unreadable ATT&CK reference pairs give `degraded`.
+  - Stage 4c: answers are counted (`long_distance_answered`, `long_distance_unparsed`,
+    `long_distance_unanswered`) and the unreadable or missing ones are in the reason; it is `degraded` when
+    no answer was readable.
+
 - **A stage that could not do its work no longer reports `ran` (#982, ADR-0104).** The stage report has a
   fourth state, `degraded`: the stage ran and its result is usable, but incomplete, and the reason says why.
   It counts as run (`RunResult.ran()`, no `StageRequired`). An empty text after Stage 1 now fails the run;

@@ -690,3 +690,17 @@ def test_selection_only_calls_are_opt_in(select_pipeline, monkeypatch):
     result = run_document(Document(text=text, original_filename="r.txt"),
                           _run_opts(ttp_mode="select", verify_ttps=True))
     assert prompts == [] and result.outcome("3").counts["skipped_chunks"] == 1
+
+
+def test_unreadable_retrieval_exclusions_degrade_stage_2c(select_pipeline, sample_cti_text, monkeypatch, tmp_path):
+    """#999: TTP_RETRIEVAL_EXCLUDE_CITED set and unreadable — candidates still come,
+    but the stage says the exclusions were not applied."""
+    from pipeline.orchestrator import Document, run_document
+    missing = tmp_path / "cited.txt"
+    monkeypatch.setenv("TTP_RETRIEVAL_EXCLUDE_CITED", str(missing))
+    result = run_document(Document(text=sample_cti_text, original_filename="r.txt"),
+                          _run_opts(ttp_mode="select", verify_ttps=True))
+    s2c = result.outcome("2c")
+    assert s2c.status == "degraded"
+    assert f"TTP_RETRIEVAL_EXCLUDE_CITED={missing} cannot be read" in s2c.reason
+    assert s2c.reason.startswith("candidates only (select mode)")

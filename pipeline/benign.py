@@ -94,21 +94,57 @@ def _bare(host: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
+class _Unreadable(Exception):
+    """The warning lists cannot be used; str(e) is the reason."""
+
+
 @functools.lru_cache(maxsize=1)
-def _lists() -> dict[str, frozenset[str]]:
+def _read_lists() -> dict[str, frozenset[str]]:
+    """
+    The warning lists, read once.  Raises _Unreadable for a missing, corrupt or
+    non-object file, or one without a `lists` object (#995).  lru_cache keeps no
+    exception, so a failed read is made again on the next call.
+    """
     try:
         data = json.loads(_PATH.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
-        logger.warning(f"[benign] {_PATH.name} unreadable, no warninglist applies: "
-                       f"{type(exc).__name__}: {exc}")
-        return {}
-    lists = {name: frozenset(_bare(v) for v in entry.get("values", []))
-             for name, entry in data.get("lists", {}).items()}
+        raise _Unreadable(f"{_PATH.name} unreadable: {type(exc).__name__}: {exc}") from exc
+    if not isinstance(data, dict) or not isinstance(data.get("lists"), dict) or not data["lists"]:
+        raise _Unreadable(f"{_PATH.name} holds no `lists` object")
+    try:
+        lists = {name: frozenset(_bare(v) for v in entry.get("values", []))
+                 for name, entry in data["lists"].items()}
+    except (AttributeError, TypeError) as exc:
+        raise _Unreadable(f"{_PATH.name} has a malformed list: {type(exc).__name__}: {exc}") from exc
     user_content = frozenset(_bare(v) for v in _USER_CONTENT)
     for name in _REFERENCE_LISTS:
         if name in lists:
             lists[name] = lists[name] - user_content
     return lists
+
+
+def _lists() -> dict[str, frozenset[str]]:
+    """
+    The warning lists, or {} when they cannot be read (logged here; load_error()
+    says why).  Nothing is cached on a failure.
+    """
+    try:
+        return _read_lists()
+    except _Unreadable as exc:
+        logger.warning(f"[benign] {exc}, no warninglist applies")
+        return {}
+
+
+_lists.cache_clear = _read_lists.cache_clear  # type: ignore[attr-defined]
+
+
+def load_error() -> str | None:
+    """Why the warning lists cannot be read, or None when they can (#995)."""
+    try:
+        _read_lists()
+    except _Unreadable as exc:
+        return str(exc)
+    return None
 
 
 def _host_in(host: str, values: frozenset[str]) -> bool:

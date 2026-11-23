@@ -182,6 +182,17 @@ describe('buildBundleGraph', () => {
     expect(g.nodes.find(n => n.name === 'NewOne')?.ghost).toBe(true)
   })
 
+  it('does not report a relationship stix2 refused at build time as removed since (#997)', () => {
+    const { bundle, entities, relations, ledger } = fixture()
+    const refused = {
+      source_value: 'Sigma rule: Emotet dropper', relationship_type: 'indicates', target_value: 'Emotet',
+      outcome: 'dropped' as const, reason: 'stix2_refused', changes: [], detail: 'refused',
+    }
+    const g = buildBundleGraph(bundle, { ...ledger, relationships: [...ledger.relationships, refused] },
+                               entities, relations)
+    expect(g.diff.filter(d => d.kind === 'stale' && d.reason === 'removed_since_build')).toEqual([])
+  })
+
   it('reports a date changed since the build, and nothing when the dates match (ADR-0063)', () => {
     const { bundle, entities, relations, ledger } = fixture()
     const built = { ...ledger, relationships: ledger.relationships.map(l => l.stix_id === 'relationship--1'
