@@ -249,6 +249,21 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "an empty Stage 3f selection followed by an answer; the Stage 4c prompt bound; evidence-span "
      "spacing; Sigma tags, domain atoms and CVE underscores (ADR-0103; #898-#906, #909-#921)",
      "extraction"),
+    ("02927d1", "2026-11-22",
+     "Stage 3: provider errors retried (timeouts, 408/409/429/5xx), a chunk with no readable answer "
+     "gets a second try instead of being saved as done, and IoCs over the 30 cap are offered by "
+     "turns across types; Snort rules with quoted ';' or ',' and nested IP lists now parse "
+     "(#789-#793, #968-#970)",
+     "extraction"),
+    ("f42dd75", "2026-11-22",
+     "ATT&CK ids written in a report: a tactic gives no attack-pattern, a revoked id becomes its "
+     "successor's with the written id kept as a reference, an unknown one is held for review; "
+     "Stage 1 with no readable text fails the run (ADR-0104; #980, #982)",
+     "extraction"),
+    ("e536129", "2026-11-23",
+     "Stage 2b: a name two ATT&CK entities share goes to the one its context names, and the "
+     "other no longer blocks a mention of its own (ADR-0105; #914)",
+     "extraction"),
 )
 
 

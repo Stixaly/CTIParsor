@@ -190,5 +190,6 @@ def reload() -> None:
         stage2b_gazetteer._read_index.cache_clear()
         stage2b_gazetteer._build_automaton.cache_clear()
         stage2b_gazetteer._policy_index.cache_clear()
+        stage2b_gazetteer._shared_groups.cache_clear()
     except ImportError:  # pragma: no cover - the gazetteer module is always importable here
         pass
