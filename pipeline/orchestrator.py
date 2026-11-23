@@ -858,7 +858,7 @@ class _Run:
     def extract(self) -> None:
         from pipeline import ner_precision
         from pipeline.base import BaseExtractionStage, resolve_type_conflicts
-        from pipeline.stage2_extraction import extract_entities, nlp_status
+        from pipeline.stage2_extraction import discarded_counts, extract_entities, nlp_status
 
         text = self.r.text
         # Said in the stage report: the run manifest records the variable only
@@ -878,7 +878,14 @@ class _Run:
         self.r.entities_per_chunk = [[] for _ in self.r.chunks]
         if self.gate("2"):
             t0 = time.monotonic()
-            self.r.entities_per_chunk = [extract_entities(c) for c in self.r.chunks]
+            # #973: what each chunk's call refused, summed over the chunks for the report.
+            discarded: dict[str, int] = {}
+            entities_per_chunk = []
+            for c in self.r.chunks:
+                entities_per_chunk.append(extract_entities(c))
+                for reason, count in discarded_counts().items():
+                    discarded[reason] = discarded.get(reason, 0) + count
+            self.r.entities_per_chunk = entities_per_chunk
             for chunk_ents in self.r.entities_per_chunk:
                 for e in chunk_ents:
                     # Keyed as Stage 4 keys an observable: a URL's path keeps
@@ -896,7 +903,8 @@ class _Run:
                 missing.append("iocextract not installed: IPv6 addresses are not extracted")
             self.record("2", DEGRADED if missing else RAN, "; ".join(filter(None, [ner_note, *missing])),
                         time.monotonic() - t0, details={"spacy_model": st["spacy_model"],
-                                                        "iocextract": st["iocextract"]},
+                                                        "iocextract": st["iocextract"],
+                                                        "discarded_iocs": discarded},
                         entities=len(best))
 
         # Stage 2b — gazetteer; regex wins a tie (more precise for exact values).

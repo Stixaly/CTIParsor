@@ -592,7 +592,7 @@ def _revoked_info(revoked: attack_ids.Resolution | None) -> dict:
 # Vulnerability/AttackPattern/Malware SDOs, not cyber-observable Indicators.
 _OBSERVABLE_IOC_TYPES: frozenset[EntityType] = frozenset({
     EntityType.IPV4, EntityType.IPV6, EntityType.DOMAIN, EntityType.URL,
-    EntityType.EMAIL, EntityType.MD5, EntityType.SHA1, EntityType.SHA256,
+    EntityType.EMAIL, EntityType.MD5, EntityType.SHA1, EntityType.SHA256, EntityType.SHA512,
     EntityType.MAC_ADDR, EntityType.ASN, EntityType.FILE,
     EntityType.REGISTRY_KEY, EntityType.MUTEX, EntityType.NETWORK_TRAFFIC,
     EntityType.USER_ACCOUNT,
@@ -2733,6 +2733,8 @@ def _entity_to_sco(entity: RawEntity):
             return stix2.File(hashes={"SHA-1": v})
         if t == EntityType.SHA256:
             return stix2.File(hashes={"SHA-256": v})
+        if t == EntityType.SHA512:
+            return stix2.File(hashes={"SHA-512": v})
         if t == EntityType.FILE:
             return stix2.File(name=v)
 
@@ -2857,6 +2859,8 @@ def _build_stix_pattern(ioc_value: str, sco) -> str | None:
                 return f"[file:hashes.'SHA-1' = '{_escape_stix_value(hashes['SHA-1'])}']"
             elif "MD5" in hashes:
                 return f"[file:hashes.MD5 = '{_escape_stix_value(hashes['MD5'])}']"
+            elif "SHA-512" in hashes:
+                return f"[file:hashes.'SHA-512' = '{_escape_stix_value(hashes['SHA-512'])}']"
         # Named file without hashes
         name = (sco.get("name") or "").strip()
         if name:

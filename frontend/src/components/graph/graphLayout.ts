@@ -76,7 +76,7 @@ export const ENTITY_TIER: Record<string, number> = {
   ipv6: 3, 'ipv6-addr': 3,
   url: 3,
   email: 3, 'email-addr': 3,
-  file: 3, sha256: 3, sha1: 3, md5: 3,
+  file: 3, sha512: 3, sha256: 3, sha1: 3, md5: 3,
   registry_key: 3, 'windows-registry-key': 3,
   user_account: 3, 'user-account': 3,
   mutex: 3,
@@ -258,6 +258,7 @@ const _SCO_PATH: Record<string, string> = {
 
   // file / hashes → FileText
   file:              'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
+  sha512:            'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
   sha256:            'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
   sha1:              'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',
   md5:               'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z M14 2v6h6 M16 13H8 M16 17H8 M10 9H8',

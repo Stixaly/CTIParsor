@@ -112,7 +112,7 @@ def _non_indicator_ip(value: str) -> bool:
     that IDF handles them.
     """
     try:
-        ip = ipaddress.ip_address(value)
+        ip = ipaddress.ip_network(value, strict=False).network_address   # a range (#972) too
     except ValueError:
         return False        # unparseable — keep it rather than silently drop
     return (ip.is_loopback or ip.is_unspecified or ip.is_link_local
@@ -217,7 +217,7 @@ def observables_from_entities(rows: Iterable[Mapping[str, object]]) -> list[Obse
         display = raw_value
 
         try:
-            if etype in ("md5", "sha1", "sha256"):
+            if etype in ("md5", "sha1", "sha256", "sha512"):
                 val = _refang(raw_value).lower()
                 if _HASH_RE.match(val):
                     add("hash", val, etype, display)

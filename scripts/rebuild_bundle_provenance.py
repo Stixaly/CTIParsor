@@ -43,7 +43,7 @@ from pipeline.stage4_stix_mapping import build_stix_bundle  # noqa: E402
 _RAW_ENTITY_TYPES = frozenset({
     EntityType.IPV4, EntityType.IPV6, EntityType.DOMAIN,
     EntityType.URL, EntityType.EMAIL, EntityType.MD5,
-    EntityType.SHA1, EntityType.SHA256, EntityType.MAC_ADDR,
+    EntityType.SHA1, EntityType.SHA256, EntityType.SHA512, EntityType.MAC_ADDR,
     EntityType.ASN, EntityType.FILE, EntityType.REGISTRY_KEY,
     EntityType.MUTEX, EntityType.NETWORK_TRAFFIC,
     EntityType.USER_ACCOUNT,

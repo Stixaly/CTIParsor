@@ -48,7 +48,7 @@ from evaluation import metrics
 
 ROOT = Path(__file__).resolve().parent.parent / "data" / "eval" / "inhouse"
 LAYERS = ("iocs", "entities", "techniques", "relations")
-IOC_TYPES = {"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256", "cve",
+IOC_TYPES = {"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256", "sha512", "cve",
              "file", "registry_key", "mutex", "mac_addr", "asn"}
 # The types the `entities` layer annotates (docs/eval/annotation-guide.md section 3).
 ENTITY_LAYER_TYPES = {"malware", "tool", "threat_actor", "campaign"}
@@ -82,7 +82,7 @@ def _ioc_norm(t: str, v: str) -> tuple[str, str]:
     v = refang(v.strip())
     if t == "cve":
         v = v.upper()
-    elif t in ("md5", "sha1", "sha256", "domain", "email", "ipv6", "mac_addr"):
+    elif t in ("md5", "sha1", "sha256", "sha512", "domain", "email", "ipv6", "mac_addr"):
         v = v.lower()
     return t, v
 

@@ -24,7 +24,7 @@ name, a status (pass, fail or not_checked) and a detail:
   reason, the heavy models off included, fails);
 - 4 document text: Stage 1 recorded a number of characters above zero;
 - 5 extraction: the job has at least one entity, and at least one IoC or
-  technique (entity types ipv4, ipv6, domain, url, email, md5, sha1, sha256,
+  technique (entity types ipv4, ipv6, domain, url, email, md5, sha1, sha256, sha512,
   and ttp);
 - 6 bundle exports: GET /api/jobs/{id}/bundle answers 200 with a STIX 2.1
   bundle that holds a report, and every relationship refers to objects in it;
@@ -69,7 +69,7 @@ TOKEN_ENV = "CTIPARSOR_TOKEN"  # noqa: S105 - the name of the variable, not a se
 MODEL_STAGES = ("2c", "2e")
 PENDING = frozenset({"uploaded", "queued", "processing"})
 ENDED_OK = frozenset({"completed", "for_review"})
-IOC_TYPES = frozenset({"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256"})
+IOC_TYPES = frozenset({"ipv4", "ipv6", "domain", "url", "email", "md5", "sha1", "sha256", "sha512"})
 TECHNIQUE_TYPE = "ttp"
 JOB_ID = re.compile(r"[0-9a-f-]{36}")
 STAGE_ID = re.compile(r"[0-9][0-9a-z]*")
