@@ -453,6 +453,10 @@ Without an LLM provider, select mode cannot select: Stage 2c falls back to the
 # File of URL fragments: procedure examples citing one are not retrieved (the
 # evaluation sets it so examples written from a scored report stay out)
 # TTP_RETRIEVAL_EXCLUDE_CITED=
+# ATT&CK domains the selection's retrieval queries (#979): auto (default) is
+# Enterprise, plus Mobile or ICS when the report names them twice or more;
+# all is every domain TTP_SEMANTIC_DOMAINS enables; or a comma list.
+# TTP_RETRIEVAL_DOMAINS=auto
 ```
 
 ## ATT&CK release

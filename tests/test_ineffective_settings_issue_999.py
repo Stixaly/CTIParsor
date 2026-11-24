@@ -133,7 +133,7 @@ def test_a_retriever_built_while_the_exclusions_are_unreadable_is_not_cached(mon
     monkeypatch.setenv("TTP_RETRIEVAL_EXCLUDE_CITED", str(cited))
     seen = []
 
-    def fake_corpus(kind, *, exclude_cited=()):
+    def fake_corpus(kind, *, exclude_cited=(), **kw):
         seen.append(list(exclude_cited))
         return tr.Corpus(ids=["T1105"], names=["Ingress Tool Transfer"], kinds=["procedure"],
                          domains=["enterprise-attack"], texts=["The loader fetched a second stage."],

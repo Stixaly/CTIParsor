@@ -666,8 +666,8 @@ manifest then lists them under `attack.modified_files`, and the release
 | `pipeline/data/mitre_embeddings.npy` | 2c semantic TTP | ~2.3 MB | yes |
 | `pipeline/data/mitre_embeddings_meta.json` | 2c semantic TTP | ~190 KB | yes |
 | `pipeline/data/mitre_embeddings_manifest.json` | 2c cache validity + thresholds | ~1 KB | no — written by `--only embeddings` |
-| `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~7 MB | yes — `--only retrieval` |
-| `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~27 MB | yes — `--only retrieval` |
+| `pipeline/data/attack_retrieval_corpus.json` | 2c candidate retrieval (`TTP_MODE=select`) | ~9 MB | yes — `--only retrieval` |
+| `pipeline/data/attack_retrieval_embeddings.npy` | 2c candidate retrieval (`TTP_MODE=select`) | ~30 MB | yes — `--only retrieval` |
 | `pipeline/data/attack_revoked.json` | 3c revoked ids and their replacements | ~5 KB | yes — `--only revoked` |
 | `pipeline/data/attack_manifest.json` | the default track's release (19.2), what was checked against a rebuild, the sha256 of its files; read by the run manifest and by `ATTACK_RELEASE` | ~4 KB | yes — no script writes it (ADR-0087) |
 | `pipeline/data/attack/20.0/` | the v20.0 track: the eight index files above (no embeddings manifest) built from ATT&CK v20.0, and its own `attack_manifest.json`; read when `ATTACK_RELEASE=20.0` | ~39.9 MB | yes — `scripts/build_attack_release.py --release 20.0` |
@@ -688,6 +688,25 @@ among the LLM's proposals only, which measured worse in recall than `verify`.
 Like any index rebuilt here, the `dev` container writes it into the repository
 and the image picks it up at the next build (`pipeline/data/` is baked in,
 read-only at run time).
+
+Per domain (issue #979): the corpus holds Enterprise, Mobile and ICS techniques,
+each entry with its `domain`. `--only retrieval` reads every bundle it is given,
+so pass `--mobile` and `--ics` (auto-discovery does not look in
+`data/attack-stix/`). The select path queries, within the domains that
+`TTP_SEMANTIC_DOMAINS` enables, the ones `TTP_RETRIEVAL_DOMAINS` asks for: `auto`
+(the default) is Enterprise, plus Mobile or ICS when the report names them at least
+twice ("Android", "iOS", "APKs", "smartphones"; "SCADA", "PLCs", "HMIs", "Modbus",
+"ICS"…). "Mobile device", "mobile phone" and "mobile network" count only beside one of
+those: an enterprise report writes them for MDM or SMS-based MFA. `all` is every
+enabled domain; a list ("enterprise,mobile") names the domains, and an unknown name is
+logged and ignored. Querying every domain for every report cost 6 of 261 Enterprise
+techniques on the in-house gold, the Mobile and ICS candidates taking places under
+the per-chunk cap; `auto` cost 4, all in reports that are mobile or ICS ones, for
+14 of the 21 Mobile techniques gained. Stage 2c's report lists the domains a report
+queried as `retrieval_domains`. The revoked
+table (`attack_revoked.json`) maps the revoked ids of the three domains; its
+names stay Enterprise's, so an active Mobile or ICS name does not hide a revoked
+Enterprise name (#464).
 
 ## Offline support
 
