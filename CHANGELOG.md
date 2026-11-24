@@ -9,6 +9,20 @@ theme.
 
 ## [Unreleased]
 
+- **The technique retrieval of the select path covers ATT&CK Mobile and ICS (#979).** Its corpus held
+  Enterprise only, so a Mobile or ICS technique could never be a candidate. The corpus of both tracks is
+  rebuilt from the three domains: 19.2 gains 1,465 Mobile and 364 ICS entries, its 17,350 Enterprise ones
+  unchanged (19,179 entries, 38 MB with the embeddings instead of 35); 20.0 has 19,759. The revoked table
+  maps the revoked ids of the three domains; its names stay Enterprise's (#464). A new setting,
+  `TTP_RETRIEVAL_DOMAINS`, chooses which domains a report queries: `auto`, the default, is Enterprise plus
+  Mobile or ICS when the report names them at least twice; `all` is every domain `TTP_SEMANTIC_DOMAINS`
+  enables. Stage 2c's report lists the domains queried (`retrieval_domains`). Measured with retrieval only
+  (no LLM) on the in-house gold: Mobile techniques among the candidates 0 → 14 of 21, Enterprise 235 →
+  231 of 261, the four lost in mobile or ICS reports; querying every domain for every report lost 6. On
+  AnnoCTR dev (Enterprise gold), 13 of the 16 documents name no Mobile or ICS domain and keep exactly their
+  candidates. `python -m evaluation retrieval` builds its corpus for every enabled domain, as `all` does,
+  not per document: its figures are not those of the default `auto`, nor comparable with the
+  Enterprise-only runs before this change.
 - **A malware named by many rules keeps its title evidence in the detection proposals (#897).** The guard
   that drops a non-discriminative name ("powershell") from title matching was 20 % of the candidate rules.
   Every rule that names a report's name joins that set, so the share measured the name against itself: on a

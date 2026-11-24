@@ -33,6 +33,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -423,7 +424,7 @@ def _built_corpus(path: str, emb_path: str) -> Corpus | None:
 
 
 def load_corpus(kind: str = "both", *, path: Path | None = None, emb_path: Path | None = None,
-                exclude_cited: Iterable[str] = ()) -> Corpus | None:
+                exclude_cited: Iterable[str] = (), domains: Iterable[str] = ()) -> Corpus | None:
     """The retrieval corpus of `kind` (one of CORPORA), restricted to the
     enabled domains, sorted by technique, without the entries citing a URL
     that contains one of `exclude_cited`."""
@@ -438,13 +439,16 @@ def load_corpus(kind: str = "both", *, path: Path | None = None, emb_path: Path 
         return None
     from pipeline.stage2c_ttp_semantic import _enabled_domains
 
-    domains = _enabled_domains()
+    asked = set(domains)
+    allowed = _enabled_domains()
+    if asked:   # #979: the domains of one report, within the enabled ones
+        allowed = asked if allowed is None else allowed & asked
     excl = [s.lower() for s in exclude_cited if s]
     keep = []
     for i, k in enumerate(corpus.kinds):
         if kind in ("description", "procedure") and k != kind:
             continue
-        if domains is not None and corpus.domains[i] not in domains:
+        if allowed is not None and corpus.domains[i] not in allowed:
             continue
         if excl and any(s in u.lower() for u in corpus.urls[i] for s in excl):
             continue
@@ -601,6 +605,9 @@ def retrieval_settings() -> dict:
         # so the select path can be measured apart from Stage 2c's.
         "keyword_gate": env_bool("TTP_RETRIEVAL_KEYWORD_GATE", default=True),
         "exclude_cited": os.getenv("TTP_RETRIEVAL_EXCLUDE_CITED", "").strip(),
+        # #979: "auto" queries Enterprise, plus Mobile or ICS when the report reads as
+        # one (document_domains); "all" queries every enabled domain; or a comma list.
+        "domains": os.getenv("TTP_RETRIEVAL_DOMAINS", "auto").strip().lower() or "auto",
     }
 
 
@@ -628,14 +635,15 @@ def exclusions_error() -> str | None:
     return None
 
 
-@functools.lru_cache(maxsize=2)
-def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retriever | None:
+@functools.lru_cache(maxsize=6)   # every domain set (#979): all, E, E+M, E+I, E+M+I
+def _production_retriever(corpus: str, method: str, exclude_cited: str,
+                          domains: tuple[str, ...] = ()) -> Retriever | None:
     from pipeline import stage2c_ttp_semantic as s2c
 
     # The model first: a fallback changes which model the corpus is checked
     # against (_active_model_name reads what _load_model loaded, #389).
     model = s2c._load_model() if method != "bm25" else None
-    c = load_corpus(corpus, exclude_cited=_exclusions(exclude_cited))
+    c = load_corpus(corpus, exclude_cited=_exclusions(exclude_cited), domains=domains)
     if c is None:
         logger.warning("Retrieval corpus %r unavailable — build it: "
                        "python scripts/build_indexes.py --only retrieval", corpus)
@@ -654,13 +662,14 @@ def _production_retriever(corpus: str, method: str, exclude_cited: str) -> Retri
     return Retriever(c, method, model)
 
 
-def _current_retriever(corpus: str, method: str, exclude_cited: str) -> Retriever | None:
+def _current_retriever(corpus: str, method: str, exclude_cited: str,
+                       domains: tuple[str, ...] = ()) -> Retriever | None:
     """_production_retriever, except while the exclusions cannot be read: that retriever
     is built on each call, so a cached one does not keep the search without the
     exclusions after the file is fixed."""
     if exclusions_error() is None:
-        return _production_retriever(corpus, method, exclude_cited)
-    return _production_retriever.__wrapped__(corpus, method, exclude_cited)
+        return _production_retriever(corpus, method, exclude_cited, domains)
+    return _production_retriever.__wrapped__(corpus, method, exclude_cited, domains)
 
 
 def retrieval_available() -> bool:
@@ -708,11 +717,95 @@ def retrieval_status() -> dict:
     }
 
 
+# #979: what makes a report read as a mobile or an ICS one.  Two occurrences at
+# least: one "Android" in an enterprise report is no reason to give its chunks
+# Mobile candidates, which take places under the per-chunk cap.  Measured on the
+# in-house gold: querying every domain for every report cost 6 of 261 Enterprise
+# techniques (Industroyer2 lost 2 and gained no ICS one).  "iOS", "ICS", "HMI",
+# "PLC", "RTU", "OT" are matched in capitals only: Cisco IOS, "ics" in words.
+_MOBILE_CUES = compile_pattern(
+    # Plurals count ("APKs", "smartphones").  "mobile device" and "mobile phone" are
+    # weak cues (below).  ASCII words: re.ASCII keeps RE2 and `re` on the same \b.
+    r"(?i:\b(?:android|iphones?|ipads?|ipados|apks?|smartphones?|dalvik|sideload(?:ed|ing)?|google play|"
+    r"app store|mobile (?:malware|banking|apps?|applications?|spyware|implants?))\b)"
+    r"|\biOS\b", re.ASCII)
+_ICS_CUES = compile_pattern(
+    r"(?i:\b(?:scada|modbus|dnp3|profinet|opc[ -]?ua|iec[ -]?(?:60870|61850|104)|substation|"
+    r"industrial control|operational technology|siemens s7)\b)|\b(?:ICS|HMIs?|PLCs?|RTUs?|OT)\b", re.ASCII)
+_DOMAIN_CUES_MIN = 2
+# Wording an enterprise report uses too (MDM, BYOD, SMS-based MFA): it adds to the
+# count only next to at least one cue above.  APT44's report names "mobile devices"
+# twice and Android once, and its gold holds four Mobile techniques.
+_MOBILE_WEAK_CUES = compile_pattern(r"(?i:\bmobile (?:devices?|phones?|networks?)\b)", re.ASCII)
+
+
+def _count(pattern, text: str, cap: int = _DOMAIN_CUES_MIN) -> int:
+    return sum(1 for _ in itertools.islice(pattern.finditer(text), cap))
+
+
+def document_domains(text: str) -> tuple[str, ...]:
+    """The ATT&CK domains a report's retrieval queries under TTP_RETRIEVAL_DOMAINS=auto:
+    Enterprise always, Mobile or ICS when the report names them _DOMAIN_CUES_MIN times
+    (a weak Mobile cue counting only beside a strong one)."""
+    out = ["enterprise-attack"]
+    strong = _count(_MOBILE_CUES, text)
+    if strong and strong + _count(_MOBILE_WEAK_CUES, text) >= _DOMAIN_CUES_MIN:
+        out.append("mobile-attack")
+    if _count(_ICS_CUES, text) >= _DOMAIN_CUES_MIN:
+        out.append("ics-attack")
+    return tuple(out)
+
+
+def _query_domains(chunks: Sequence[str]) -> tuple[str, ...]:
+    """The domain set retrieval is asked for: () for every enabled domain."""
+    setting = retrieval_settings()["domains"]
+    if setting == "all":
+        return ()
+    if setting == "auto":
+        return document_domains("\n".join(chunks))
+    # A list: "mobile" is "mobile-attack"; an unknown name is said, not silently
+    # turned into an empty corpus (zero candidates for every report).
+    named = set()
+    for d in (d.strip() for d in setting.split(",") if d.strip()):
+        full = d if d.endswith("-attack") else f"{d}-attack"
+        if full in _RETRIEVAL_DOMAINS:
+            named.add(full)
+        else:
+            logger.warning("TTP_RETRIEVAL_DOMAINS names %r, not an ATT&CK domain (%s): ignored",
+                           d, ", ".join(_RETRIEVAL_DOMAINS))
+    if not named:
+        logger.warning("TTP_RETRIEVAL_DOMAINS=%r names no ATT&CK domain: every enabled domain is queried",
+                       setting)
+    return tuple(sorted(named))
+
+
+_RETRIEVAL_DOMAINS = ("enterprise-attack", "mobile-attack", "ics-attack")
+
+
+def retrieval_domains(chunks: Sequence[str] | None = None) -> list[str]:
+    """The ATT&CK domains the select path's retrieval queries, sorted: those the
+    corpus holds, restricted to TTP_SEMANTIC_DOMAINS (issue #979).  Read from the
+    cached corpus; no encoder is loaded.  [] when there is no corpus."""
+    from pipeline.stage2c_ttp_semantic import _enabled_domains
+
+    s = retrieval_settings()
+    asked = set(_query_domains(chunks)) if chunks is not None else set()
+    # The cached corpus itself, not load_corpus(): that would copy the embedding
+    # matrix on every run only to read its domain column.
+    corpus = (_short_corpus() if s["corpus"] == "short" else
+              _built_corpus(str(attack_data.resolve(CORPUS_PATH)), str(attack_data.resolve(EMBEDDINGS_PATH))))
+    if corpus is None:
+        return []
+    enabled = _enabled_domains()
+    return sorted({d for d in corpus.domains
+                   if (enabled is None or d in enabled) and (not asked or d in asked)})
+
+
 def candidates_for_chunks(chunks: Sequence[str]) -> list[list[TtpCandidate]]:
     """The candidates of every chunk, for the selector, with the production
     settings (`retrieval_settings`).  Empty lists when retrieval is off."""
     s = retrieval_settings()
-    retriever = _current_retriever(s["corpus"], s["method"], s["exclude_cited"])
+    retriever = _current_retriever(s["corpus"], s["method"], s["exclude_cited"], _query_domains(chunks))
     if retriever is None:
         return [[] for _ in chunks]
     return chunk_candidates_with(retriever, chunks, k_per_passage=s["k_per_passage"],

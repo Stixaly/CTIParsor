@@ -15,9 +15,10 @@ the version of its x-mitre-collection against --release.  The track is built
 in a neighbouring directory, with the builders of scripts/build_indexes.py,
 and renamed once complete, so a failure never leaves a track attack_data would
 accept.  Like the default track, mitre_index.json, the gazetteer, the curated
-relationships and the embeddings cover Enterprise, Mobile and ICS, while the
-revoked-technique table and the retrieval corpus cover Enterprise only; the
-CAPEC entries of mitre_index.json are the default track's, carried over.
+relationships, the embeddings, the retrieval corpus and the revoked-technique
+table cover Enterprise, Mobile and ICS (issue #979); the revoked names stay
+Enterprise's.  The CAPEC entries of mitre_index.json are the default track's,
+carried over.
 
 The embedding model is TTP_EMBEDDING_MODEL (all-MiniLM-L6-v2 by default).  The
 default track has no mitre_embeddings_manifest.json, and a track built with
@@ -188,15 +189,14 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
     model_id = os.getenv("TTP_EMBEDDING_MODEL", _DEFAULT_MODEL)
     write_manifest = model_id != _DEFAULT_MODEL
 
-    # Enterprise, mobile and ICS feed the indexes. Retrieval and revoked objects use the
-    # enterprise domain only.
+    # Enterprise, mobile and ICS feed the indexes, the retrieval corpus and the revoked-technique
+    # table (issue #979). The revoked names stay Enterprise's (build_indexes.build_revoked).
     paths = {s["domain"]: stix_dir / f"{s['domain']}.json" for s in sources}
     all_domains: dict[str, Path | None] = {
         "enterprise": paths["enterprise-attack"],
         "mobile": paths["mobile-attack"],
         "ics": paths["ics-attack"],
     }
-    enterprise_only: dict[str, Path | None] = {"enterprise": paths["enterprise-attack"]}
 
     # Everything is built in a `.building` directory next to the track. The track is
     # replaced only when the build is complete; on any error the directory is removed.
@@ -208,10 +208,10 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
         build_indexes.build_mitre_index(all_domains, building, capec_index)
         build_indexes.build_gazetteer(all_domains, building)
         build_indexes.build_attack_relationships(all_domains, building)
-        build_indexes.build_revoked(enterprise_only, building)
+        build_indexes.build_revoked(all_domains, building)
         if not skip_embeddings:
             build_indexes.build_embeddings(all_domains, building, write_manifest=write_manifest)
-        build_indexes.build_retrieval(enterprise_only, neutralise=True, out_dir=building,
+        build_indexes.build_retrieval(all_domains, neutralise=True, out_dir=building,
                                       embed=not skip_embeddings)
 
         # The file list must match what this build is expected to write, so a missing
@@ -240,8 +240,8 @@ def build_release(release: str, stix_dir: Path | None = None, out_dir: Path | No
             "sources": sources,
             "capec": {"carried_from": _rel(capec_index), "sha256": _sha256(capec_index),
                       "entries": len(capec)},
-            "retrieval_domains": ["enterprise-attack"],
-            "revoked_domains": ["enterprise-attack"],
+            "retrieval_domains": list(_DOMAINS),
+            "revoked_domains": list(_DOMAINS),
             "exceptions": {
                 "mitre_index.json (CAPEC)": f"the {len(capec)} CAPEC entries are the default track's, "
                                             "carried over: CAPEC is not part of ATT&CK, so the two "

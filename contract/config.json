@@ -861,6 +861,12 @@
         "both"
       ]
     },
+    "env TTP_RETRIEVAL_DOMAINS": {
+      "set": false,
+      "values": [
+        "auto"
+      ]
+    },
     "env TTP_RETRIEVAL_KEYWORD_GATE": {
       "set": false,
       "values": [

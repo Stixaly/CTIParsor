@@ -171,16 +171,17 @@ def test_the_files_of_a_track_are_built_from_the_three_domains(env, capsys):
     assert "enterprise-attack" in summary and "mobile-attack" in summary and "ics-attack" in summary
 
 
-def test_revoked_and_retrieval_are_enterprise_only(env):
+def test_revoked_and_retrieval_cover_the_three_domains(env):
     assert run(env) == 0
 
     revoked = load(env.out, "attack_revoked.json")
-    assert revoked["revoked_by"] == {"T1001": "T1059"}               # not Mobile's T1401
-    assert list(revoked["sources"]) == ["enterprise-attack.json"]
+    assert revoked["revoked_by"] == {"T1001": "T1059", "T1401": "T1400"}   # Enterprise and Mobile (#979)
+    assert list(revoked["sources"]) == ["enterprise-attack.json", "mobile-attack.json", "ics-attack.json"]
+    assert revoked["names"] == {"old technique": "T1059"}            # the names stay Enterprise's
 
     corpus = load(env.out, "attack_retrieval_corpus.json")
-    assert {e["domain"] for e in corpus["entries"]} == {"enterprise-attack"}
-    assert {e["id"] for e in corpus["entries"]} == {"T1059", "T1059.001"}
+    assert {e["domain"] for e in corpus["entries"]} == {"enterprise-attack", "mobile-attack", "ics-attack"}
+    assert {e["id"] for e in corpus["entries"]} == {"T1059", "T1059.001", "T1400", "T0800"}
     assert corpus["manifest"]["neutralise_names"] is True
     procedure = next(e for e in corpus["entries"] if e["kind"] == "procedure" and e["id"] == "T1059.001")
     assert "Test Group" not in procedure["text"]                     # the actor's name is a placeholder
@@ -214,8 +215,8 @@ def test_the_manifest_describes_the_track(env):
     assert enterprise["collection_modified"] == "2026-10-13T17:53:10.145Z"
 
     assert manifest["capec"] == {"carried_from": "capec_index.json", "sha256": sha(env.capec), "entries": 2}
-    assert manifest["retrieval_domains"] == ["enterprise-attack"]
-    assert manifest["revoked_domains"] == ["enterprise-attack"]
+    assert manifest["retrieval_domains"] == ["enterprise-attack", "mobile-attack", "ics-attack"]
+    assert manifest["revoked_domains"] == ["enterprise-attack", "mobile-attack", "ics-attack"]
     assert manifest["exceptions"] == {"mitre_index.json (CAPEC)": (
         "the 2 CAPEC entries are the default track's, carried over: CAPEC is not part of ATT&CK, "
         "so the two tracks differ by ATT&CK only")}

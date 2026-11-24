@@ -941,6 +941,7 @@ class _Run:
             from pipeline.ttp_retrieval import (
                 candidates_for_chunks,
                 retrieval_available,
+                retrieval_domains,
                 retrieval_status,
             )
             if self.gate("2c", retrieval_available,
@@ -959,7 +960,8 @@ class _Run:
                 note = "; ".join(filter(None, ["candidates only (select mode)",
                                                self._embedding_caveat(status), excl_error]))
                 self.record("2c", DEGRADED if excl_error else RAN, note, time.monotonic() - t0,
-                            details=self._embedding_details(status),
+                            details={**self._embedding_details(status),
+                                     "retrieval_domains": retrieval_domains(self.r.chunks)},
                             candidates=sum(len(c) for c in self.r.ttp_candidates))
         elif self.gate("2c", semantic_available,
                        lambda: self._embedding_reason(

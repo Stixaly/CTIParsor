@@ -624,7 +624,8 @@ def build_retrieval(bundles: dict[str, Path | None], *, neutralise: bool = True,
 # Revoked techniques → their replacement
 # ---------------------------------------------------------------------------
 
-def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) -> None:
+def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None,
+                  names_from: tuple[str, ...] = ("enterprise",)) -> None:
     """Build attack_revoked.json (in `out_dir`, default pipeline/data/): each
     revoked ATT&CK technique id and the active id its `revoked-by` chain ends on.
 
@@ -632,9 +633,11 @@ def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) 
     writes (T1562, revoked for T1685 in 2026) used to be resolved by its name
     instead, and "Impair Defenses" now only names the Mobile technique T1629.
 
-    The names are read as Enterprise's (mitre_db.revoked_names), so pass the
-    Enterprise bundle alone: the active names of the bundles given here are
-    the ones that hide a revoked name.
+    `revoked_by` covers every bundle given: the ids of the three domains do not
+    overlap (issue #979).  `names` is read from the bundles keyed in `names_from`
+    only, Enterprise by default (mitre_db.revoked_names): the active names of
+    those bundles are the ones that hide a revoked name, so a Mobile name such as
+    "Impair Defenses" (T1629) does not hide the revoked Enterprise name (#464).
     """
     out_dir = out_dir or _DATA_DIR
     revoked_path = out_dir / _REVOKED_NAME
@@ -646,6 +649,7 @@ def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) 
     for key, path in bundles.items():
         if path is None or key == "capec":
             continue
+        named = key in names_from
         objects = _load_bundle(path)
         sources[path.name] = max((o.get("modified", "") for o in objects), default="")
         ext: dict[str, str] = {}
@@ -662,7 +666,8 @@ def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) 
             names[obj["id"]] = (obj.get("name") or "").strip().lower()
             if obj["id"] in ext and not obj.get("revoked") and not obj.get("x_mitre_deprecated"):
                 active.add(obj["id"])
-                active_names.add(names[obj["id"]])
+                if named:
+                    active_names.add(names[obj["id"]])
         edges = {o["source_ref"]: o["target_ref"] for o in objects
                  if o.get("type") == "relationship" and o.get("relationship_type") == "revoked-by"
                  and o.get("source_ref") in ext and o.get("target_ref") in ext}
@@ -673,9 +678,9 @@ def build_revoked(bundles: dict[str, Path | None], out_dir: Path | None = None) 
                 cur = edges[cur]
             if cur in active:
                 revoked_by[ext[src]] = ext[cur]
-                if names.get(src):
+                if named and names.get(src):
                     revoked_names[names[src]] = ext[cur]
-    # A revoked name another active technique of these bundles still bears
+    # A revoked name another active technique of the names' bundles still bears
     # keeps resolving to that one.
     names_out = {n: i for n, i in sorted(revoked_names.items()) if n and n not in active_names}
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -760,10 +765,10 @@ def main() -> None:
     if only is None or only == "relationships":
         build_attack_relationships(bundles, out_dir)
     if only is None or only == "revoked":
-        # Enterprise only, as build_attack_release does: the names read by
-        # mitre_db.revoked_names() are Enterprise's, and a Mobile or ICS active name
-        # would otherwise hide a revoked Enterprise name ("Impair Defenses", issue #464).
-        build_revoked({"enterprise": bundles["enterprise"]}, out_dir)
+        # The three domains for the ids (issue #979); the names are Enterprise's (build_revoked),
+        # so a Mobile or ICS active name does not hide a revoked Enterprise name ("Impair
+        # Defenses", issue #464).
+        build_revoked(bundles, out_dir)
     if only == "retrieval":
         build_retrieval(bundles, neutralise=not args.keep_names,
                         out_dir=args.retrieval_out or out_dir)
