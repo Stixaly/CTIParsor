@@ -269,6 +269,10 @@ BUNDLE_AFFECTING: tuple[tuple[str, str, str, str], ...] = (
      "imphash/JA3/commit as a file hash; Windows paths with %VAR% or spaces, SHA-512, IPv4 "
      "ranges and new file extensions are extracted (#972, #973)",
      "extraction"),
+    ("61d3fea", "2026-11-24",
+     "Technique retrieval (select mode) also proposes Mobile and ICS candidates for a report that "
+     "names those domains; the revoked table covers the three domains (#979)",
+     "extraction"),
 )
 
 
